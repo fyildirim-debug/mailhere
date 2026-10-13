@@ -63,28 +63,42 @@ test('güvenilmeyen sertifika: parmak izi gösterilir, onayla hesap eklenir', as
   await expect(page.getByRole('heading', { name: 'Hazırsın' })).toBeVisible();
 });
 
-test('ayarlar: hesap adı, rengi ve imzası düzenlenir; güvenilen sertifika listelenir', async ({ page }) => {
+test('ayarlar: hesap adı, rengi ve imzaları düzenlenir; güvenilen sertifika listelenir', async ({ page }) => {
   await page.goto('/#/main');
   await page.evaluate(() => window.__mh.call('cert_trust', { host: 'posta.ornek.dev', port: 993, sha256: 'AA:BB:CC:DD:EE:FF:00:11:22:33' }));
   await page.getByRole('button', { name: 'Ayarlar' }).click();
+  const nav = page.getByRole('navigation', { name: 'Ayarlar' });
+  await nav.getByRole('button', { name: 'Gizlilik ve güvenlik' }).click();
   await expect(page.getByText('posta.ornek.dev:993')).toBeVisible();
 
-  await page.getByRole('button', { name: 'Düzenle' }).first().click();
+  await nav.getByRole('button', { name: 'İş' }).click();
+  await expect(page.getByRole('tab', { name: 'Genel' })).toHaveAttribute('aria-selected', 'true');
   await page.getByLabel('Hesap adı').fill('Ofis');
   await page.getByRole('radio', { name: 'Renk 4' }).click();
-  await page.getByLabel('İmza').fill('Furkan YILDIRIM\nMailhere');
   await page.getByRole('button', { name: 'Kaydet' }).click();
   await expect(page.getByRole('status')).toContainText('Kaydedildi');
-  await expect(page.getByRole('navigation').getByRole('button', { name: /Ofis/ })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Kutular ve hesaplar' }).getByRole('button', { name: 'Ofis ornek.com.tr' })).toBeVisible();
+
+  await page.getByRole('tab', { name: 'İmzalar' }).click();
+  await page.getByRole('button', { name: 'İmza ekle' }).click();
+  await page.getByLabel('İmza 3 imzasının metni').fill('Furkan YILDIRIM\nMailhere');
+  await page.getByLabel('Yeni postalarda').selectOption({ label: 'İmza 3' });
+  await page.getByRole('button', { name: 'Kaydet' }).click();
+  await expect(page.getByRole('status')).toContainText('Kaydedildi');
+
   const acc = await page.evaluate(() => window.__mh.state.accounts[0]);
   expect(acc.name).toBe('Ofis');
   expect(acc.color).toBe('#9A5BD6');
-  expect(acc.signature).toBe('Furkan YILDIRIM\nMailhere');
+  expect(acc.signatures).toHaveLength(3);
+  const sig = acc.signatures.find((s) => s.id === acc.signatureNew);
+  expect(sig?.body).toBe('Furkan YILDIRIM\nMailhere');
+  expect(acc.signatureReply).toBe('is-kisa');
 });
 
 test('güncelleme: elle denetlenir, kenar çubuğunda kart çıkar', async ({ page }) => {
   await page.goto('/?guncelleme#/main');
   await page.getByRole('button', { name: 'Ayarlar' }).click();
+  await page.getByRole('navigation', { name: 'Ayarlar' }).getByRole('button', { name: 'Güncellemeler' }).click();
   await page.getByRole('button', { name: 'Şimdi denetle' }).click();
   await expect(page.getByText('Mailhere 0.2.0 hazır').first()).toBeVisible();
   await expect(page.getByRole('navigation').getByText('0.2.0 sürümü hazır')).toBeVisible();

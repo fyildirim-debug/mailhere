@@ -1,7 +1,7 @@
 // Tarayıcı modu, testler ve ekran görüntüleri için örnek veri.
 // İçerik onaylı tasarımdaki postalarla aynıdır; gerçek kişi ya da kurum değildir.
 
-import type { Account, Address, Attachment, Category, Mailbox, MailboxRole, MessageDetail } from './types';
+import type { Account, Address, Attachment, Category, Mailbox, MailboxRole, MessageDetail, Unsubscribe } from './types';
 
 export interface DemoData {
   accounts: Account[];
@@ -23,9 +23,19 @@ function at(base: Date, dayOffset: number, hh: number, mm: number): number {
   return d.getTime();
 }
 
-function mb(accountId: string, path: string, name: string, role: MailboxRole): Mailbox {
-  return { id: `${accountId}:${path}`, accountId, path, name, role, unread: 0, total: 0 };
+function mb(accountId: string, path: string, name: string, role: MailboxRole, parent: string | null = null, hidden = false): Mailbox {
+  return { id: `${accountId}:${path}`, accountId, path, name, role, unread: 0, total: 0, parentId: parent && `${accountId}:${parent}`, hidden };
 }
+
+/** Rol dışı klasörler: [hesap, yol, ad, üst yol, gizli]. */
+const FOLDERS: [string, string, string, string | null, boolean][] = [
+  ['demo-is', 'Projeler', 'Projeler', null, false],
+  ['demo-is', 'Projeler/Mailhere', 'Mailhere', 'Projeler', false],
+  ['demo-is', 'Projeler/Sunucu', 'Sunucu taşıma', 'Projeler', false],
+  ['demo-is', 'Hukuk', 'Hukuk', null, false],
+  ['demo-kisisel', 'Faturalar', 'Faturalar', null, false],
+  ['demo-kisisel', 'Önemli', 'Önemli', null, true],
+];
 
 const ROLES: [string, string, MailboxRole][] = [
   ['INBOX', 'Gelen Kutusu', 'inbox'],
@@ -43,6 +53,8 @@ interface Seed {
   from: Address;
   to: Address[];
   cc?: Address[];
+  /** Rol dışı klasörün yolu (verilirse `role` yok sayılır). */
+  box?: string;
   subject: string;
   body: string;
   html?: string;
@@ -53,6 +65,7 @@ interface Seed {
   attachments?: Attachment[];
   thread?: string;
   remote?: boolean;
+  unsubscribe?: Unsubscribe;
 }
 
 function snippetOf(text: string): string {
@@ -65,21 +78,30 @@ export function createDemoData(now = new Date()): DemoData {
       id: A_WORK, name: 'İş', email: ME_WORK.email, displayName: 'Furkan', color: '#4C6FD8', kind: 'imap',
       imap: { host: 'imap.ornek.com.tr', port: 993, security: 'tls', username: ME_WORK.email },
       smtp: { host: 'smtp.ornek.com.tr', port: 465, security: 'tls', username: ME_WORK.email },
-      jmapUrl: null, signature: '— Furkan', createdAt: at(now, -30, 9, 0), auth: 'password',
+      jmapUrl: null, createdAt: at(now, -30, 9, 0), auth: 'password', notify: true,
+      signatures: [
+        { id: 'is-kisa', name: 'Kısa', body: '— Furkan' },
+        { id: 'is-tam', name: 'Tam', body: 'Furkan Yıldırım\nÜrün Geliştirme · Örnek A.Ş.\n+90 212 555 01 01' },
+      ],
+      signatureNew: 'is-tam', signatureReply: 'is-kisa',
     },
     {
       id: A_HOME, name: 'Kişisel', email: ME_HOME.email, displayName: 'Furkan', color: '#2E9A61', kind: 'imap',
       imap: { host: 'imap.eposta.com', port: 993, security: 'tls', username: ME_HOME.email },
       smtp: { host: 'smtp.eposta.com', port: 465, security: 'tls', username: ME_HOME.email },
-      jmapUrl: null, signature: null, createdAt: at(now, -30, 9, 5), auth: 'password',
+      jmapUrl: null, createdAt: at(now, -30, 9, 5), auth: 'password', notify: true, signatures: [], signatureNew: null, signatureReply: null,
     },
     {
       id: A_SERVER, name: 'Sunucu', email: 'posta@alanadi.com', displayName: 'Furkan', color: '#D08A1E', kind: 'jmap',
-      imap: null, smtp: null, jmapUrl: 'https://posta.alanadi.com/jmap', signature: null, createdAt: at(now, -30, 9, 10), auth: 'password',
+      imap: null, smtp: null, jmapUrl: 'https://posta.alanadi.com/jmap', createdAt: at(now, -30, 9, 10), auth: 'password', notify: true,
+      signatures: [], signatureNew: null, signatureReply: null,
     },
   ];
 
-  const mailboxes = accounts.flatMap((a) => ROLES.map(([p, n, r]) => mb(a.id, p, n, r)));
+  const mailboxes = [
+    ...accounts.flatMap((a) => ROLES.map(([p, n, r]) => mb(a.id, p, n, r))),
+    ...FOLDERS.map(([a, p, n, parent, hidden]) => mb(a, p, n, 'other', parent, hidden)),
+  ];
 
   const kerem: Address = { name: 'Kerem Aydın', email: 'kerem.aydin@ornek.com.tr' };
   const ayse: Address = { name: 'Ayşe Demir', email: 'ayse.demir@eposta.com' };
@@ -133,6 +155,7 @@ export function createDemoData(now = new Date()): DemoData {
       html:
         '<div style="max-width:560px;margin:0 auto;font-family:Georgia,serif;color:#222"><img data-mh-src="https://mimarhaftalik.com/kapak-142.jpg" alt="Sayı 142 kapak" width="560" height="220" style="display:block;width:100%;height:auto;background:#eee"><h1 style="font-size:26px;margin:24px 0 8px">Sakin arayüzler üzerine</h1><p>Bu hafta üç yazı seçtik.</p><p><b>Boşluğun sesi</b> — Ekranda hiçbir şey olmayan alanlar neden en çok şeyi anlatır?</p><p><b>Az renkle hiyerarşi</b> — Tek vurgu rengiyle yön bulmayı kolaylaştıran yedi örnek.</p><p><b>Yavaş teknoloji</b> — Bildirimleri azaltmak odaklanmayı gerçekten artırıyor mu?</p><p><a href="https://mimarhaftalik.com/142" target="_blank" rel="noopener noreferrer">Sayının tamamını oku</a></p><img data-mh-src="https://izleme.mimarhaftalik.com/p.gif" width="1" height="1" alt=""></div>',
       date: at(now, -1, 19, 20), unread: true, category: 'newsletters', remote: true,
+      unsubscribe: { url: 'https://mimarhaftalik.com/abonelik/birak', mailto: null, oneClick: true },
     },
     {
       key: 'm6', account: A_WORK, role: 'inbox', from: { name: 'Elif Şahin', email: 'elif.sahin@hukukbiz.com.tr' }, to: [ME_WORK],
@@ -156,6 +179,7 @@ export function createDemoData(now = new Date()): DemoData {
       body:
         'Merhaba,\n\nUzun ekran saatlerinde gözü yoran şey çoğu zaman parlaklık değil, karşıtlığın dağınıklığıdır.\n\nBu sayıda beş küçük karar var: zemin tonunu kırmak, tek vurgu rengi seçmek, satır aralığını açmak, hareketi azaltmak ve bildirimleri gruplamak.\n\nGörüşmek üzere,\nTasarım Notları',
       date: at(now, -3, 8, 0), category: 'newsletters', remote: true,
+      unsubscribe: { url: null, mailto: 'mailto:ayril@tasarimnotlari.co?subject=ayril', oneClick: false },
     },
     {
       key: 'm9a', account: A_WORK, role: 'sent', from: ME_WORK, to: [murat], subject: 'Sunucu taşıma planı',
@@ -168,6 +192,30 @@ export function createDemoData(now = new Date()): DemoData {
       date: at(now, -3, 14, 12), category: 'people', thread: 'tasima',
       attachments: [{ index: 0, name: 'Geri_donus_plani.pdf', mime: 'application/pdf', size: 215_040 }],
     },
+    {
+      // Kendi zemini olmayan HTML yanıt (koyu temada koyu zeminde gösterilir).
+      key: 'm10', account: A_HOME, role: 'inbox', from: ayse, to: [ME_HOME], subject: 'Re: Kitap kulübü',
+      body: 'Bu ay ben seçebilir miyim?\n\nAyşe\n\n> Bu ayın kitabını kim seçiyor?',
+      html:
+        '<div dir="ltr">Bu ay ben seçebilir miyim? Aklımda iki kısa roman var.<div><br></div><div style="color:#000000">Pazar akşamına kadar listeyi gönderirim.</div><div><br></div><div style="color:rgb(136,136,136)">Ayşe</div></div><br><div class="gmail_quote"><div dir="ltr" class="gmail_attr">Furkan &lt;<a href="mailto:furkan@eposta.com">furkan@eposta.com</a>&gt;, dün şunu yazdı:<br></div><blockquote class="gmail_quote" style="margin:0px 0px 0px 0.8ex;border-left:1px solid rgb(204,204,204);padding-left:1ex">Bu ayın kitabını kim seçiyor?</blockquote></div>',
+      date: at(now, -2, 21, 5), category: 'people', thread: 'kitap',
+    },
+    {
+      key: 'm11', account: A_WORK, role: 'other', box: 'Projeler/Mailhere', from: kerem, to: [ME_WORK], subject: 'Yol haritası notları',
+      body: 'Selam,\n\nKlasör ağacı ve hesap ayarları bu sürüme girsin. Sonra arama süzgeçlerine geçeriz.\n\nKerem',
+      date: at(now, -2, 15, 5), unread: true, category: 'people',
+    },
+    {
+      key: 'm12', account: A_WORK, role: 'other', box: 'Projeler/Sunucu', from: murat, to: [ME_WORK], subject: 'Bakım penceresi onaylandı',
+      body: 'Cumartesi 02:00 için onay geldi. Yedek planı dosyada.\n\nMurat',
+      date: at(now, -4, 9, 20), category: 'people',
+    },
+    {
+      key: 'm13', account: A_HOME, role: 'other', box: 'Faturalar', from: { name: 'Bulut Fatura', email: 'fatura@bulutfatura.com.tr' }, to: [ME_HOME],
+      subject: 'Eylül faturanız hazır',
+      body: 'Eylül dönemine ait faturanız oluşturuldu.\n\nTutar: 1.180,00 ₺',
+      date: at(now, -31, 11, 0), category: 'notifications',
+    },
   ];
 
   const messages: MessageDetail[] = seeds.map((s, i) => {
@@ -176,7 +224,7 @@ export function createDemoData(now = new Date()): DemoData {
     return {
       id,
       accountId: s.account,
-      mailboxId: `${s.account}:${ROLES.find((r) => r[2] === s.role)![0]}`,
+      mailboxId: `${s.account}:${s.box ?? ROLES.find((r) => r[2] === s.role)![0]}`,
       threadId: s.thread ?? s.key,
       from: s.from,
       to: s.to,
@@ -199,6 +247,7 @@ export function createDemoData(now = new Date()): DemoData {
       remoteAllowed: false,
       attachments: s.attachments ?? [],
       thread: [],
+      unsubscribe: s.unsubscribe ?? null,
     };
   });
 

@@ -39,6 +39,7 @@ Son denetim: 2026-10-13 (beş alanda kod denetimi; bulgular doğrulanıp düzelt
 - TLS zorunlu; şifresiz bağlantı yalnız `localhost`'a. STARTTLS reddedilirse düz metne düşülmez.
 - Geçersiz sertifika yalnız sunucunun gerçekten sunduğu sertifika için onaylanabilir. Onay ayrıca işletim sisteminin kendi penceresinde istenir. Büyük sağlayıcılarda (Gmail, Outlook…) onay verilemez.
 - JMAP parolası yalnız oturumun kendi kökenine gider. Başka kökene, `http`'ye ya da bu makineye yönlendirmede gönderilmez. Sunucu yanıtları boyutla sınırlıdır.
+- Hesabın sunucu adresi, kapısı ya da kullanıcı adı değişince kayıtlı parola yeni sunucuya gönderilmez, yeniden istenir. Sunucu ya da parola değişikliği kaydedilmeden önce bağlantı ve giriş denenir (sertifika kuralı aynı).
 - DNS (SRV) ile bulunan sunucu e-posta alan adı dışındaysa hesap eklerken uyarı çıkar. Otomatik yapılandırma yalnız HTTPS'ten okunur.
 - OAuth: PKCE (S256), rastgele `state`, yalnız `127.0.0.1`'de tek kullanımlık dönüş adresi.
 - SMTP'de makine adı yerine `EHLO [127.0.0.1]` gönderilir.

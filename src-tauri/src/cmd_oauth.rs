@@ -257,6 +257,7 @@ async fn add(
         signature: None,
         created_at: now_ms(),
         auth: kind,
+        notify: true,
     };
     if let Err(e) = state.store.insert_account(&account) {
         state.sync.tokens().forget(&account.id);

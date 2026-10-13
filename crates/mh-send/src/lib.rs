@@ -13,4 +13,4 @@ pub use message::{
 };
 pub use mime::for_path as mime_for_path;
 pub use outbox::Outbox;
-pub use transport::{send, send_with, server_saves_sent};
+pub use transport::{send, send_with, server_saves_sent, test_login};

@@ -36,7 +36,7 @@ pub async fn account_discover(email: String) -> Res<DiscoveredConfig> {
     mh_sync::discover(&email).await
 }
 
-fn validate_server(cfg: &mh_core::ServerConfig, what: &str) -> AppResult<()> {
+pub(crate) fn validate_server(cfg: &mh_core::ServerConfig, what: &str) -> AppResult<()> {
     if cfg.host.trim().is_empty() || cfg.port == 0 || cfg.username.trim().is_empty() {
         return Err(AppError::new(
             ErrorCode::Invalid,
@@ -91,6 +91,7 @@ pub async fn account_add(
         signature: None,
         created_at: now_ms(),
         auth: Default::default(),
+        notify: true,
     };
     state.store.insert_account(&account)?;
     state.sync.start(account.clone());
@@ -515,7 +516,41 @@ pub fn normalize_settings(mut s: Settings) -> Settings {
         .filter(|e| mh_store::is_remote_entry(e))
         .collect();
     s.trusted_certs = crate::cmd_cert::normalize_trusted(s.trusted_certs);
+    // Boş liste geçerlidir (kullanıcı tümünü sildi); `None` dile göre varsayılan.
+    s.quick_replies = s.quick_replies.map(clean_quick_replies);
     s
+}
+
+/// Hızlı yanıtları sadeleştirir: her biri tek satır (satır sonu boşluğa,
+/// denetim ve yön karakterleri atılır, boşluklar teke iner), en çok
+/// `QUICK_REPLY_CHARS` karakter; boşlar ve büyük/küçük harf farkıyla
+/// yinelenenler atılır (ilk gelen kalır, sıra korunur); en çok
+/// `QUICK_REPLIES_MAX` öğe.
+pub fn clean_quick_replies(list: Vec<String>) -> Vec<String> {
+    // Türkçe I/ı/İ/i aynı sayılır ("İyi" ile "iyi" yinelenen).
+    let key = |s: &str| -> String {
+        s.to_lowercase()
+            .chars()
+            .filter(|c| *c != '\u{0307}')
+            .map(|c| if c == 'ı' { 'i' } else { c })
+            .collect()
+    };
+    let mut out: Vec<String> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for reply in list {
+        let line = mh_mime::clean_line(&reply);
+        let line = line.split_whitespace().collect::<Vec<_>>().join(" ");
+        let cut: String = line.chars().take(mh_core::QUICK_REPLY_CHARS).collect();
+        let cut = cut.trim_end();
+        if cut.is_empty() || !seen.insert(key(cut)) {
+            continue;
+        }
+        out.push(cut.to_owned());
+        if out.len() == mh_core::QUICK_REPLIES_MAX {
+            break;
+        }
+    }
+    out
 }
 
 /// İstenen onay listesinden yalnız zaten onaylı olanları bırakır.
@@ -544,6 +579,24 @@ pub fn settings_set(
         mh_sync::tls::set_trusted(&settings.trusted_certs);
         state.sync.sync_now();
     }
+    if let Err(e) = app.emit(events::SETTINGS, &settings) {
+        tracing::warn!(error = %e, "ayar olayı gönderilemedi");
+    }
+    Ok(settings)
+}
+
+/// Yalnız hızlı yanıtları değiştirir (hızlı okuma penceresi `settings_set`e
+/// erişemez). `None` dile göre varsayılana döner, boş liste hiç düğme
+/// göstermez. Diğer ayarlara dokunulmaz; tüm pencerelere `mh:settings` gider.
+#[tauri::command]
+pub fn quick_replies_set(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    replies: Option<Vec<String>>,
+) -> Res<Settings> {
+    let mut settings = state.store.settings()?;
+    settings.quick_replies = replies.map(clean_quick_replies);
+    state.store.set_settings(&settings)?;
     if let Err(e) = app.emit(events::SETTINGS, &settings) {
         tracing::warn!(error = %e, "ayar olayı gönderilemedi");
     }
@@ -792,5 +845,52 @@ mod tests {
         assert_eq!(s.vip, vec!["ayse@eposta.com".to_string()]);
         let d = normalize_settings(Settings::default());
         assert_eq!(d, Settings::default());
+    }
+
+    #[test]
+    fn hizli_yanitlar_sadelestirilir() {
+        let s = normalize_settings(Settings {
+            quick_replies: Some(vec![
+                "  Teşekkürler!  ".into(),
+                "Tamam,\r\nyarın\tkonuşalım".into(),
+                "teşekkürler!".into(),
+                " \n ".into(),
+                "İyi akşamlar".into(),
+                "iyi AKŞAMLAR".into(),
+                "fatura\u{202E}fdp\u{0007}".into(),
+                "x".repeat(200),
+            ]),
+            ..Settings::default()
+        });
+        let got = s.quick_replies.unwrap();
+        assert_eq!(
+            got[..4],
+            [
+                "Teşekkürler!".to_string(),
+                "Tamam, yarın konuşalım".into(),
+                "İyi akşamlar".into(),
+                "faturafdp".into(),
+            ]
+        );
+        assert_eq!(got.len(), 5);
+        assert_eq!(got[4].chars().count(), mh_core::QUICK_REPLY_CHARS);
+
+        // Karakter (bayt değil) sınırı ve öğe sınırı.
+        let long: String = "ğ".repeat(500);
+        let out = clean_quick_replies(vec![long]);
+        assert_eq!(out[0].chars().count(), mh_core::QUICK_REPLY_CHARS);
+        let many: Vec<String> = (0..20).map(|i| format!("Yanıt {i}")).collect();
+        let out = clean_quick_replies(many);
+        assert_eq!(out.len(), mh_core::QUICK_REPLIES_MAX);
+        assert_eq!(out[0], "Yanıt 0");
+        assert_eq!(out[7], "Yanıt 7");
+
+        // Boş liste geçerli ve korunur; yokluk varsayılandır.
+        let s = normalize_settings(Settings {
+            quick_replies: Some(vec![" ".into()]),
+            ..Settings::default()
+        });
+        assert_eq!(s.quick_replies, Some(Vec::new()));
+        assert_eq!(normalize_settings(Settings::default()).quick_replies, None);
     }
 }

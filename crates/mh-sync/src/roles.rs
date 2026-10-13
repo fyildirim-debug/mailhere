@@ -20,6 +20,16 @@ pub fn is_all(attrs: &[NameAttribute<'_>]) -> bool {
     attrs.iter().any(|a| matches!(a, NameAttribute::All))
 }
 
+/// Başka kutulardaki postaların kopyasını gösteren sanal kutu: `\Flagged`
+/// (RFC 6154; Gmail "Yıldızlı") ya da `\Important` (RFC 8457; Gmail "Önemli").
+/// Eşitlenirse aynı posta iki kez görünür; bu yüzden ilk eklemede gizlenir.
+pub fn is_copy(attrs: &[NameAttribute<'_>]) -> bool {
+    attrs.iter().any(|a| {
+        matches!(a, NameAttribute::Flagged)
+            || matches!(a, NameAttribute::Extension(e) if e.eq_ignore_ascii_case("\\Important"))
+    })
+}
+
 pub fn is_noselect(attrs: &[NameAttribute<'_>]) -> bool {
     attrs.iter().any(|a| {
         matches!(a, NameAttribute::NoSelect)
@@ -34,6 +44,47 @@ pub fn leaf(path: &str, delimiter: Option<&str>) -> String {
         Some(d) => decoded.rsplit(d).next().unwrap_or(&decoded).to_owned(),
         None => decoded,
     }
+}
+
+/// Klasörün ağaçtaki yeri: (seçilebilir en yakın atanın yolu, görünen ad).
+/// Seçilemeyen ya da listede olmayan ara düğümler atlanır; atlanan
+/// parçalar görünen ada " / " ile eklenir ("Projeler / 2024"). Hiç
+/// seçilebilir ata yoksa kökte durur. `prefix` kişisel ad alanıdır
+/// ("INBOX."): altındaki klasörler köke bağlanır, önek addan atılır.
+pub fn place(
+    path: &str,
+    delimiter: Option<&str>,
+    prefix: &str,
+    selectable: impl Fn(&str) -> bool,
+) -> (Option<String>, String) {
+    let Some(d) = delimiter.filter(|d| !d.is_empty()) else {
+        return (None, crate::mutf7::decode(path));
+    };
+    let base = if !prefix.is_empty()
+        && path.len() > prefix.len()
+        && path
+            .get(..prefix.len())
+            .is_some_and(|p| p.eq_ignore_ascii_case(prefix))
+    {
+        prefix.len()
+    } else {
+        0
+    };
+    let parts: Vec<&str> = path[base..].split(d).collect();
+    let name = |from: usize| {
+        parts[from..]
+            .iter()
+            .map(|p| crate::mutf7::decode(p))
+            .collect::<Vec<_>>()
+            .join(" / ")
+    };
+    for i in (1..parts.len()).rev() {
+        let candidate = format!("{}{}", &path[..base], parts[..i].join(d));
+        if selectable(&candidate) {
+            return (Some(candidate), name(i));
+        }
+    }
+    (None, name(0))
 }
 
 /// Ad tahmini (Türkçe ve İngilizce yaygın adlar).
@@ -122,6 +173,38 @@ mod tests {
         assert!(is_noselect(&[NameAttribute::Extension(Cow::Borrowed(
             "\\NonExistent"
         ))]));
+        assert!(is_copy(&[NameAttribute::Flagged]));
+        assert!(is_copy(&[NameAttribute::Extension(Cow::Borrowed(
+            "\\important"
+        ))]));
+        assert!(!is_copy(&[NameAttribute::All, NameAttribute::Sent]));
+    }
+
+    #[test]
+    fn agactaki_yer() {
+        let sel = |p: &str| ["A", "A/B"].contains(&p);
+        let at = |path: &str, d: Option<&str>, prefix: &str| place(path, d, prefix, sel);
+        assert_eq!(at("A/B/C", Some("/"), ""), (Some("A/B".into()), "C".into()));
+        assert_eq!(
+            at("A/X/C", Some("/"), ""),
+            (Some("A".into()), "X / C".into()),
+            "seçilemeyen ara düğüm addan atlanmaz"
+        );
+        assert_eq!(at("Q/R", Some("/"), ""), (None, "Q / R".into()));
+        assert_eq!(
+            at("A/B", None, ""),
+            (None, "A/B".into()),
+            "ayraçsız ağaç yok"
+        );
+        assert_eq!(
+            place("INBOX.A", Some("."), "INBOX.", |_| true),
+            (None, "A".into()),
+            "ad alanı öneki INBOX'a bağlamaz"
+        );
+        assert_eq!(
+            place("inbox.A.B", Some("."), "INBOX.", |p| p == "inbox.A"),
+            (Some("inbox.A".into()), "B".into())
+        );
     }
 
     #[test]

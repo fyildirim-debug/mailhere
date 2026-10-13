@@ -160,6 +160,7 @@ pub(crate) mod testutil {
             signature: None,
             created_at: 1,
             auth: Default::default(),
+            notify: true,
         }
     }
 

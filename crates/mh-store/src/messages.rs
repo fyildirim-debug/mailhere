@@ -1177,13 +1177,13 @@ pub(crate) mod tests {
 
     fn setup() -> Store {
         let s = store_with_account("a");
-        s.upsert_mailbox("a", "INBOX", "INBOX", MailboxRole::Inbox)
+        s.upsert_mailbox("a", "INBOX", "INBOX", MailboxRole::Inbox, None, false)
             .unwrap();
-        s.upsert_mailbox("a", "Archive", "Archive", MailboxRole::Archive)
+        s.upsert_mailbox("a", "Archive", "Archive", MailboxRole::Archive, None, false)
             .unwrap();
-        s.upsert_mailbox("a", "Trash", "Trash", MailboxRole::Trash)
+        s.upsert_mailbox("a", "Trash", "Trash", MailboxRole::Trash, None, false)
             .unwrap();
-        s.upsert_mailbox("a", "Drafts", "Drafts", MailboxRole::Drafts)
+        s.upsert_mailbox("a", "Drafts", "Drafts", MailboxRole::Drafts, None, false)
             .unwrap();
         s
     }
@@ -1330,7 +1330,7 @@ pub(crate) mod tests {
     #[test]
     fn konusma_zinciri() {
         let s = setup();
-        s.upsert_mailbox("a", "Sent", "Sent", MailboxRole::Sent)
+        s.upsert_mailbox("a", "Sent", "Sent", MailboxRole::Sent, None, false)
             .unwrap();
         let mut root = msg("a", "a:Sent", "Sunucu taşıma planı", 100);
         root.message_id_header = Some("kok@ornek".into());

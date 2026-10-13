@@ -33,7 +33,7 @@ pub use push::{touches_account, SseEvent, SseParser};
 pub use send::{delete_draft, envelope_recipients, save_draft, submit, SavedDraft};
 pub use sync::{
     email_properties, fetch_body, full_sync, incremental_sync, prefetch, role_from, sync_mailboxes,
-    to_new_message, SyncOutcome, INITIAL_FETCH, SYNC_ROLES,
+    to_new_message, tracked, SyncOutcome, INITIAL_FETCH, SYNC_ROLES,
 };
 pub use types::{Email, Session, CORE, MAIL, SUBMISSION};
 
@@ -112,6 +112,7 @@ mod tests {
             signature: None,
             created_at: 0,
             auth: Default::default(),
+            notify: true,
         }
     }
 

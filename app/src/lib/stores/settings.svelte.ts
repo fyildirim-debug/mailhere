@@ -1,7 +1,7 @@
 // Ayarlar: arka uçtan okunur, tema ve dil her pencerede uygulanır.
 
 import { call, defaultSettings, EVENTS, on, type Settings } from '../api';
-import { setLanguage } from '../i18n/index.svelte';
+import { setLanguage, t } from '../i18n/index.svelte';
 
 export const settings = $state({ value: { ...defaultSettings } as Settings, ready: false });
 
@@ -38,4 +38,15 @@ export async function updateSettings(patch: Partial<Settings>) {
 
 export async function toggleTheme() {
   await updateSettings({ theme: resolvedTheme() === 'dark' ? 'light' : 'dark' });
+}
+
+/** Hızlı yanıt düğmeleri; kullanıcı düzenlemediyse dile göre varsayılanlar. */
+export function quickReplies(s: Settings = settings.value): string[] {
+  return s.quickReplies ?? [t('quick.chip1'), t('quick.chip2'), t('quick.chip3')];
+}
+
+/** Yalnız hızlı yanıtları yazar; null varsayılanlara döndürür. */
+export async function saveQuickReplies(list: string[] | null) {
+  apply({ ...settings.value, quickReplies: list });
+  apply(await call('quick_replies_set', { replies: list }));
 }

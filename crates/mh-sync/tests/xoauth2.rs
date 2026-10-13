@@ -122,6 +122,7 @@ async fn dovecot_xoauth2_uctan_uca() {
         signature: None,
         created_at: 0,
         auth: AuthKind::Google,
+        notify: true,
     };
     store.insert_account(&account).unwrap();
     let secrets: Arc<dyn SecretStore> = Arc::new(MemorySecrets::new());

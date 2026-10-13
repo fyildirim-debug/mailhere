@@ -6,8 +6,8 @@ use rusqlite::{params, OptionalExtension, Row};
 use crate::codec::{from_json, kind_from, kind_str, to_json};
 use crate::Store;
 
-const COLS: &str =
-    "id, name, email, display_name, color, kind, imap, smtp, jmap_url, signature, created_at, auth";
+const COLS: &str = "id, name, email, display_name, color, kind, imap, smtp, jmap_url, signature,
+    created_at, auth, notify";
 
 fn auth_str(a: AuthKind) -> &'static str {
     match a {
@@ -45,6 +45,7 @@ fn row_to_account(r: &Row<'_>) -> rusqlite::Result<Account> {
         signature: r.get(9)?,
         created_at: r.get(10)?,
         auth: auth_from(&r.get::<_, String>(11)?),
+        notify: r.get(12)?,
     })
 }
 
@@ -54,11 +55,12 @@ impl Store {
         self.with(|c| {
             c.execute(
                 &format!(
-                    "INSERT INTO accounts ({COLS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                    "INSERT INTO accounts ({COLS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
                      ON CONFLICT(id) DO UPDATE SET name = excluded.name, email = excluded.email,
                        display_name = excluded.display_name, color = excluded.color, kind = excluded.kind,
                        imap = excluded.imap, smtp = excluded.smtp, jmap_url = excluded.jmap_url,
-                       signature = excluded.signature, auth = excluded.auth"
+                       signature = excluded.signature, auth = excluded.auth,
+                       notify = excluded.notify"
                 ),
                 params![
                     a.id,
@@ -72,7 +74,8 @@ impl Store {
                     a.jmap_url,
                     a.signature,
                     a.created_at,
-                    auth_str(a.auth)
+                    auth_str(a.auth),
+                    a.notify
                 ],
             )?;
             Ok(())
@@ -106,8 +109,9 @@ impl Store {
     pub fn update_account(&self, id: &str, u: &AccountUpdate) -> AppResult<Option<Account>> {
         let changed = self.with(|c| {
             c.execute(
-                "UPDATE accounts SET name = ?2, display_name = ?3, color = ?4, signature = ?5 WHERE id = ?1",
-                params![id, u.name, u.display_name, u.color, u.signature],
+                "UPDATE accounts SET name = ?2, display_name = ?3, color = ?4, signature = ?5,
+                   notify = ?6 WHERE id = ?1",
+                params![id, u.name, u.display_name, u.color, u.signature, u.notify],
             )
         })?;
         if changed == 0 {
@@ -116,7 +120,26 @@ impl Store {
         self.account(id)
     }
 
-    /// Hesabı ve tüm yerel verisini siler. Silindiyse `true`.
+    /// Hesabın gelen ve giden posta sunucu ayarlarını yazar (doğrulama ve
+    /// bağlantı denemesi çağıranın işidir). Hesap yoksa `None`.
+    pub fn update_account_servers(
+        &self,
+        id: &str,
+        imap: &ServerConfig,
+        smtp: &ServerConfig,
+    ) -> AppResult<Option<Account>> {
+        let changed = self.with(|c| {
+            c.execute(
+                "UPDATE accounts SET imap = ?2, smtp = ?3 WHERE id = ?1",
+                params![id, to_json(imap), to_json(smtp)],
+            )
+        })?;
+        if changed == 0 {
+            return Ok(None);
+        }
+        self.account(id)
+    }
+
     /// Hesabı ve (zincirleme) tüm postalarını siler; silinen içerik WAL'da da
     /// beklemesin diye ardından WAL sıfırlanır.
     pub fn remove_account(&self, id: &AccountId) -> AppResult<bool> {
@@ -154,6 +177,7 @@ mod tests {
             display_name: "Furkan Y.".into(),
             color: "#2E9A61".into(),
             signature: Some("Sevgiler,\nFurkan".into()),
+            notify: false,
         };
         let a = s.update_account("a", &u).unwrap().unwrap();
         assert_eq!(
@@ -161,10 +185,51 @@ mod tests {
             ("Kişisel", "Furkan Y.", "#2E9A61")
         );
         assert_eq!(a.signature.as_deref(), Some("Sevgiler,\nFurkan"));
+        assert!(!a.notify);
         // Sunucu ayarları ve adres değişmez.
         assert_eq!(a.imap, account("a").imap);
         assert_eq!(a.email, "a@ornek.com.tr");
         assert_eq!(s.account("a").unwrap().unwrap(), a);
         assert!(s.update_account("yok", &u).unwrap().is_none());
+    }
+
+    #[test]
+    fn bildirim_tercihi_okunur_yazilir() {
+        let s = store_with_account("a");
+        assert!(s.account("a").unwrap().unwrap().notify, "varsayılan açık");
+        let mut a = account("a");
+        a.notify = false;
+        s.insert_account(&a).unwrap();
+        assert!(!s.account("a").unwrap().unwrap().notify);
+    }
+
+    #[test]
+    fn sunucu_ayarlari_yazilir() {
+        let s = store_with_account("a");
+        let server = |host: &str, port: u16| mh_core::ServerConfig {
+            host: host.into(),
+            port,
+            security: mh_core::Security::Starttls,
+            username: "furkan".into(),
+        };
+        let a = s
+            .update_account_servers(
+                "a",
+                &server("posta.ornek.com", 143),
+                &server("smtp.ornek.com", 587),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(a.imap, Some(server("posta.ornek.com", 143)));
+        assert_eq!(a.smtp, Some(server("smtp.ornek.com", 587)));
+        assert_eq!(
+            (a.name.as_str(), a.email.as_str()),
+            ("İş", "a@ornek.com.tr")
+        );
+        assert_eq!(s.account("a").unwrap().unwrap(), a);
+        assert!(s
+            .update_account_servers("yok", &server("x", 1), &server("y", 2))
+            .unwrap()
+            .is_none());
     }
 }

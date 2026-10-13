@@ -63,6 +63,7 @@ async fn giden_kutusu_jmap_ile_gonderir() {
         signature: None,
         created_at: 0,
         auth: Default::default(),
+        notify: true,
     };
     store.insert_account(&account).unwrap();
     store.set_jmap_username(ACC, user).unwrap();

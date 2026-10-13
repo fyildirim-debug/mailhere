@@ -56,6 +56,8 @@ pub struct State {
     pub user: String,
     pub pass: String,
     pub mailboxes: Vec<(String, String, Option<String>)>,
+    /// Kutu kimliği → üst kutu kimliği (`parentId`).
+    pub parents: HashMap<String, String>,
     pub emails: BTreeMap<String, FEmail>,
     pub blobs: HashMap<String, Vec<u8>>,
     pub identities: Vec<(String, String)>,
@@ -521,7 +523,7 @@ fn api(st: &mut State, name: &str, a: &Value) -> Vec<(String, Value)> {
                 .mailboxes
                 .iter()
                 .enumerate()
-                .map(|(i, (id, n, r))| json!({ "id": id, "name": n, "parentId": null, "role": r, "sortOrder": i }))
+                .map(|(i, (id, n, r))| json!({ "id": id, "name": n, "parentId": st.parents.get(id), "role": r, "sortOrder": i }))
                 .collect();
             one(
                 json!({ "accountId": ACCOUNT, "state": format!("m{}", st.mailbox_state), "list": list, "notFound": [] }),

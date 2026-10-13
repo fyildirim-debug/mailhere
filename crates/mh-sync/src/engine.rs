@@ -54,7 +54,7 @@ const ACTION_TIMEOUT: Duration = Duration::from_secs(120);
 /// (kuyruğu sonsuza dek tıkamasın).
 const ACTION_MAX_ATTEMPTS: u32 = 5;
 
-/// Eşitlenen kutu rolleri.
+/// Gizli olsa da eşitlenen kutu rolleri.
 const SYNC_ROLES: [MailboxRole; 5] = [
     MailboxRole::Inbox,
     MailboxRole::Sent,
@@ -62,6 +62,22 @@ const SYNC_ROLES: [MailboxRole; 5] = [
     MailboxRole::Archive,
     MailboxRole::Trash,
 ];
+
+/// Kutu eşitlenir mi? Rol kutuları her zaman; Gereksiz ve diğer klasörler
+/// kenar çubuğunda görünüyorsa. Eşitlenmeyen kutu (Gmail "Tüm Postalar")
+/// hiçbir zaman. Bildirim yalnız gelen kutusundan çıkar.
+fn syncs(info: &MailboxInfo) -> bool {
+    !info.nosync && (SYNC_ROLES.contains(&info.mailbox.role) || !info.mailbox.hidden)
+}
+
+/// Tam eşitlemede kutu sırası: gelen kutusu, rol kutuları, sonra diğerleri.
+fn sync_order(role: MailboxRole) -> u8 {
+    match role {
+        MailboxRole::Inbox => 0,
+        r if SYNC_ROLES.contains(&r) => 1,
+        _ => 2,
+    }
+}
 
 /// Bellekteki komutlar. Sunucu işlemleri kalıcı kuyruktadır; `Wake` yalnız
 /// kuyruğa yeni işlem yazıldığını haber verir.
@@ -282,6 +298,18 @@ impl SyncManager {
         }
     }
 
+    /// Tek hesabı hemen eşitler (kutular yeniden listelenir). Hesap
+    /// çalışmıyorsa `false`.
+    pub fn sync_account(&self, account_id: &str) -> bool {
+        self.send(account_id, Command::SyncAll)
+    }
+
+    /// Hesabın tek kutusunu hemen eşitler (ör. görünür yapılan klasör).
+    /// Hesap çalışmıyorsa `false`.
+    pub fn sync_path(&self, account_id: &str, path: &str) -> bool {
+        self.send(account_id, Command::SyncPath(path.to_owned()))
+    }
+
     /// İşlemi kalıcı kuyruğa yazar ve hesabın motorunu uyandırır.
     fn queue(&self, account_id: &str, action: &Action, raw: Option<&[u8]>) -> AppResult<()> {
         self.store.action_push(account_id, action, raw, now_ms())?;
@@ -426,7 +454,9 @@ impl SyncManager {
                 format!("{}{name}", ns.prefix)
             }
         };
-        let id = self.store.upsert_mailbox(account, &path, name, role)?;
+        let id = self
+            .store
+            .upsert_mailbox(account, &path, name, role, None, false)?;
         self.store
             .mailbox(&id)?
             .ok_or_else(|| AppError::new(ErrorCode::Internal, "Kutu oluşturulamadı."))
@@ -835,6 +865,8 @@ pub struct Listed {
     pub attr_role: Option<MailboxRole>,
     pub all: bool,
     pub noselect: bool,
+    /// Başka kutuların kopyası (`\Flagged`, `\Important`).
+    pub copy: bool,
 }
 
 impl Listed {
@@ -845,12 +877,33 @@ impl Listed {
             attr_role: roles::from_attributes(n.attributes()),
             all: roles::is_all(n.attributes()),
             noselect: roles::is_noselect(n.attributes()),
+            copy: roles::is_copy(n.attributes()),
         }
     }
 }
 
-/// Kutu atanmış rolü: (yol, görünen ad, rol, eşitlenmesin mi).
-pub fn assign_roles(listed: &[Listed]) -> Vec<(String, String, MailboxRole, bool)> {
+/// LIST sonucundan yerel kutu.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Assigned {
+    pub path: String,
+    /// Görünen ad: yaprak ad ya da seçilemeyen atalarla "Projeler / 2024".
+    pub name: String,
+    /// Sunucudan bulunan (otomatik) rol.
+    pub role: MailboxRole,
+    /// Hedef olarak kullanılır ama eşitlenmez (Gmail "Tüm Postalar").
+    pub nosync: bool,
+    /// Seçilebilir en yakın üst klasörün yolu; kökteyse ya da rol kutusuysa `None`.
+    pub parent: Option<String>,
+    /// Yalnız ilk eklemede uygulanan varsayılan gizlilik.
+    pub hidden: bool,
+}
+
+/// Kutuların rolleri, ağaçtaki yerleri ve varsayılan gizliliği. Seçilemeyen
+/// kutular atlanır.
+///
+/// Varsayılan gizli: kopya kutular (`\Flagged`, `\Important`), arşiv olarak
+/// kullanılmayan `\All` ve eşitlenmeyen her kutu. Diğer klasörler görünür.
+pub fn assign_roles(listed: &[Listed]) -> Vec<Assigned> {
     let selectable: Vec<&Listed> = listed.iter().filter(|l| !l.noselect).collect();
     let mut role_of: HashMap<&str, (MailboxRole, bool)> = HashMap::new();
     let mut taken: HashSet<MailboxRole> = HashSet::new();
@@ -888,19 +941,31 @@ pub fn assign_roles(listed: &[Listed]) -> Vec<(String, String, MailboxRole, bool
             role_of.insert(&l.path, (r, false));
         }
     }
+    // 4) Ağaç: kişisel ad alanı "INBOX." ise altındaki klasörler köktedir.
+    let prefix = personal_namespace(listed).prefix;
+    let paths: HashSet<&str> = selectable.iter().map(|l| l.path.as_str()).collect();
     selectable
         .iter()
         .map(|l| {
-            let (role, skip) = role_of
+            let (role, nosync) = role_of
                 .get(l.path.as_str())
                 .copied()
                 .unwrap_or((MailboxRole::Other, false));
-            (
-                l.path.clone(),
-                roles::leaf(&l.path, l.delimiter.as_deref()),
+            let (parent, name) = if role == MailboxRole::Other {
+                roles::place(&l.path, l.delimiter.as_deref(), &prefix, |p| {
+                    paths.contains(p)
+                })
+            } else {
+                (None, roles::leaf(&l.path, l.delimiter.as_deref()))
+            };
+            Assigned {
+                path: l.path.clone(),
+                name,
                 role,
-                skip,
-            )
+                nosync,
+                parent,
+                hidden: nosync || l.copy || (l.all && role != MailboxRole::Archive),
+            }
         })
         .collect()
 }
@@ -952,11 +1017,37 @@ async fn refresh_mailboxes(ctx: &AccountCtx, conn: &mut Conn) -> SyncResult<()> 
     let listed: Vec<Listed> = names.iter().map(Listed::from_name).collect();
     let assigned = assign_roles(&listed);
     conn.server_paths = listed.iter().map(|l| l.path.clone()).collect();
+    // Adı, rolü ya da üst klasörü değişen (ya da yeni) kutular arayüze bildirilir.
+    let shape = |m: &MailboxInfo| {
+        (
+            m.mailbox.id.clone(),
+            m.mailbox.name.clone(),
+            m.mailbox.role,
+            m.mailbox.parent_id.clone(),
+        )
+    };
+    let before: HashSet<_> = ctx
+        .store
+        .mailboxes_for(account)?
+        .iter()
+        .map(shape)
+        .collect();
     let mut keep = Vec::new();
-    for (path, name, role, skip) in &assigned {
-        let id = ctx.store.upsert_mailbox(account, path, name, *role)?;
-        ctx.store.set_mailbox_nosync(&id, *skip)?;
-        keep.push(path.clone());
+    for a in &assigned {
+        let parent = a
+            .parent
+            .as_deref()
+            .map(|p| mh_store::mailbox_id(account, p));
+        let id = ctx.store.upsert_mailbox(
+            account,
+            &a.path,
+            &a.name,
+            a.role,
+            parent.as_deref(),
+            a.hidden,
+        )?;
+        ctx.store.set_mailbox_nosync(&id, a.nosync)?;
+        keep.push(a.path.clone());
     }
     // Yerelde oluşturulup sunucuda henüz açılmamış rol kutularını koru.
     for info in ctx.store.mailboxes_for(account)? {
@@ -967,10 +1058,15 @@ async fn refresh_mailboxes(ctx: &AccountCtx, conn: &mut Conn) -> SyncResult<()> 
             keep.push(info.mailbox.path);
         }
     }
-    let removed = ctx.store.remove_mailboxes_except(account, &keep)?;
+    let mut changed = ctx.store.remove_mailboxes_except(account, &keep)?;
+    for m in ctx.store.mailboxes_for(account)? {
+        if !before.contains(&shape(&m)) {
+            changed.push(m.mailbox.id);
+        }
+    }
     ctx.store
         .set_namespace(account, &personal_namespace(&listed))?;
-    ctx.changed(removed);
+    ctx.changed(changed);
     conn.listed = true;
     Ok(())
 }
@@ -980,13 +1076,15 @@ async fn full_sync(ctx: &AccountCtx, conn: &mut Conn) -> SyncResult<()> {
         refresh_mailboxes(ctx, conn).await?;
         conn.listed = false;
     }
-    let targets: Vec<MailboxInfo> = ctx
+    let mut targets: Vec<MailboxInfo> = ctx
         .store
         .mailboxes_for(ctx.id())?
         .into_iter()
-        .filter(|m| SYNC_ROLES.contains(&m.mailbox.role) && !m.nosync)
+        .filter(syncs)
         .filter(|m| conn.server_paths.contains(&m.mailbox.path))
         .collect();
+    // Önce gelen kutusu, sonra rol kutuları, sonra klasörler (yol sırasıyla).
+    targets.sort_by_key(|m| sync_order(m.mailbox.role));
     let total = targets.len() as u32;
     let mut changed: Vec<String> = Vec::new();
     let mut new_unread = Vec::new();
@@ -1017,10 +1115,7 @@ async fn full_sync(ctx: &AccountCtx, conn: &mut Conn) -> SyncResult<()> {
 }
 
 async fn sync_one(ctx: &AccountCtx, conn: &mut Conn, info: &MailboxInfo) -> SyncResult<()> {
-    if info.nosync
-        || !SYNC_ROLES.contains(&info.mailbox.role)
-        || !conn.server_paths.contains(&info.mailbox.path)
-    {
+    if !syncs(info) || !conn.server_paths.contains(&info.mailbox.path) {
         return Ok(());
     }
     let notify = info.mailbox.role == MailboxRole::Inbox;
@@ -1441,7 +1536,12 @@ mod tests {
             attr_role,
             all,
             noselect: false,
+            copy: false,
         }
+    }
+
+    fn find<'a>(roles: &'a [Assigned], path: &str) -> Option<&'a Assigned> {
+        roles.iter().find(|r| r.path == path)
     }
 
     #[test]
@@ -1456,10 +1556,19 @@ mod tests {
             l("[Gmail]/Sent Mail", Some(MailboxRole::Sent), false),
             l("[Gmail]/Trash", Some(MailboxRole::Trash), false),
             l("[Gmail]/Drafts", Some(MailboxRole::Drafts), false),
+            l("[Gmail]/Spam", Some(MailboxRole::Junk), false),
+            Listed {
+                copy: true,
+                ..l("[Gmail]/Starred", None, false)
+            },
+            Listed {
+                copy: true,
+                ..l("[Gmail]/Important", None, false)
+            },
             l("Archive", None, false),
         ];
         let roles = assign_roles(&listed);
-        let get = |p: &str| roles.iter().find(|r| r.0 == p).map(|r| (r.2, r.3));
+        let get = |p: &str| find(&roles, p).map(|r| (r.role, r.nosync));
         assert_eq!(get("[Gmail]"), None, "seçilemeyen kutu atlanır");
         assert_eq!(get("INBOX"), Some((MailboxRole::Inbox, false)));
         assert_eq!(get("[Gmail]/All Mail"), Some((MailboxRole::Archive, true)));
@@ -1469,11 +1578,28 @@ mod tests {
             "rol bir kez atanır"
         );
         assert_eq!(get("[Gmail]/Sent Mail"), Some((MailboxRole::Sent, false)));
+        assert_eq!(get("[Gmail]/Spam"), Some((MailboxRole::Junk, false)));
+        let sent = find(&roles, "[Gmail]/Sent Mail").unwrap();
         assert_eq!(
-            roles.iter().find(|r| r.0 == "[Gmail]/Sent Mail").unwrap().1,
-            "Sent Mail"
+            (sent.name.as_str(), sent.parent.as_deref()),
+            ("Sent Mail", None)
         );
         assert_eq!(personal_namespace(&listed).prefix, "");
+
+        // Varsayılan gizli: eşitlenmeyen "Tüm Postalar", kopya kutular.
+        let hidden = |p: &str| find(&roles, p).unwrap().hidden;
+        assert!(hidden("[Gmail]/All Mail"));
+        assert!(hidden("[Gmail]/Starred"));
+        assert!(hidden("[Gmail]/Important"));
+        for p in ["INBOX", "[Gmail]/Sent Mail", "[Gmail]/Spam", "Archive"] {
+            assert!(!hidden(p), "{p}");
+        }
+        // Seçilemeyen atanın adı görünen ada katılır.
+        let starred = find(&roles, "[Gmail]/Starred").unwrap();
+        assert_eq!(
+            (starred.name.as_str(), starred.parent.as_deref()),
+            ("[Gmail] / Starred", None)
+        );
     }
 
     #[test]
@@ -1486,11 +1612,144 @@ mod tests {
             l("Spam", None, false),
         ];
         let roles = assign_roles(&listed);
-        let get = |p: &str| roles.iter().find(|r| r.0 == p).map(|r| (r.2, r.3)).unwrap();
+        let get = |p: &str| find(&roles, p).map(|r| (r.role, r.nosync)).unwrap();
         assert_eq!(get("Gonderilen-Ozel"), (MailboxRole::Sent, false));
         assert_eq!(get("Sent"), (MailboxRole::Other, false));
         assert_eq!(get("All"), (MailboxRole::Other, false));
         assert_eq!(get("Spam"), (MailboxRole::Junk, false));
+        // Arşiv olarak kullanılmayan \All gizli ama eşitlenebilir (gösterilirse).
+        assert!(find(&roles, "All").unwrap().hidden);
+        assert!(!find(&roles, "Sent").unwrap().hidden);
+    }
+
+    #[test]
+    fn klasor_agaci() {
+        let listed = vec![
+            l("INBOX", None, false),
+            l("Projeler", None, false),
+            l("Projeler/2024", None, false),
+            l("Projeler/2024/Mart", None, false),
+            Listed {
+                noselect: true,
+                ..l("Eski", None, false)
+            },
+            l("Eski/Faturalar", None, false),
+            // Ara düğüm listede yok (sunucu yalnız yaprağı döndü).
+            l("Musteriler/Acme/Teklifler", None, false),
+            l("INBOX/Alt", None, false),
+            l("Is", None, false),
+            l("Is/Sent", None, false),
+            l(
+                &crate::mutf7::encode("İş Ortakları/Görüşmeler"),
+                None,
+                false,
+            ),
+        ];
+        let roles = assign_roles(&listed);
+        let at = |p: &str| {
+            let a = find(&roles, p).unwrap();
+            (a.parent.as_deref(), a.name.as_str())
+        };
+        assert_eq!(at("Projeler"), (None, "Projeler"));
+        assert_eq!(at("Projeler/2024"), (Some("Projeler"), "2024"));
+        assert_eq!(at("Projeler/2024/Mart"), (Some("Projeler/2024"), "Mart"));
+        assert_eq!(at("Eski/Faturalar"), (None, "Eski / Faturalar"));
+        assert_eq!(
+            at("Musteriler/Acme/Teklifler"),
+            (None, "Musteriler / Acme / Teklifler")
+        );
+        // Ad alanı önekli değilse INBOX'ın altı INBOX'a bağlanır.
+        assert_eq!(at("INBOX/Alt"), (Some("INBOX"), "Alt"));
+        // Rol kutusu her zaman köktedir.
+        let sent = find(&roles, "Is/Sent").unwrap();
+        assert_eq!(
+            (sent.role, sent.parent.as_deref(), sent.name.as_str()),
+            (MailboxRole::Sent, None, "Sent")
+        );
+        assert_eq!(
+            at(&crate::mutf7::encode("İş Ortakları/Görüşmeler")),
+            (None, "İş Ortakları / Görüşmeler")
+        );
+        assert!(roles.iter().all(|r| !r.hidden));
+    }
+
+    #[test]
+    fn inbox_onekli_ad_alaninda_klasorler_koktedir() {
+        let dot = |p: &str| Listed {
+            delimiter: Some(".".into()),
+            ..l(p, None, false)
+        };
+        let listed = vec![
+            dot("INBOX"),
+            dot("INBOX.Sent"),
+            dot("INBOX.Trash"),
+            dot("INBOX.Projeler"),
+            dot("INBOX.Projeler.2024"),
+            Listed {
+                noselect: true,
+                ..dot("INBOX.Eski")
+            },
+            dot("INBOX.Eski.Faturalar"),
+        ];
+        assert_eq!(personal_namespace(&listed).prefix, "INBOX.");
+        let roles = assign_roles(&listed);
+        let at = |p: &str| {
+            let a = find(&roles, p).unwrap();
+            (a.parent.as_deref(), a.name.as_str())
+        };
+        assert_eq!(at("INBOX.Projeler"), (None, "Projeler"));
+        assert_eq!(at("INBOX.Projeler.2024"), (Some("INBOX.Projeler"), "2024"));
+        assert_eq!(at("INBOX.Eski.Faturalar"), (None, "Eski / Faturalar"));
+        assert_eq!(at("INBOX.Sent"), (None, "Sent"));
+        assert_eq!(find(&roles, "INBOX.Sent").unwrap().role, MailboxRole::Sent);
+        assert_eq!(at("INBOX"), (None, "INBOX"));
+    }
+
+    fn mb(role: MailboxRole, hidden: bool, nosync: bool) -> MailboxInfo {
+        MailboxInfo {
+            mailbox: mh_core::Mailbox {
+                id: "a:x".into(),
+                account_id: "a".into(),
+                path: "x".into(),
+                name: "x".into(),
+                role,
+                unread: 0,
+                total: 0,
+                parent_id: None,
+                hidden,
+            },
+            uidvalidity: None,
+            uidnext: None,
+            highest_uid: 0,
+            nosync,
+        }
+    }
+
+    #[test]
+    fn esitlenen_kutular() {
+        // Rol kutuları gizli olsa da eşitlenir.
+        for r in SYNC_ROLES {
+            assert!(syncs(&mb(r, false, false)));
+            assert!(syncs(&mb(r, true, false)), "{r:?}");
+        }
+        // Gereksiz ve klasörler yalnız görünürken.
+        for r in [MailboxRole::Junk, MailboxRole::Other] {
+            assert!(syncs(&mb(r, false, false)), "{r:?}");
+            assert!(!syncs(&mb(r, true, false)), "{r:?}");
+        }
+        // Eşitlenmeyen kutu hiçbir zaman.
+        assert!(!syncs(&mb(MailboxRole::Archive, false, true)));
+        assert!(!syncs(&mb(MailboxRole::Other, false, true)));
+        // Sıra: gelen kutusu, rol kutuları, diğerleri.
+        let mut roles = [
+            MailboxRole::Other,
+            MailboxRole::Junk,
+            MailboxRole::Trash,
+            MailboxRole::Inbox,
+        ];
+        roles.sort_by_key(|r| sync_order(*r));
+        assert_eq!(roles[0], MailboxRole::Inbox);
+        assert_eq!(roles[1], MailboxRole::Trash);
     }
 
     #[test]
@@ -1591,6 +1850,7 @@ mod tests {
             signature: None,
             created_at: 0,
             auth: Default::default(),
+            notify: true,
         };
         assert!(!is_syncable(&a));
         a.imap.as_mut().unwrap().host = "imap.ornek.com".into();
@@ -1628,6 +1888,7 @@ mod tests {
             signature: None,
             created_at: 0,
             auth: Default::default(),
+            notify: true,
         };
         store.insert_account(&a).unwrap();
         a.id = "demo".into();
@@ -1635,7 +1896,7 @@ mod tests {
         store.insert_account(&a).unwrap();
         for acc in ["a", "demo"] {
             store
-                .upsert_mailbox(acc, "INBOX", "INBOX", MailboxRole::Inbox)
+                .upsert_mailbox(acc, "INBOX", "INBOX", MailboxRole::Inbox, None, false)
                 .unwrap();
         }
         let mk = |acc: &str, uid: u32| {

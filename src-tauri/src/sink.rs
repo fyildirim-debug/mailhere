@@ -51,6 +51,12 @@ impl EventSink for TauriSink {
         // Kartta hesabın güncel adı ve rengi görünsün (`account_update` sonrası).
         let fresh = state.store.account(&account.id).ok().flatten();
         let account = fresh.as_ref().unwrap_or(account);
+        // Bu hesap için bildirim kapalı: kart ve sistem bildirimi yok, yalnız
+        // tepsi sayacı güncellenir.
+        if !account.notify {
+            crate::tray::refresh(&self.app);
+            return;
+        }
         let settings = match state.store.settings() {
             Ok(s) => s,
             Err(_) => return,

@@ -22,7 +22,7 @@ pub use credentials::{
     credentials_for, oauth_secret_key, token_rejected, Credentials, ProviderResolver, TokenProvider,
 };
 pub use discover::discover;
-pub use engine::{assign_roles, fetch_body, is_syncable, Listed, SyncManager};
+pub use engine::{assign_roles, fetch_body, is_syncable, Assigned, Listed, SyncManager};
 pub use error::{SyncError, SyncResult};
 pub use mailbox::{sync_mailbox, uid_set, MailboxOutcome};
 pub use secrets::{password_for, MemorySecrets, SecretStore};

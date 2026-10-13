@@ -1,10 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import type { Category } from '../../lib/api';
+  import type { Category, ListOnly } from '../../lib/api';
   import { t, type MessageKey } from '../../lib/i18n/index.svelte';
   import Icon from '../../lib/ui/Icon.svelte';
+  import Menu, { type MenuItem } from '../../lib/ui/Menu.svelte';
+  import { folderLabel } from '../../lib/mail/folders';
   import { dateGroup, type DateGroup } from '../../lib/util/format';
-  import { loadMore, mail, markAllRead, rowsOf, setCategory, setView } from '../../lib/stores/mail.svelte';
+  import { loadMore, mail, markAllRead, rowsOf, setCategory, setOnly, setView } from '../../lib/stores/mail.svelte';
   import { settings } from '../../lib/stores/settings.svelte';
   import MessageRow from './MessageRow.svelte';
 
@@ -112,12 +114,29 @@
 
   const title = $derived.by(() => {
     if (mail.search != null) return t('list.searchTitle', { q: mail.search });
-    const base = mail.view.kind === 'mailbox' ? (mail.mailboxes.find((b) => b.id === (mail.view as { id: string }).id)?.name ?? '') : t(titleKey[mail.view.kind]);
+    const box = mail.view.kind === 'mailbox' ? mail.mailboxes.find((b) => b.id === (mail.view as { id: string }).id) : undefined;
+    const base = mail.view.kind === 'mailbox' ? (box ? folderLabel(box) : '') : t(titleKey[mail.view.kind]);
     const acc = mail.accounts.find((a) => a.id === mail.accountId);
     return acc ? `${base} · ${acc.name}` : base;
   });
 
   const unread = $derived(rows.filter((m) => m.unread).length);
+
+  const onlyKey: Record<ListOnly, MessageKey> = { unread: 'list.only.unread', starred: 'list.only.starred', attachments: 'list.only.attachments' };
+  let filterMenu = $state<{ x: number; y: number } | null>(null);
+  const filterItems = $derived<MenuItem[]>([
+    { label: t('list.only.all'), checked: mail.only == null, onclick: () => mail.only && setOnly(mail.only) },
+    ...(['unread', 'starred', 'attachments'] as ListOnly[]).map((k) => ({
+      label: t(onlyKey[k]),
+      checked: mail.only === k,
+      onclick: () => mail.only !== k && setOnly(k),
+    })),
+  ]);
+
+  function openFilter(e: MouseEvent) {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    filterMenu = { x: r.right - 220, y: r.bottom + 4 };
+  }
   const isInbox = $derived(mail.view.kind === 'inbox' && mail.search == null);
 </script>
 
@@ -131,10 +150,30 @@
           <Icon name="x" />
         </button>
       {/if}
-      <button class="btn-icon" class:mark={mail.search == null} aria-label={t('act.markAllRead')} title={t('act.markAllRead')} disabled={!unread} onclick={() => markAllRead()}>
+      {#if mail.search == null}
+        <button
+          class="btn-icon mark"
+          class:on={mail.only != null}
+          aria-label={t('list.filterBy')}
+          title={t('list.filterBy')}
+          aria-haspopup="menu"
+          onclick={openFilter}
+        >
+          <Icon name="filter" />
+        </button>
+      {/if}
+      <button class="btn-icon" aria-label={t('act.markAllRead')} title={t('act.markAllRead')} disabled={!unread} onclick={() => markAllRead()}>
         <Icon name="checkAll" />
       </button>
     </div>
+    {#if mail.only && mail.search == null}
+      <div class="pill-row">
+        <span class="pill">
+          <Icon name="filter" size={14} />{t(onlyKey[mail.only])}
+          <button aria-label={t('list.clearFilter')} title={t('list.clearFilter')} onclick={() => mail.only && setOnly(mail.only)}><Icon name="x" size={12} /></button>
+        </span>
+      </div>
+    {/if}
     {#if isInbox}
       <div class="seg-track" role="group" aria-label={t('list.filter')}>
         {#each tabs as tab (tab.label)}
@@ -161,11 +200,13 @@
       <div class="empty">
         <Icon name="check" size={28} />
         <div class="empty-title">{t('list.emptyTitle')}</div>
-        <div class="empty-body">{mail.category ? t('list.emptyFilteredBody') : t('list.emptyBody')}</div>
+        <div class="empty-body">{mail.category || mail.only ? t('list.emptyFilteredBody') : t('list.emptyBody')}</div>
       </div>
     {/if}
   </div>
 </section>
+
+{#if filterMenu}<Menu at={filterMenu} title={t('list.filterBy')} items={filterItems} onclose={() => (filterMenu = null)} />{/if}
 
 <style>
   .list {
@@ -207,6 +248,40 @@
   .mark {
     margin-left: auto;
     align-self: center;
+  }
+
+  .pill-row {
+    display: flex;
+    margin-top: -4px;
+  }
+
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 26px;
+    padding: 0 4px 0 10px;
+    border-radius: 999px;
+    background: var(--accent-soft);
+    color: var(--accent-text);
+    font-size: var(--fs-meta);
+    font-weight: 500;
+  }
+
+  .pill button {
+    display: grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: inherit;
+  }
+
+  .pill button:hover {
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
   }
 
   .mark:disabled {

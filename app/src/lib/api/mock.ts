@@ -19,8 +19,17 @@ import {
   type MailboxRole,
   type MessageDetail,
   type MessageSummary,
+  type Rule,
+  type RuleCondition,
+  type ScheduledItem,
+  type ServerConfig,
   type Settings,
+  type Signature,
+  type Template,
+  type Vacation,
   type View,
+  QUICK_REPLIES_MAX,
+  QUICK_REPLY_CHARS,
 } from './types';
 
 type Handler = (payload: unknown) => void;
@@ -38,7 +47,7 @@ export interface MockBackend {
   on<E extends keyof EventPayloads>(event: E, handler: (p: EventPayloads[E]) => void): () => void;
   emit<E extends keyof EventPayloads>(event: E, payload: EventPayloads[E]): void;
   /** Testler için iç durum. */
-  state: { accounts: Account[]; mailboxes: Mailbox[]; messages: MessageDetail[]; settings: Settings };
+  state: { accounts: Account[]; mailboxes: Mailbox[]; messages: MessageDetail[]; settings: Settings; rules: Rule[] };
 }
 
 const SETTINGS_KEY = 'mailhere.mock.settings';
@@ -56,6 +65,86 @@ function summary(m: MessageDetail): MessageSummary {
     id, accountId, mailboxId, threadId, from, to, subject, snippet, date, unread, starred, hasAttachments, category, snoozedUntil,
   } = m;
   return { id, accountId, mailboxId, threadId, from, to, subject, snippet, date, unread, starred, hasAttachments, category, snoozedUntil };
+}
+
+/** Arka uçtaki `normalize_settings` ile aynı kurallar. */
+export function cleanQuickReplies(list: string[] | null): string[] | null {
+  if (list == null) return null;
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of list) {
+    // eslint-disable-next-line no-control-regex
+    const t = [...raw.replace(/[\r\n\t]+/g, ' ').replace(/[\u0000-\u001f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '').trim()].slice(0, QUICK_REPLY_CHARS).join('').trim();
+    const key = t.toLocaleLowerCase('tr');
+    if (!t || seen.has(key)) continue;
+    seen.add(key);
+    out.push(t);
+    if (out.length === QUICK_REPLIES_MAX) break;
+  }
+  return out;
+}
+
+let uid = 0;
+function newId(prefix: string): string {
+  uid += 1;
+  return `${prefix}-${Date.now().toString(36)}-${uid}`;
+}
+
+function cleanTemplates(list: Template[]): Template[] {
+  const seen = new Set<string>();
+  const out: Template[] = [];
+  for (const t of list.slice(0, 50)) {
+    const name = t.name.trim().slice(0, 80);
+    const body = t.body.slice(0, 20_000);
+    if (!name && !body.trim()) continue;
+    const id = t.id && !seen.has(t.id) ? t.id : newId('sablon');
+    seen.add(id);
+    out.push({ id, name: name || 'Şablon', subject: t.subject.replace(/\s+/g, ' ').trim().slice(0, 300), body });
+  }
+  return out;
+}
+
+function cleanSignatures(list: Signature[]): Signature[] {
+  if (list.length > 20) fail('invalid', 'Bir hesapta en çok 20 imza olabilir.');
+  const seen = new Set<string>();
+  return list.map((sig, i) => {
+    const id = sig.id || newId('imza');
+    if (seen.has(id)) fail('invalid', 'İki imza aynı kimliği taşıyor. Sayfayı yenileyip yeniden dene.');
+    seen.add(id);
+    return { id, name: sig.name.trim().slice(0, 60) || `İmza ${i + 1}`, body: sig.body.replace(/\s+$/, '').slice(0, 10_000) };
+  });
+}
+
+/** Kural koşulu (arka uçtaki gibi Türkçe katlamalı, büyük/küçük harf duyarsız). */
+function matches(m: MessageDetail, c: RuleCondition): boolean {
+  const fold = (x: string) => x.toLocaleLowerCase('tr');
+  switch (c.kind) {
+    case 'hasAttachment':
+      return m.hasAttachments;
+    case 'category':
+      return m.category === c.value;
+    default: {
+      const hay =
+        c.kind === 'from'
+          ? [`${m.from.name ?? ''} ${m.from.email}`]
+          : c.kind === 'to'
+            ? [...m.to, ...m.cc].map((a) => `${a.name ?? ''} ${a.email}`)
+            : c.kind === 'subject'
+              ? [m.subject]
+              : [m.bodyText ?? m.snippet];
+      const v = fold(c.value.trim());
+      if (c.op === 'is') {
+        const exact = c.kind === 'from' ? [m.from.email] : c.kind === 'to' ? [...m.to, ...m.cc].map((a) => a.email) : hay;
+        return exact.some((h) => fold(h.trim()) === v);
+      }
+      const hit = hay.some((h) => fold(h).includes(v));
+      return c.op === 'contains' ? hit : !hit;
+    }
+  }
+}
+
+function sameServer(a: ServerConfig | null, b: ServerConfig): boolean {
+  return !!a && a.host.trim().toLowerCase() === b.host.trim().toLowerCase() && a.port === b.port && a.username.trim() === b.username.trim();
 }
 
 function loadSettings(persist: boolean): Settings {
@@ -76,9 +165,25 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     mailboxes: opts.empty ? [] : data.mailboxes,
     messages: opts.empty ? [] : data.messages,
     settings: loadSettings(!!opts.persist),
+    rules: opts.empty
+      ? []
+      : ([
+          {
+            id: 'kural-bulten', name: 'Bültenler sessiz', enabled: true, accountId: null, match: 'all',
+            conditions: [{ kind: 'category', value: 'newsletters' }], actions: [{ kind: 'mute' }], stop: false,
+          },
+          {
+            id: 'kural-fatura', name: 'Faturalar klasöre', enabled: true, accountId: 'demo-kisisel', match: 'any',
+            conditions: [{ kind: 'from', op: 'contains', value: 'fatura@' }, { kind: 'subject', op: 'contains', value: 'fatura' }],
+            actions: [{ kind: 'move', mailboxId: 'demo-kisisel:Faturalar' }, { kind: 'markRead' }], stop: true,
+          },
+        ] satisfies Rule[]) as Rule[],
   };
+  const scheduled = new Map<string, { item: ScheduledItem; msg: OutgoingMessage; timer: ReturnType<typeof setTimeout> }>();
+  const vacations = new Map<string, Vacation>();
+  // Sunucudan bulunan (otomatik) roller: elle atama sıfırlanınca geri gelir.
+  const autoRole = new Map(state.mailboxes.map((b) => [b.id, b.role]));
   const handlers = new Map<string, Set<Handler>>();
-  const outbox = new Map<string, ReturnType<typeof setTimeout>>();
   let nextId = 1000;
 
   function emit<E extends keyof EventPayloads>(event: E, payload: EventPayloads[E]) {
@@ -131,6 +236,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       inboxUnread,
       snoozed: state.messages.filter((m) => inView(m, { kind: 'snoozed' })).length,
       drafts: state.messages.filter((m) => roleOf(m.mailboxId) === 'drafts').length,
+      scheduled: scheduled.size,
       perAccountUnread,
     };
   }
@@ -154,7 +260,9 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       ['Archive', 'Arşiv', 'archive'],
       ['Trash', 'Çöp', 'trash'],
     ] as const) {
-      state.mailboxes.push({ id: `${accountId}:${path}`, accountId, path, name, role, unread: 0, total: 0 });
+      const id = `${accountId}:${path}`;
+      state.mailboxes.push({ id, accountId, path, name, role, unread: 0, total: 0, parentId: null, hidden: false });
+      autoRole.set(id, role);
     }
   }
 
@@ -164,8 +272,11 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       ...partial,
       id: `acc-${nextId++}`,
       color: partial.color ?? colors[state.accounts.length % colors.length],
-      signature: null,
+      signatures: [],
+      signatureNew: null,
+      signatureReply: null,
       createdAt: now(),
+      notify: true,
     };
     state.accounts.push(account);
     addMailboxes(account.id);
@@ -191,8 +302,48 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       snippet: msg.bodyText.replace(/\s+/g, ' ').slice(0, 200), date: now(), unread: false, starred: false,
       hasAttachments: msg.attachments.length > 0, category: 'people', snoozedUntil: null, cc: msg.cc, bcc: msg.bcc, replyTo: [],
       messageIdHeader: null, references: [], bodyText: msg.bodyText, bodyHtml: null, hasRemoteContent: false,
-      remoteAllowed: false, attachments: [], thread: [],
+      remoteAllowed: false, attachments: [], thread: [], unsubscribe: null,
     };
+  }
+
+  function deliver(id: string) {
+    const entry = scheduled.get(id);
+    if (!entry) return;
+    clearTimeout(entry.timer);
+    scheduled.delete(id);
+    const { msg } = entry;
+    const account = state.accounts.find((a) => a.id === msg.accountId);
+    if (account) {
+      state.messages.push({
+        id: nextId++, accountId: account.id, mailboxId: boxFor(account.id, 'sent'), threadId: `out-${id}`,
+        from: { name: account.displayName, email: account.email }, to: msg.to, subject: msg.subject,
+        snippet: msg.bodyText.replace(/\s+/g, ' ').slice(0, 200), date: now(), unread: false, starred: false,
+        hasAttachments: msg.attachments.length > 0, category: 'people', snoozedUntil: null, cc: msg.cc, bcc: [], replyTo: [],
+        messageIdHeader: null, references: [], bodyText: msg.bodyText, bodyHtml: null, hasRemoteContent: false,
+        remoteAllowed: false, attachments: [], thread: [], unsubscribe: null,
+      });
+    }
+    emit(EVENTS.outbox, { id, ok: true, error: null });
+    emit(EVENTS.changed, { mailboxIds: [] });
+  }
+
+  /** Kuralı doğrular (arka uçtaki `rule_save` kuralları). */
+  function checkRule(rule: Rule): Rule {
+    const name = rule.name.trim().slice(0, 80);
+    if (!name) fail('invalid', 'Kurala bir ad ver.');
+    if (!rule.conditions.length || rule.conditions.length > 20) fail('invalid', 'Kuralın 1 ile 20 arasında koşulu olmalı.');
+    if (!rule.actions.length || rule.actions.length > 10) fail('invalid', 'Kuralın 1 ile 10 arasında eylemi olmalı.');
+    for (const c of rule.conditions) {
+      if ('value' in c && typeof c.value === 'string' && !c.value.trim()) fail('invalid', 'Koşulların değeri boş olamaz.');
+    }
+    for (const a of rule.actions) {
+      if (a.kind === 'move') {
+        if (!rule.accountId) fail('invalid', 'Klasöre taşımak için kurala bir hesap seç.');
+        if (!state.mailboxes.some((b) => b.id === a.mailboxId && b.accountId === rule.accountId)) fail('invalid', 'Taşınacak klasör bu hesapta yok.');
+      }
+      if (a.kind === 'forward' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(a.to.trim())) fail('invalid', 'İletilecek adres geçerli bir e-posta adresi olmalı.');
+    }
+    return { ...rule, name };
   }
 
   const commands: { [K in CommandName]: (args: CommandArgs<K>) => CommandResult<K> | Promise<CommandResult<K>> } = {
@@ -240,6 +391,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
         .filter((m) => inView(m, query.view))
         .filter((m) => !query.accountId || m.accountId === query.accountId)
         .filter((m) => !query.category || m.category === query.category)
+        .filter((m) => (query.only === 'unread' ? m.unread : query.only === 'starred' ? m.starred : query.only === 'attachments' ? m.hasAttachments : true))
         .sort((a, b) => b.date - a.date || b.id - a.id);
       if (query.cursor) {
         const [d, i] = query.cursor.split(':').map(Number);
@@ -271,19 +423,51 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       emit(EVENTS.changed, { mailboxIds: [] });
       return null;
     },
+    messages_move_to: ({ ids, mailboxId }) => {
+      const b = state.mailboxes.find((x) => x.id === mailboxId);
+      if (!b) fail('notFound', 'Klasör bulunamadı; sunucuda silinmiş ya da yeniden adlandırılmış olabilir.');
+      for (const id of ids) if (find(id).accountId !== b.accountId) fail('invalid', 'Posta yalnız kendi hesabının klasörlerine taşınabilir.');
+      for (const id of ids) {
+        const m = find(id);
+        m.mailboxId = b.id;
+        m.snoozedUntil = null;
+      }
+      emit(EVENTS.changed, { mailboxIds: [] });
+      return null;
+    },
     messages_snooze: ({ ids, until }) => {
       for (const id of ids) find(id).snoozedUntil = until;
       emit(EVENTS.changed, { mailboxIds: [] });
       return null;
     },
     search: ({ q, limit }) => {
-      const needle = lower(q.trim());
-      if (!needle) return [];
+      // Arka uçtaki işleçlerin sade karşılığı: from:, to:, konu:, has:ek, is:okunmamış, is:yıldızlı, in:.
+      const tests: ((m: MessageDetail) => boolean)[] = [];
+      let inBox = false;
+      const free = q.replace(/(\S+?):("([^"]*)"|\S+)/g, (all, op: string, _v: string, quoted: string | undefined) => {
+        const v = lower(quoted ?? _v);
+        const o = lower(op);
+        if (o === 'from') tests.push((m) => lower(`${m.from.name ?? ''} ${m.from.email}`).includes(v));
+        else if (o === 'to') tests.push((m) => [...m.to, ...m.cc].some((a) => lower(`${a.name ?? ''} ${a.email}`).includes(v)));
+        else if (o === 'subject' || o === 'konu') tests.push((m) => lower(m.subject).includes(v));
+        else if (o === 'has' && ['ek', 'attachment'].includes(v)) tests.push((m) => m.hasAttachments);
+        else if (o === 'is' && ['okunmamış', 'okunmamis', 'unread'].includes(v)) tests.push((m) => m.unread);
+        else if (o === 'is' && ['yıldızlı', 'yildizli', 'starred'].includes(v)) tests.push((m) => m.starred);
+        else if (o === 'in') {
+          inBox = true;
+          tests.push((m) => {
+            const b = state.mailboxes.find((x) => x.id === m.mailboxId);
+            return !!b && (lower(b.name).includes(v) || b.role === v);
+          });
+        } else return all;
+        return ' ';
+      });
+      const needle = lower(free.trim());
+      if (!needle && !tests.length) return [];
       return state.messages
-        .filter((m) => roleOf(m.mailboxId) !== 'trash')
-        .filter((m) =>
-          [m.subject, m.from.name ?? '', m.from.email, m.bodyText ?? ''].some((f) => lower(f).includes(needle)),
-        )
+        .filter((m) => inBox || roleOf(m.mailboxId) !== 'trash')
+        .filter((m) => tests.every((f) => f(m)))
+        .filter((m) => !needle || [m.subject, m.from.name ?? '', m.from.email, m.bodyText ?? ''].some((f) => lower(f).includes(needle)))
         .sort((a, b) => b.date - a.date)
         .slice(0, limit)
         .map(summary);
@@ -305,37 +489,22 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       const id = `out-${nextId++}`;
       const sendAt = msg.sendAt ?? now() + state.settings.undoSendSeconds * 1000;
       if (msg.draftId != null) state.messages = state.messages.filter((m) => m.id !== msg.draftId);
-      const timer = setTimeout(
-        () => {
-          outbox.delete(id);
-          const account = state.accounts.find((a) => a.id === msg.accountId);
-          if (account) {
-            state.messages.push({
-              id: nextId++, accountId: account.id, mailboxId: boxFor(account.id, 'sent'), threadId: `out-${id}`,
-              from: { name: account.displayName, email: account.email }, to: msg.to, subject: msg.subject,
-              snippet: msg.bodyText.replace(/\s+/g, ' ').slice(0, 200), date: now(), unread: false, starred: false,
-              hasAttachments: msg.attachments.length > 0, category: 'people', snoozedUntil: null, cc: msg.cc, bcc: [], replyTo: [],
-              messageIdHeader: null, references: [], bodyText: msg.bodyText, bodyHtml: null, hasRemoteContent: false,
-              remoteAllowed: false, attachments: [], thread: [],
-            });
-          }
-          emit(EVENTS.outbox, { id, ok: true, error: null });
-        },
-        Math.max(0, sendAt - now()),
-      );
-      outbox.set(id, timer);
+      const item: ScheduledItem = { id, accountId: msg.accountId, sendAt, to: msg.to, subject: msg.subject, error: null };
+      scheduled.set(id, { item, msg, timer: setTimeout(() => deliver(id), Math.max(0, sendAt - now())) });
+      if (msg.sendAt) emit(EVENTS.changed, { mailboxIds: [] });
       return { id, sendAt };
     },
     send_cancel: ({ id }) => {
-      const t = outbox.get(id);
-      if (!t) return false;
-      clearTimeout(t);
-      outbox.delete(id);
+      const entry = scheduled.get(id);
+      if (!entry) return false;
+      clearTimeout(entry.timer);
+      scheduled.delete(id);
+      emit(EVENTS.changed, { mailboxIds: [] });
       return true;
     },
     settings_get: () => structuredClone(state.settings),
     settings_set: ({ settings }) => {
-      state.settings = { ...settings };
+      state.settings = { ...settings, templates: cleanTemplates(settings.templates ?? []), quickReplies: cleanQuickReplies(settings.quickReplies) };
       if (opts.persist) {
         try {
           localStorage.setItem(SETTINGS_KEY, JSON.stringify(state.settings));
@@ -397,9 +566,155 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     account_update: ({ id, update }) => {
       const a = state.accounts.find((x) => x.id === id);
       if (!a) fail('notFound', 'Hesap bulunamadı.');
-      Object.assign(a, update);
+      const signatures = cleanSignatures(update.signatures);
+      // Yeni imzalar kimliksiz gelir: varsayılan seçimi listedeki sıraya göre eşle.
+      const resolve = (want: string | null) => {
+        if (want == null) return null;
+        const i = update.signatures.findIndex((x) => x.id === want);
+        return i >= 0 ? signatures[i].id : null;
+      };
+      Object.assign(a, update, { signatures, signatureNew: resolve(update.signatureNew), signatureReply: resolve(update.signatureReply) });
       emit(EVENTS.changed, { mailboxIds: [] });
       return structuredClone(a);
+    },
+    account_update_server: ({ id, update }) => {
+      const a = state.accounts.find((x) => x.id === id);
+      if (!a) fail('notFound', 'Hesap bulunamadı.');
+      if (a.kind !== 'imap' || a.auth !== 'password') {
+        fail('invalid', 'Bu hesabın sunucu ayarları değiştirilemez. Gerekirse hesabı kaldırıp yeniden ekle.');
+      }
+      for (const [cfg, what] of [[update.imap, 'Gelen posta'], [update.smtp, 'Giden posta']] as const) {
+        if (!cfg.host.trim() || !cfg.port || !cfg.username.trim()) fail('invalid', `${what} sunucu adı, kapı ve kullanıcı adı boş olamaz.`);
+      }
+      const moved = !sameServer(a.imap, update.imap) || !sameServer(a.smtp, update.smtp);
+      if (moved && !update.password) fail('invalid', 'Sunucu değişince parolayı yeniden yaz.');
+      if (update.password === 'yanlis') fail('auth', 'Sunucu parolayı kabul etmedi. Parolayı ya da uygulama parolasını kontrol et.');
+      for (const cfg of [update.imap, update.smtp]) {
+        const pinned = state.settings.trustedCerts.some((c) => c.host === cfg.host && c.port === cfg.port);
+        if (cfg.host.includes('kendinden') && !pinned) fail('untrusted', `${cfg.host} sunucusunun sertifikası güvenilir bir kuruluşça imzalanmamış.`);
+      }
+      a.imap = { ...update.imap, host: update.imap.host.trim(), username: update.imap.username.trim() };
+      a.smtp = { ...update.smtp, host: update.smtp.host.trim(), username: update.smtp.username.trim() };
+      emit(EVENTS.changed, { mailboxIds: [] });
+      return structuredClone(a);
+    },
+    account_set_password: ({ id, password }) => {
+      const a = state.accounts.find((x) => x.id === id);
+      if (!a) fail('notFound', 'Hesap bulunamadı.');
+      if (a.auth !== 'password') fail('invalid', 'Bu hesap tarayıcıyla giriş kullanıyor; parolası yok.');
+      if (!password) fail('invalid', 'Parola boş olamaz.');
+      if (password === 'yanlis') fail('auth', 'Sunucu parolayı kabul etmedi. Parolayı ya da uygulama parolasını kontrol et.');
+      return null;
+    },
+    mailbox_set_hidden: ({ id, hidden }) => {
+      const b = state.mailboxes.find((x) => x.id === id);
+      if (!b) fail('notFound', 'Klasör bulunamadı.');
+      if (b.role === 'inbox' && hidden) fail('invalid', 'Gelen kutusu gizlenemez.');
+      b.hidden = hidden;
+      emit(EVENTS.changed, { mailboxIds: [id] });
+      return null;
+    },
+    mailbox_set_role: ({ id, role }) => {
+      const b = state.mailboxes.find((x) => x.id === id);
+      if (!b) fail('notFound', 'Klasör bulunamadı.');
+      if (role === ('inbox' as string) || role === ('other' as string)) fail('invalid', 'Bu görev bir klasöre atanamaz.');
+      if (b.role === 'inbox') fail('invalid', 'Gelen kutusunun görevi değiştirilemez.');
+      for (const o of state.mailboxes) if (o.accountId === b.accountId && o.role === role) o.role = 'other';
+      b.role = role;
+      emit(EVENTS.changed, { mailboxIds: [] });
+      return null;
+    },
+    mailbox_roles_reset: ({ accountId }) => {
+      for (const b of state.mailboxes) if (b.accountId === accountId) b.role = autoRole.get(b.id) ?? 'other';
+      emit(EVENTS.changed, { mailboxIds: [] });
+      return null;
+    },
+    rules_list: () => structuredClone(state.rules),
+    rule_save: ({ rule }) => {
+      if (!rule.id && state.rules.length >= 200) fail('invalid', 'En çok 200 kural olabilir. Kullanmadıklarını sil.');
+      const clean = checkRule(rule);
+      if (clean.id) {
+        const i = state.rules.findIndex((r) => r.id === clean.id);
+        if (i < 0) fail('notFound', 'Kural bulunamadı; silinmiş olabilir.');
+        state.rules[i] = clean;
+      } else {
+        clean.id = newId('kural');
+        state.rules.push(clean);
+      }
+      return structuredClone(clean);
+    },
+    rule_delete: ({ id }) => {
+      state.rules = state.rules.filter((r) => r.id !== id);
+      return null;
+    },
+    rules_reorder: ({ ids }) => {
+      const order = new Map(ids.map((id, i) => [id, i]));
+      state.rules.sort((a, b) => (order.get(a.id) ?? 1e9) - (order.get(b.id) ?? 1e9));
+      return null;
+    },
+    rule_run: ({ id }) => {
+      const rule = state.rules.find((r) => r.id === id);
+      if (!rule) fail('notFound', 'Kural bulunamadı; silinmiş olabilir.');
+      let n = 0;
+      for (const m of state.messages) {
+        if (roleOf(m.mailboxId) !== 'inbox' || (rule.accountId && m.accountId !== rule.accountId)) continue;
+        const hit = rule.match === 'all' ? rule.conditions.every((c) => matches(m, c)) : rule.conditions.some((c) => matches(m, c));
+        if (!hit) continue;
+        n++;
+        for (const a of rule.actions) {
+          if (a.kind === 'markRead') m.unread = false;
+          else if (a.kind === 'star') m.starred = true;
+          else if (a.kind === 'archive') m.mailboxId = boxFor(m.accountId, 'archive');
+          else if (a.kind === 'trash') m.mailboxId = boxFor(m.accountId, 'trash');
+          else if (a.kind === 'move') m.mailboxId = a.mailboxId;
+        }
+      }
+      emit(EVENTS.changed, { mailboxIds: [] });
+      return n;
+    },
+    outbox_list: () => [...scheduled.values()].map((e) => e.item).sort((a, b) => a.sendAt - b.sendAt),
+    outbox_send_now: ({ id }) => {
+      if (!scheduled.has(id)) fail('notFound', 'Bu gönderim artık giden kutusunda değil.');
+      deliver(id);
+      return null;
+    },
+    outbox_to_draft: ({ id }) => {
+      const entry = scheduled.get(id);
+      if (!entry) fail('notFound', 'Bu gönderim artık giden kutusunda değil.');
+      clearTimeout(entry.timer);
+      scheduled.delete(id);
+      const draftId = nextId++;
+      state.messages.push(draftMessage({ ...entry.msg, sendAt: null }, draftId));
+      emit(EVENTS.changed, { mailboxIds: [] });
+      return draftId;
+    },
+    unsubscribe: ({ id }) => {
+      const u = find(id).unsubscribe;
+      if (!u) fail('notFound', 'Bu postada abonelikten çıkma bağlantısı yok.');
+      if (u.oneClick && u.url?.startsWith('https://')) return 'done';
+      if (u.mailto) return 'done';
+      if (u.url) return 'browser';
+      fail('notFound', 'Bu postada abonelikten çıkma bağlantısı yok.');
+    },
+    vacation_get: ({ accountId }) => {
+      const a = state.accounts.find((x) => x.id === accountId);
+      if (!a) fail('notFound', 'Hesap bulunamadı.');
+      if (a.kind !== 'jmap') return null;
+      return structuredClone(vacations.get(accountId) ?? { enabled: false, fromDate: null, toDate: null, subject: '', body: '' });
+    },
+    vacation_set: ({ accountId, vacation }) => {
+      const a = state.accounts.find((x) => x.id === accountId);
+      if (!a) fail('notFound', 'Hesap bulunamadı.');
+      if (a.kind !== 'jmap') fail('invalid', 'Bu hesabın sunucusu otomatik yanıtı desteklemiyor.');
+      if (vacation.fromDate != null && vacation.toDate != null && vacation.toDate < vacation.fromDate) fail('invalid', 'Bitiş tarihi başlangıçtan önce olamaz.');
+      const v = { ...vacation, subject: vacation.subject.replace(/\s+/g, ' ').trim().slice(0, 300), body: vacation.body.slice(0, 20_000) };
+      vacations.set(accountId, v);
+      return structuredClone(v);
+    },
+    quick_replies_set: ({ replies }) => {
+      state.settings = { ...state.settings, quickReplies: cleanQuickReplies(replies) };
+      emit(EVENTS.settings, structuredClone(state.settings));
+      return structuredClone(state.settings);
     },
     cert_inspect: ({ host, port }) => {
       const pinned = state.settings.trustedCerts.some((c) => c.host === host && c.port === port);

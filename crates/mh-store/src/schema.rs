@@ -165,6 +165,24 @@ const MIGRATIONS: &[&str] = &[
         UNIQUE (account_id, jmap_id)
     );
     "#,
+    // 6: klasör ağacı, gizleme ve elle atanan roller; hesap başına bildirim.
+    r#"
+    -- Seçilebilir en yakın üst klasörün yerel kimliği; kökteyse NULL.
+    ALTER TABLE mailboxes ADD COLUMN parent_id TEXT;
+    -- Kenar çubuğunda gizli (1) ya da görünür (0). Önceki sürümden kalan
+    -- kutularda -1: "henüz karar verilmedi"; varsayılan bir sonraki
+    -- listelemede (IMAP LIST, JMAP Mailbox/get) yazılır, sonra hiç değişmez.
+    ALTER TABLE mailboxes ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;
+    UPDATE mailboxes SET hidden = -1;
+    -- Kullanıcının elle atadığı rol; NULL = sunucudan bulunan (otomatik).
+    -- `role` sütunu etkin roldür.
+    ALTER TABLE mailboxes ADD COLUMN role_user TEXT;
+    -- Bu hesabın yeni postaları için kart ve bildirim gösterilir.
+    ALTER TABLE accounts ADD COLUMN notify INTEGER NOT NULL DEFAULT 1;
+    -- JMAP: izlenen kutular genişledi (görünen klasörler ve Gereksiz); var
+    -- olan postaları da alınsın diye sonraki eşitleme baştan yapılır.
+    UPDATE jmap_accounts SET email_state = NULL, mailbox_state = NULL;
+    "#,
 ];
 
 /// Dallar ayrı geliştirilirken ana dalın ara sürümleri bazı geçişleri yer
@@ -232,5 +250,63 @@ mod tests {
         conn.prepare("SELECT nosync FROM mailboxes").unwrap();
         // İkinci açılışta yeniden uygulanmaz (sütunlar zaten var).
         migrate(&mut conn).unwrap();
+    }
+
+    #[test]
+    fn klasor_agaci_gecisi_eski_kutulari_karasiz_birakir() {
+        // 5. sürümde bir hesap ve kutu; 6. geçiş sonradan uygulanır.
+        let mut conn = Connection::open_in_memory().unwrap();
+        for sql in &MIGRATIONS[..5] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 5i64).unwrap();
+        conn.execute_batch(
+            "INSERT INTO accounts (id, name, email, display_name, color, kind, created_at)
+             VALUES ('a', 'İş', 'a@ornek.com', 'A', '#4C6FD8', 'imap', 1);
+             INSERT INTO mailboxes (id, account_id, path, name, role)
+             VALUES ('a:Projeler', 'a', 'Projeler', 'Projeler', 'other');
+             INSERT INTO jmap_accounts (account_id, username, email_state, mailbox_state)
+             VALUES ('a', 'furkan', 'e9', 'm3');",
+        )
+        .unwrap();
+        migrate(&mut conn).unwrap();
+        let (parent, hidden, role_user): (Option<String>, i64, Option<String>) = conn
+            .query_row(
+                "SELECT parent_id, hidden, role_user FROM mailboxes WHERE id = 'a:Projeler'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!((parent, hidden, role_user), (None, -1, None));
+        let notify: bool = conn
+            .query_row("SELECT notify FROM accounts WHERE id = 'a'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert!(notify, "var olan hesaplarda bildirim açık");
+        let jmap: (Option<String>, Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT username, email_state, mailbox_state FROM jmap_accounts WHERE account_id = 'a'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            jmap,
+            (Some("furkan".into()), None, None),
+            "JMAP baştan eşitlenir"
+        );
+        // Yeni kutu karar verilmiş (görünür) olarak eklenir.
+        conn.execute(
+            "INSERT INTO mailboxes (id, account_id, path, name, role) VALUES ('a:X', 'a', 'X', 'X', 'other')",
+            [],
+        )
+        .unwrap();
+        let hidden: i64 = conn
+            .query_row("SELECT hidden FROM mailboxes WHERE id = 'a:X'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(hidden, 0);
     }
 }

@@ -43,6 +43,12 @@ fn main() {
         "account_add_oauth",
         "cert_inspect",
         "cert_trust",
+        "account_update_server",
+        "account_set_password",
+        "mailbox_set_hidden",
+        "mailbox_set_role",
+        "mailbox_roles_reset",
+        "quick_replies_set",
     ];
     tauri_build::try_build(
         tauri_build::Attributes::new()

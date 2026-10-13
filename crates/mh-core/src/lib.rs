@@ -79,6 +79,13 @@ pub struct Account {
     pub created_at: Millis,
     #[serde(default)]
     pub auth: AuthKind,
+    /// Bu hesabın yeni postaları için kart ve bildirim gösterilir.
+    #[serde(default = "yes")]
+    pub notify: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 /// Hesap ekleme isteği. `password` yalnız bir kez kullanılır ve anahtar
@@ -167,6 +174,29 @@ pub struct AccountUpdate {
     pub display_name: String,
     pub color: String,
     pub signature: Option<String>,
+    #[serde(default = "yes")]
+    pub notify: bool,
+}
+
+/// Parolalı IMAP hesabının sunucu ayarları. Sunucu adı, kapı ya da kullanıcı
+/// adı değişiyorsa `password` zorunludur: kayıtlı parola yeni bir sunucuya
+/// kendiliğinden gönderilmez. `Debug` çıktısında parola gizlenir.
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerUpdate {
+    pub imap: ServerConfig,
+    pub smtp: ServerConfig,
+    pub password: Option<String>,
+}
+
+impl std::fmt::Debug for ServerUpdate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ServerUpdate")
+            .field("imap", &self.imap)
+            .field("smtp", &self.smtp)
+            .field("password", &self.password.as_ref().map(|_| "***"))
+            .finish()
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -225,6 +255,20 @@ pub struct Mailbox {
     pub role: MailboxRole,
     pub unread: u32,
     pub total: u32,
+    /// Üst klasörün kimliği; kökteyse (ya da üstü seçilemeyen bir düğümse) `None`.
+    #[serde(default)]
+    pub parent_id: Option<String>,
+    /// Kenar çubuğunda gizli. Gizli özel klasör eşitlenmez; rol klasörü
+    /// eşitlenmeye devam eder.
+    #[serde(default)]
+    pub hidden: bool,
+}
+
+impl MailboxRole {
+    /// Elle bir klasöre atanabilen roller (gelen kutusu ve "diğer" dışında).
+    pub fn is_special(self) -> bool {
+        !matches!(self, MailboxRole::Inbox | MailboxRole::Other)
+    }
 }
 
 // -------------------------------------------------------------------- postalar
@@ -537,7 +581,15 @@ pub struct Settings {
     pub auto_update: bool,
     /// Kullanıcının onayladığı sertifikalar (sabitlenmiş SHA-256 parmak izi).
     pub trusted_certs: Vec<TrustedCert>,
+    /// Hızlı yanıt düğmeleri; `None` ise dile göre varsayılanlar.
+    pub quick_replies: Option<Vec<String>>,
+    /// Koyu temada kendi zemini olmayan postalar koyu zeminde gösterilir.
+    pub dark_mail: bool,
 }
+
+/// Hızlı yanıt sınırları: en çok bu kadar düğme, her biri en çok bu kadar karakter.
+pub const QUICK_REPLIES_MAX: usize = 8;
+pub const QUICK_REPLY_CHARS: usize = 120;
 
 /// Kullanıcının elle güvendiği sunucu sertifikası.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -592,6 +644,8 @@ impl Default for Settings {
             remote_allow: Vec::new(),
             auto_update: true,
             trusted_certs: Vec::new(),
+            quick_replies: None,
+            dark_mail: true,
         }
     }
 }

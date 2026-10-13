@@ -5,10 +5,26 @@
   import FileBadge from '../../lib/ui/FileBadge.svelte';
   import Icon from '../../lib/ui/Icon.svelte';
   import { showToast } from '../../lib/ui/toast.svelte';
+  import { flatten, folderLabel, folderTree } from '../../lib/mail/folders';
   import MailBody from '../../lib/mail/MailBody.svelte';
+  import Menu, { type MenuItem } from '../../lib/ui/Menu.svelte';
   import SnoozeMenu from '../../lib/mail/SnoozeMenu.svelte';
   import { displayName, fileSize, foreignReplyDomains, replyTargets } from '../../lib/util/format';
-  import { allowRemote, mail, moveTo, select, selectedIds, sendQuickReply, setUnread, snooze, toggleStar } from '../../lib/stores/mail.svelte';
+  import {
+    allowRemote,
+    blockSender,
+    mail,
+    moveTo,
+    moveToFolder,
+    newRuleFrom,
+    select,
+    selectedIds,
+    sendQuickReply,
+    setUnread,
+    snooze,
+    toggleStar,
+    unsubscribe,
+  } from '../../lib/stores/mail.svelte';
 
   let reply = $state('');
   let sending = $state(false);
@@ -66,6 +82,58 @@
     }
   }
 
+  let menu = $state<{ at: { x: number; y: number }; title?: string; items: MenuItem[] } | null>(null);
+
+  function anchorOf(e: MouseEvent) {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    return { x: r.right - 260, y: r.bottom + 4 };
+  }
+
+  function moveMenu(e: MouseEvent) {
+    if (!d) return;
+    const here = d.mailboxId;
+    const nodes = flatten(folderTree(mail.mailboxes, d.accountId, true)).filter((n) => n.mailbox.id !== here && n.mailbox.role !== 'drafts');
+    menu = {
+      at: anchorOf(e),
+      title: t('read.moveTo'),
+      items: nodes.map((n) => ({
+        label: `${'  '.repeat(n.depth)}${folderLabel(n.mailbox)}`,
+        icon: 'folder' as const,
+        onclick: () => void moveToFolder(selectedIds(), n.mailbox, folderLabel(n.mailbox)),
+      })),
+    };
+  }
+
+  function moreMenu(e: MouseEvent) {
+    if (!d) return;
+    const msg = d;
+    const sender = msg.from.email;
+    menu = {
+      at: anchorOf(e),
+      items: [
+        { label: t('act.markUnread'), icon: 'mail', hint: 'U', onclick: () => void setUnread([msg.id], true) },
+        { label: t('read.openQuick'), icon: 'external', onclick: () => void call('open_quick', { id: msg.id }) },
+        ...(msg.unsubscribe ? [{ label: t('read.unsubscribe'), icon: 'unsubscribe' as const, onclick: () => void unsubscribe(msg) }] : []),
+        {
+          label: t('read.ruleFromSender'),
+          icon: 'rules',
+          onclick: () =>
+            newRuleFrom({
+              id: '',
+              name: t('read.ruleName', { name: displayName(msg.from) }),
+              enabled: true,
+              accountId: msg.accountId,
+              match: 'all',
+              conditions: [{ kind: 'from', op: 'is', value: sender }],
+              actions: [{ kind: 'archive' }],
+              stop: false,
+            }),
+        },
+        { label: t('read.block', { email: sender }), icon: 'block', danger: true, onclick: () => void blockSender(msg.accountId, sender) },
+      ],
+    };
+  }
+
   function compose(mode: 'replyAll' | 'forward') {
     if (d) void call('open_compose', { prefill: { mode, messageId: d.id } });
   }
@@ -94,6 +162,9 @@
       <button class="btn-icon" aria-label={t('act.delete')} title="{t('act.delete')} · Del" onclick={() => moveTo(selectedIds(), 'trash')}>
         <Icon name="trash" />
       </button>
+      <button class="btn-icon" aria-label={t('read.moveTo')} title={t('read.moveTo')} aria-haspopup="menu" onclick={moveMenu}>
+        <Icon name="folder" />
+      </button>
       <button class="btn-icon" aria-label={t('act.markUnread')} title="{t('act.markUnread')} · U" onclick={() => setUnread([d.id], true)}>
         <Icon name="mail" />
       </button>
@@ -105,8 +176,8 @@
         <button class="btn-soft" title="{t('act.replyAllLong')} · A" onclick={() => compose('replyAll')}><Icon name="replyAll" size={16} />{t('act.replyAll')}</button>
         <button class="btn-soft" title="{t('act.forward')} · F" onclick={() => compose('forward')}><Icon name="forward" size={16} />{t('act.forward')}</button>
       {/if}
-      <button class="btn-icon" aria-label={t('act.openInApp')} title={t('quick.title')} onclick={() => call('open_quick', { id: d.id })}>
-        <Icon name="external" />
+      <button class="btn-icon" aria-label={t('read.more')} title={t('read.more')} aria-haspopup="menu" onclick={moreMenu}>
+        <Icon name="more" />
       </button>
     </div>
 
@@ -142,6 +213,14 @@
               <span class:star={d.starred}><Icon name="star" filled={d.starred} /></span>
             </button>
           </div>
+
+          {#if d.unsubscribe}
+            <div class="unsub">
+              <Icon name="unsubscribe" size={16} />
+              <span class="grow">{t('read.listMail')}</span>
+              <button class="link small" onclick={() => d && unsubscribe(d)}>{t('read.unsubscribe')}</button>
+            </div>
+          {/if}
 
           {#if d.hasRemoteContent && !d.remoteAllowed}
             <div class="remote">
@@ -218,6 +297,8 @@
     </div>
   {/if}
 </main>
+
+{#if menu}<Menu at={menu.at} title={menu.title} items={menu.items} onclose={() => (menu = null)} />{/if}
 
 <style>
   .reply-warn {
@@ -349,6 +430,23 @@
   .star {
     display: inline-flex;
     color: var(--amber);
+  }
+
+  .unsub {
+    margin-top: 18px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border-radius: var(--r-row);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    color: var(--ink-2);
+    font-size: var(--fs-meta);
+  }
+
+  .unsub + .remote {
+    margin-top: 8px;
   }
 
   .remote {

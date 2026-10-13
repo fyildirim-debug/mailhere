@@ -21,7 +21,7 @@ const MAGIC: &[u8] = b"SQLite format 3";
 /// Hesap, kutu ve işaretli bir posta yazar.
 fn fill(s: &Store) {
     s.insert_account(&account("a")).unwrap();
-    s.upsert_mailbox("a", "INBOX", "INBOX", MailboxRole::Inbox)
+    s.upsert_mailbox("a", "INBOX", "INBOX", MailboxRole::Inbox, None, false)
         .unwrap();
     let mut m = msg("a", "a:INBOX", SUBJECT, 10);
     m.body_text = Some(format!("Bütçe {BODY} ekte."));

@@ -94,6 +94,36 @@ pub async fn send_with(cfg: &ServerConfig, creds: &Credentials, message: Message
     }
 }
 
+/// Giden posta sunucusuna bağlanır ve parolayla kimlik doğrular; posta
+/// göndermez (sunucu ayarı kaydedilmeden önceki deneme). Sertifika güvenilir
+/// değilse `ErrorCode::Untrusted`, parola reddedilirse `ErrorCode::Auth` döner.
+/// Kullanıcı adı boşsa yalnız bağlantı ve EHLO denenir.
+pub async fn test_login(cfg: &ServerConfig, password: &str) -> AppResult<()> {
+    let host = cfg.host.trim();
+    let mut conn = crate::smtp::open(cfg).await?;
+    let user = cfg.username.trim().to_owned();
+    let work = async {
+        if !user.is_empty() {
+            let c = SmtpCredentials::new(user, password.to_owned());
+            conn.auth(DEFAULT_MECHANISMS, &c).await?;
+        }
+        Ok::<_, lettre::transport::smtp::Error>(())
+    };
+    let res = tokio::time::timeout(Duration::from_secs(60), work).await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), conn.quit()).await;
+    match res {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(e)) => {
+            tracing::warn!(host, error = %e, "SMTP kimlik doğrulaması başarısız");
+            Err(map_err(&e, cfg, false))
+        }
+        Err(_) => Err(AppError::new(
+            ErrorCode::Network,
+            "Giden posta sunucusu zamanında yanıt vermedi. Bağlantını denetleyip yeniden dene.",
+        )),
+    }
+}
+
 /// Gönderilen postayı kendisi "Gönderilmiş" kutusuna saklayan sunucular
 /// (Gmail, Outlook / Office 365): IMAP'e ayrıca eklenmez, yoksa iki kopya olur.
 pub fn server_saves_sent(cfg: &ServerConfig) -> bool {
@@ -216,6 +246,7 @@ pub(crate) mod tests {
             signature: None,
             created_at: 0,
             auth: Default::default(),
+            notify: true,
         };
         let msg = OutgoingMessage {
             account_id: "a".into(),
@@ -293,6 +324,65 @@ pub(crate) mod tests {
         let seen = server.await.unwrap();
         assert!(seen.commands.iter().any(|c| c.starts_with("AUTH PLAIN")));
         assert!(seen.data.contains("Subject: Cumartesi"));
+    }
+
+    #[tokio::test]
+    async fn giris_denemesi_posta_gondermez() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(fake_smtp(listener));
+        let cfg = ServerConfig {
+            host: "127.0.0.1".into(),
+            port,
+            security: Security::None,
+            username: "furkan".into(),
+        };
+        test_login(&cfg, "gizli-parola").await.unwrap();
+        let seen = server.await.unwrap();
+        assert!(seen.commands.iter().any(|c| c.starts_with("AUTH PLAIN")));
+        assert!(
+            !seen
+                .commands
+                .iter()
+                .any(|c| c.starts_with("MAIL") || c.starts_with("DATA")),
+            "{seen:?}"
+        );
+        assert!(seen.data.is_empty());
+    }
+
+    #[tokio::test]
+    async fn reddedilen_parola_kimlik_hatasi() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let (sock, _) = listener.accept().await.unwrap();
+            let (r, mut w) = tokio::io::split(sock);
+            let mut lines = BufReader::new(r).lines();
+            w.write_all(b"220 sahte ESMTP\r\n").await.unwrap();
+            while let Ok(Some(line)) = lines.next_line().await {
+                let cmd = line.to_ascii_uppercase();
+                let reply: &[u8] = if cmd.starts_with("EHLO") {
+                    b"250-sahte\r\n250 AUTH PLAIN LOGIN\r\n"
+                } else if cmd.starts_with("AUTH") {
+                    b"535 5.7.8 kimlik reddedildi\r\n"
+                } else if cmd.starts_with("QUIT") {
+                    let _ = w.write_all(b"221 hosca kal\r\n").await;
+                    break;
+                } else {
+                    b"250 tamam\r\n"
+                };
+                w.write_all(reply).await.unwrap();
+            }
+        });
+        let cfg = ServerConfig {
+            host: "127.0.0.1".into(),
+            port,
+            security: Security::None,
+            username: "furkan".into(),
+        };
+        let err = test_login(&cfg, "yanlis-parola").await.unwrap_err();
+        assert_eq!(err.code, ErrorCode::Auth, "{err:?}");
+        assert!(!err.message.contains("yanlis-parola"));
     }
 
     /// Düz metin satırı (arabelleğe fazladan bayt almadan).

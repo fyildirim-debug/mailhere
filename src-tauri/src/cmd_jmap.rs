@@ -79,6 +79,7 @@ pub async fn account_add_jmap(
         signature: None,
         created_at: now_ms(),
         auth: Default::default(),
+        notify: true,
     };
     state.store.insert_account(&account)?;
     state.store.set_jmap_username(&account.id, &username)?;

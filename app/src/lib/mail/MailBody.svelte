@@ -1,7 +1,11 @@
 <script lang="ts">
   // Posta gövdesi. HTML betiksiz, CSP'li bir çerçevede; düz metin bağlantıları güvenle ayrılmış halde.
+  // Koyu temada kendi zemini olmayan HTML posta koyu zeminde gösterilir; kendi
+  // tasarımı (zemin rengi ya da görseli) olan posta açık kağıtta kalır.
   import { openExternal } from '../api';
+  import { resolvedTheme, settings } from '../stores/settings.svelte';
   import { linkify } from '../util/format';
+  import { adaptDark, hasOwnBackground } from './darkmail';
 
   interface Props {
     text: string | null;
@@ -13,18 +17,44 @@
 
   let frame = $state<HTMLIFrameElement>();
   let height = $state(120);
+  /** Koyu zeminde mi gösteriliyor (kendi zemini olmayan posta)? */
+  let darkPaper = $state(false);
+  /** Uyarlama bitene kadar çerçeve görünmez (beyaz–koyu yanıp sönmesin). */
+  let shown = $state(false);
 
-  const srcdoc = $derived(
-    html == null
-      ? ''
-      : `<!doctype html><html><head><meta charset="utf-8">` +
-          `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: cid:${remoteAllowed ? ' https: http:' : ''}; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'">` +
-          // İzin verilen uzak görsellerde bile uygulamayı ele veren Referer gitmesin.
-          `<meta name="referrer" content="no-referrer">` +
-          `<style>html,body{margin:0;background:#fff;color:#15171c}body{padding:20px 22px;font:15px/1.6 'Geist Variable',ui-sans-serif,system-ui,sans-serif;word-wrap:break-word;overflow-wrap:anywhere}` +
-          `img{max-width:100%;height:auto}img[data-mh-src]:not([src]){background:#eef0f4;border-radius:6px}table{max-width:100%!important}a{color:#3a47b8}pre{white-space:pre-wrap}blockquote{margin:0 0 0 4px;padding-left:12px;border-left:1px solid #d2d6de;color:#4f5562}</style>` +
-          `</head><body>${html}</body></html>`,
-  );
+  const wantDark = $derived(resolvedTheme(settings.value) === 'dark' && settings.value.darkMail);
+
+  /** Çerçeve kendi belgesi olduğundan jetonların o anki değerleri aktarılır. */
+  function token(name: string): string {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+
+  const srcdoc = $derived.by(() => {
+    if (html == null) return '';
+    const dark = wantDark;
+    const paper = dark ? token('--paper') : token('--mail-paper');
+    const ink = dark ? token('--ink') : '#15171c';
+    const ink2 = dark ? token('--ink-2') : '#4f5562';
+    const link = dark ? token('--accent-text') : '#3a47b8';
+    const rule = dark ? token('--line-strong') : '#d2d6de';
+    const placeholder = dark ? token('--raised') : '#eef0f4';
+    return (
+      `<!doctype html><html><head><meta charset="utf-8">` +
+      `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: cid:${remoteAllowed ? ' https: http:' : ''}; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'">` +
+      // İzin verilen uzak görsellerde bile uygulamayı ele veren Referer gitmesin.
+      `<meta name="referrer" content="no-referrer">` +
+      `<style>:root{color-scheme:${dark ? 'dark' : 'light'}}html,body{margin:0;background:${paper};color:${ink}}body{padding:20px 22px;font:15px/1.6 'Geist Variable',ui-sans-serif,system-ui,sans-serif;word-wrap:break-word;overflow-wrap:anywhere}` +
+      `img{max-width:100%;height:auto}img[data-mh-src]:not([src]){background:${placeholder};border-radius:6px}table{max-width:100%!important}a{color:${link}}pre{white-space:pre-wrap}blockquote{margin:0 0 0 4px;padding-left:12px;border-left:1px solid ${rule};color:${ink2}}` +
+      `html.mh-light,html.mh-light body{background:${token('--mail-paper')};color:#15171c;color-scheme:light}html.mh-light a{color:#3a47b8}html.mh-light blockquote{border-left-color:#d2d6de;color:#4f5562}</style>` +
+      `</head><body>${html}</body></html>`
+    );
+  });
+
+  // Yeni posta ya da tema: uyarlama yeniden yapılana kadar gizle.
+  $effect(() => {
+    void srcdoc;
+    shown = false;
+  });
 
   function measure() {
     const doc = frame?.contentDocument;
@@ -35,6 +65,17 @@
   function onLoad() {
     const doc = frame?.contentDocument;
     if (!doc) return;
+    darkPaper = false;
+    if (wantDark) {
+      if (hasOwnBackground(doc)) {
+        // Kendi tasarımı olan posta (bülten, fatura) açık kağıtta, olduğu gibi.
+        doc.documentElement.classList.add('mh-light');
+      } else {
+        adaptDark(doc, { ink: token('--ink'), ink2: token('--ink-2'), paper: token('--paper') });
+        darkPaper = true;
+      }
+    }
+    shown = true;
     measure();
     // Görseller geç yüklenebilir; birkaç kez yeniden ölç.
     doc.querySelectorAll('img').forEach((img) => img.addEventListener('load', measure));
@@ -58,7 +99,7 @@
 </script>
 
 {#if html != null}
-  <div class="paper">
+  <div class="paper" class:dark={darkPaper} class:pending={!shown}>
     <iframe
       bind:this={frame}
       title="posta"
@@ -91,13 +132,22 @@
     background: var(--mail-paper);
     overflow: hidden;
     box-shadow: 0 0 0 1px var(--line);
+    transition: opacity var(--t-fast);
+  }
+
+  .paper.dark {
+    background: var(--paper);
+  }
+
+  .paper.pending {
+    opacity: 0;
   }
 
   iframe {
     display: block;
     width: 100%;
     border: 0;
-    background: var(--mail-paper);
+    background: transparent;
   }
 
   .text {

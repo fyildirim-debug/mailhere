@@ -190,6 +190,7 @@ fn test_account(cfg: &ServerConfig) -> Account {
         signature: None,
         created_at: 0,
         auth: Default::default(),
+        notify: true,
     }
 }
 
@@ -452,7 +453,7 @@ async fn imap_yarida_kalan_esitleme_ve_geri_alma() {
     let store = Arc::new(Store::open_in_memory().unwrap());
     store.insert_account(&test_account(&cfg)).unwrap();
     let inbox_id = store
-        .upsert_mailbox("t", "INBOX", "INBOX", MailboxRole::Inbox)
+        .upsert_mailbox("t", "INBOX", "INBOX", MailboxRole::Inbox, None, false)
         .unwrap();
     let info = || store.mailbox(&inbox_id).unwrap().unwrap();
     let count = || store.local_uids(&inbox_id).unwrap().len();

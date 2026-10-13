@@ -15,7 +15,8 @@
   import MessageList from './MessageList.svelte';
   import Onboarding from './Onboarding.svelte';
   import Reader from './Reader.svelte';
-  import SettingsView from './SettingsView.svelte';
+  import ScheduledView from './ScheduledView.svelte';
+  import Settings from './settings/Settings.svelte';
   import Sidebar from './Sidebar.svelte';
 
   let reader = $state<ReturnType<typeof Reader>>();
@@ -118,7 +119,9 @@
       <!-- Tek örnek: hesap eklenince de aynı bileşen "Hazırsın" adımında kalır. -->
       {#if mail.ready}<Onboarding />{/if}
     {:else if mail.screen === 'settings'}
-      <SettingsView />
+      <Settings />
+    {:else if mail.screen === 'scheduled'}
+      <ScheduledView />
     {:else}
       <MessageList />
       <Reader bind:this={reader} />

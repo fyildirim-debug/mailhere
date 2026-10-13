@@ -1,17 +1,19 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { appWindow, call, EVENTS, on, toAppError, type Account, type MessageDetail } from '../../lib/api';
-  import { t, when, type MessageKey } from '../../lib/i18n/index.svelte';
+  import { t, when } from '../../lib/i18n/index.svelte';
   import Avatar from '../../lib/ui/Avatar.svelte';
   import FileBadge from '../../lib/ui/FileBadge.svelte';
   import Icon from '../../lib/ui/Icon.svelte';
   import Logo from '../../lib/ui/Logo.svelte';
   import WindowControls from '../../lib/ui/WindowControls.svelte';
   import MailBody from '../../lib/mail/MailBody.svelte';
+  import QuickRepliesEditor from '../../lib/mail/QuickRepliesEditor.svelte';
   import SnoozeMenu from '../../lib/mail/SnoozeMenu.svelte';
   import { baseSubject, displayName, fileSize, foreignReplyDomains, replyTargets } from '../../lib/util/format';
   import { locale } from '../../lib/i18n/index.svelte';
-  import { quoteFor } from '../../lib/stores/mail.svelte';
+  import { quoteFor, signatureFor } from '../../lib/stores/mail.svelte';
+  import { quickReplies, settings } from '../../lib/stores/settings.svelte';
 
   interface Props {
     id: number;
@@ -30,7 +32,8 @@
   let snoozeOpen = $state(false);
   let closeTimer: ReturnType<typeof setTimeout> | null = null;
 
-  const chips: MessageKey[] = ['quick.chip1', 'quick.chip2', 'quick.chip3'];
+  const chips = $derived(quickReplies(settings.value));
+  let editingChips = $state(false);
 
   onMount(() => {
     void load();
@@ -94,7 +97,8 @@
     sending = true;
     try {
       const text = reply;
-      const body = account?.signature ? `${text}\n\n${account.signature}` : text;
+      const sig = signatureFor(account ?? undefined, 'reply');
+      const body = sig ? `${text}\n\n${sig}` : text;
       const item = await call('send', {
         msg: {
           accountId: d.accountId,
@@ -220,11 +224,24 @@
           <button class="link" onclick={undoSend}>{t('act.undo')}</button>
         </div>
       {:else}
-        <div class="chips">
-          {#each chips as c (c)}
-            <button class="chip" onclick={() => (reply = t(c))}>{t(c)}</button>
-          {/each}
-        </div>
+        {#if editingChips}
+          <div class="chip-editor">
+            <div class="chip-editor-head">
+              <span class="chip-editor-title">{t('qr.title')}</span>
+              <button class="link" onclick={() => (editingChips = false)}>{t('qr.done')}</button>
+            </div>
+            <QuickRepliesEditor compact />
+          </div>
+        {:else}
+          <div class="chips">
+            {#each chips as c (c)}
+              <button class="chip" onclick={() => (reply = c)}>{c}</button>
+            {/each}
+            <button class="chip edit" aria-label={t('qr.edit')} title={t('qr.edit')} onclick={() => (editingChips = true)}>
+              <Icon name={chips.length ? 'pen' : 'plus'} size={14} />{#if !chips.length}{t('qr.add')}{/if}
+            </button>
+          </div>
+        {/if}
         {#if foreignReplyDomains(d).length}
           <p class="reply-warn" role="note">{t('read.replyElsewhere', { domains: foreignReplyDomains(d).join(', ') })}</p>
         {/if}
@@ -407,6 +424,36 @@
   .chip:hover {
     background: var(--surface);
     border-color: var(--ink-3);
+  }
+
+  .chip.edit {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 10px;
+    border-style: dashed;
+    color: var(--ink-2);
+  }
+
+  .chip-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    border-radius: var(--r-card);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    animation: fade-up var(--t-state) ease-out;
+  }
+
+  .chip-editor-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .chip-editor-title {
+    font-weight: 600;
   }
 
   .box {

@@ -132,6 +132,7 @@ async fn taslaklar_sunucuya_yansir() {
         signature: None,
         created_at: 0,
         auth: Default::default(),
+        notify: true,
     };
     store.insert_account(&account).unwrap();
     let secrets: Arc<dyn SecretStore> = Arc::new(MemorySecrets::new());

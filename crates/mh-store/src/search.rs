@@ -88,9 +88,9 @@ mod tests {
     #[test]
     fn turkce_dostu_arama() {
         let s = store_with_account("a");
-        s.upsert_mailbox("a", "INBOX", "INBOX", MailboxRole::Inbox)
+        s.upsert_mailbox("a", "INBOX", "INBOX", MailboxRole::Inbox, None, false)
             .unwrap();
-        s.upsert_mailbox("a", "Trash", "Trash", MailboxRole::Trash)
+        s.upsert_mailbox("a", "Trash", "Trash", MailboxRole::Trash, None, false)
             .unwrap();
         let mut m1 = msg("a", "a:INBOX", "Q4 bütçe taslağı", 10);
         m1.body_text = Some("Pazarlama kaleminde düşüş var.".into());

@@ -30,9 +30,16 @@ export interface Account {
   imap: ServerConfig | null;
   smtp: ServerConfig | null;
   jmapUrl: string | null;
-  signature: string | null;
+  /** Hesabın imzaları (düz metin). */
+  signatures: Signature[];
+  /** Yeni postada kullanılan imzanın kimliği; null: imzasız. */
+  signatureNew: string | null;
+  /** Yanıt ve iletmede kullanılan imzanın kimliği; null: imzasız. */
+  signatureReply: string | null;
   createdAt: Millis;
   auth: AuthKind;
+  /** Bu hesabın yeni postaları için kart ve bildirim gösterilir. */
+  notify: boolean;
 }
 
 export interface NewAccount {
@@ -69,11 +76,32 @@ export interface NewOAuthAccount {
   color: string | null;
 }
 
+export interface Signature {
+  /** Yeni imzada boş bırakılır; arka uç kimlik verir. */
+  id: string;
+  name: string;
+  body: string;
+}
+
 export interface AccountUpdate {
   name: string;
   displayName: string;
   color: string;
-  signature: string | null;
+  notify: boolean;
+  signatures: Signature[];
+  signatureNew: string | null;
+  signatureReply: string | null;
+}
+
+/** Parolalı IMAP hesabının sunucu ayarları. */
+export interface ServerUpdate {
+  imap: ServerConfig;
+  smtp: ServerConfig;
+  /**
+   * Sunucu adı, kapı ya da kullanıcı adı değişiyorsa zorunlu: kayıtlı parola
+   * yeni bir sunucuya kendiliğinden gönderilmez. Boşsa kayıtlı parola denenir.
+   */
+  password: string | null;
 }
 
 export type DiscoverySource = 'autoconfig' | 'srv' | 'guess' | 'builtin';
@@ -91,6 +119,9 @@ export interface DiscoveredConfig {
 
 export type MailboxRole = 'inbox' | 'sent' | 'drafts' | 'archive' | 'trash' | 'junk' | 'other';
 
+/** Bir klasöre elle atanabilen görev. */
+export type SpecialRole = Exclude<MailboxRole, 'inbox' | 'other'>;
+
 export interface Mailbox {
   id: string;
   accountId: AccountId;
@@ -99,6 +130,10 @@ export interface Mailbox {
   role: MailboxRole;
   unread: number;
   total: number;
+  /** Üst klasörün kimliği; kökteyse (ya da üstü seçilemeyen bir düğümse) null. */
+  parentId: string | null;
+  /** Kenar çubuğunda gizli. Gizli özel klasör eşitlenmez; rol klasörü eşitlenmeye devam eder. */
+  hidden: boolean;
 }
 
 // -------------------------------------------------------------------- postalar
@@ -154,7 +189,21 @@ export interface MessageDetail extends MessageSummary {
   remoteAllowed: boolean;
   attachments: Attachment[];
   thread: ThreadEntry[];
+  /** List-Unsubscribe başlığı varsa abonelikten çıkma yolları. */
+  unsubscribe: Unsubscribe | null;
 }
+
+export interface Unsubscribe {
+  /** https (ya da http) adresi. */
+  url: string | null;
+  /** mailto adresi. */
+  mailto: string | null;
+  /** RFC 8058: List-Unsubscribe-Post ile tek tıkla çıkılabilir. */
+  oneClick: boolean;
+}
+
+/** `done`: arka uç çıkışı yaptı; `browser`: arayüz `url`yi tarayıcıda açmalı. */
+export type UnsubscribeResult = 'done' | 'browser';
 
 export type View =
   | { kind: 'inbox' }
@@ -166,10 +215,14 @@ export type View =
   | { kind: 'trash' }
   | { kind: 'mailbox'; id: string };
 
+/** Listede hızlı süzgeç. */
+export type ListOnly = 'unread' | 'starred' | 'attachments';
+
 export interface ListQuery {
   view: View;
   accountId: AccountId | null;
   category: Category | null;
+  only?: ListOnly | null;
   cursor: string | null;
   limit: number;
 }
@@ -183,6 +236,8 @@ export interface Counts {
   inboxUnread: number;
   snoozed: number;
   drafts: number;
+  /** Giden kutusunda bekleyen (planlanmış) gönderimler. */
+  scheduled: number;
   perAccountUnread: Record<AccountId, number>;
 }
 
@@ -209,6 +264,72 @@ export interface OutgoingMessage {
 export interface OutboxItem {
   id: string;
   sendAt: Millis;
+}
+
+/** Giden kutusundaki planlanmış gönderim. */
+export interface ScheduledItem {
+  id: string;
+  accountId: AccountId;
+  sendAt: Millis;
+  to: Address[];
+  subject: string;
+  /** Son denemenin hatası (gönderilemediyse). */
+  error: string | null;
+}
+
+// ------------------------------------------------------------------ kurallar
+
+export type RuleText = 'from' | 'to' | 'subject' | 'body';
+export type RuleOp = 'contains' | 'notContains' | 'is';
+
+export type RuleCondition =
+  | { kind: RuleText; op: RuleOp; value: string }
+  | { kind: 'hasAttachment' }
+  | { kind: 'category'; value: Category };
+
+export type RuleAction =
+  | { kind: 'move'; mailboxId: string }
+  | { kind: 'archive' }
+  | { kind: 'trash' }
+  | { kind: 'markRead' }
+  | { kind: 'star' }
+  /** Kart ve bildirim gösterilmez. */
+  | { kind: 'mute' }
+  | { kind: 'forward'; to: string };
+
+/** Gelen kutusuna yeni düşen postaya sırayla uygulanan kural. */
+export interface Rule {
+  /** Yeni kuralda boş; arka uç kimlik verir. */
+  id: string;
+  name: string;
+  enabled: boolean;
+  /** null: tüm hesaplar (klasöre taşıma için hesap zorunlu). */
+  accountId: AccountId | null;
+  match: 'all' | 'any';
+  conditions: RuleCondition[];
+  actions: RuleAction[];
+  /** Eşleşirse sonraki kurallar denenmez. */
+  stop: boolean;
+}
+
+// -------------------------------------------------------------- otomatik yanıt
+
+/** Sunucu tarafı otomatik yanıt (JMAP VacationResponse). */
+export interface Vacation {
+  enabled: boolean;
+  fromDate: Millis | null;
+  toDate: Millis | null;
+  subject: string;
+  body: string;
+}
+
+/** Yazma penceresine eklenen hazır metin. */
+export interface Template {
+  /** Yeni şablonda boş; arka uç kimlik verir. */
+  id: string;
+  name: string;
+  subject: string;
+  body: string;
 }
 
 export type ComposeMode = 'new' | 'reply' | 'replyAll' | 'forward' | 'draft';
@@ -252,7 +373,16 @@ export interface Settings {
   remoteAllow: string[];
   autoUpdate: boolean;
   trustedCerts: TrustedCert[];
+  /** Hızlı yanıt düğmeleri; null ise dile göre varsayılanlar. */
+  quickReplies: string[] | null;
+  /** Koyu temada kendi zemini olmayan postalar koyu zeminde gösterilir. */
+  darkMail: boolean;
+  templates: Template[];
 }
+
+/** Hızlı yanıt sınırları (arka uçla aynı). */
+export const QUICK_REPLIES_MAX = 8;
+export const QUICK_REPLY_CHARS = 120;
 
 export interface TrustedCert {
   host: string;
@@ -294,6 +424,9 @@ export const defaultSettings: Settings = {
   remoteAllow: [],
   autoUpdate: true,
   trustedCerts: [],
+  quickReplies: null,
+  darkMail: true,
+  templates: [],
 };
 
 // ------------------------------------------------------------------- olaylar
@@ -372,6 +505,8 @@ export interface Commands {
   message_get: [{ id: MessageId }, MessageDetail];
   messages_flag: [{ ids: MessageId[]; unread: boolean | null; starred: boolean | null }, null];
   messages_move: [{ ids: MessageId[]; target: MoveTarget }, null];
+  /** Postaları kendi hesabının herhangi bir klasörüne taşır. */
+  messages_move_to: [{ ids: MessageId[]; mailboxId: string }, null];
   messages_snooze: [{ ids: MessageId[]; until: Millis | null }, null];
   search: [{ q: string; limit: number }, MessageSummary[]];
   remote_allow: [{ id: MessageId }, MessageDetail];
@@ -405,6 +540,41 @@ export interface Commands {
   account_add_oauth: [{ input: NewOAuthAccount }, Account];
 
   account_update: [{ id: AccountId; update: AccountUpdate }, Account];
+  /** Parolalı IMAP hesabının sunucularını değiştirir; önce bağlantıyı dener. */
+  account_update_server: [{ id: AccountId; update: ServerUpdate }, Account];
+  /** Parolayı (ya da uygulama parolasını) değiştirir; önce girişi dener. */
+  account_set_password: [{ id: AccountId; password: string }, null];
+  /** Yalnız hızlı yanıtları yazar (hızlı okuma penceresi ayarların geri kalanına erişemez). */
+  quick_replies_set: [{ replies: string[] | null }, Settings];
+
+  // Kurallar
+  rules_list: [Record<string, never>, Rule[]];
+  /** Kaydeder (id boşsa yeni); doğrulanmış kuralı döner. */
+  rule_save: [{ rule: Rule }, Rule];
+  rule_delete: [{ id: string }, null];
+  rules_reorder: [{ ids: string[] }, null];
+  /** Kuralı gelen kutusundaki mevcut postalara uygular (iletme hariç); eşleşen posta sayısı. */
+  rule_run: [{ id: string }, number];
+
+  // Planlanan gönderimler
+  outbox_list: [Record<string, never>, ScheduledItem[]];
+  outbox_send_now: [{ id: string }, null];
+  /** Gönderimi iptal edip taslağa çevirir; taslağın kimliği. */
+  outbox_to_draft: [{ id: string }, MessageId];
+
+  // Abonelik ve otomatik yanıt
+  unsubscribe: [{ id: MessageId }, UnsubscribeResult];
+  /** Desteklenmiyorsa (IMAP) null. */
+  vacation_get: [{ accountId: AccountId }, Vacation | null];
+  vacation_set: [{ accountId: AccountId; vacation: Vacation }, Vacation];
+
+  // Klasörler
+  /** Kenar çubuğunda gösterir ya da gizler (gelen kutusu gizlenemez). */
+  mailbox_set_hidden: [{ id: string; hidden: boolean }, null];
+  /** Klasörü Gönderilenler, Taslaklar, Arşiv, Çöp ya da Gereksiz yapar; rolün önceki sahibi sıradan klasöre döner. */
+  mailbox_set_role: [{ id: string; role: SpecialRole }, null];
+  /** Hesabın elle atanan klasör görevlerini kaldırır; roller yeniden sunucudan bulunur. */
+  mailbox_roles_reset: [{ accountId: AccountId }, null];
 
   // Sertifika onayı
   cert_inspect: [{ host: string; port: number; security: Security }, CertInfo];

@@ -64,6 +64,10 @@ enum Dest {
 enum Command {
     /// Artımlı eşitleme.
     Sync,
+    /// Baştan eşitleme: izlenen kutular değişti (klasör gösterildi ya da
+    /// gizlendi, rol atandı ya da sıfırlandı). Sırayla çalışır; araya giren
+    /// bir eşitleme durumu ezemez.
+    Resync,
     Flags {
         /// Yerel kimlikler: sunucu onayından sonra yerel değer yeniden yazılır.
         ids: Vec<MessageId>,
@@ -99,8 +103,11 @@ impl Command {
 fn next_command(pending: &mut VecDeque<Command>) -> Option<Command> {
     let idx = pending.iter().position(Command::is_action).unwrap_or(0);
     let cmd = pending.remove(idx)?;
-    if matches!(cmd, Command::Sync) {
-        pending.retain(Command::is_action);
+    match cmd {
+        Command::Sync => pending.retain(Command::is_action),
+        // Baştan eşitleme bekleyen eşitlemeleri de kapsar.
+        Command::Resync => pending.retain(|c| !matches!(c, Command::Sync | Command::Resync)),
+        _ => {}
     }
     Some(cmd)
 }
@@ -305,6 +312,13 @@ impl JmapManager {
             .is_some_and(|h| h.tx.send(cmd).is_ok())
     }
 
+    /// Hesabı hemen baştan eşitler (kutular yeniden alınır, izlenen kutular
+    /// yeniden sorgulanır, artık izlenmeyen kutulardaki postalar yerelden
+    /// kalkar). Hesap çalışmıyorsa `false`.
+    pub fn resync(&self, account_id: &str) -> bool {
+        self.send(account_id, Command::Resync)
+    }
+
     /// Tüm JMAP hesaplarını hemen eşitler.
     pub fn sync_now(&self) {
         for h in self.handles().values() {
@@ -460,7 +474,14 @@ impl JmapManager {
         };
         let dest = match store.mailbox_by_role(&account.id, MailboxRole::Drafts)? {
             Some(m) => m.mailbox.id,
-            None => store.upsert_mailbox(&account.id, "Drafts", "Drafts", MailboxRole::Drafts)?,
+            None => store.upsert_mailbox(
+                &account.id,
+                "Drafts",
+                "Drafts",
+                MailboxRole::Drafts,
+                None,
+                false,
+            )?,
         };
         let mut m = NewMessage::from_raw(raw.clone(), false, &account.id, &dest, now)
             .ok_or_else(|| AppError::new(ErrorCode::Internal, "Taslak oluşturulamadı."))?;
@@ -673,6 +694,12 @@ async fn run_sync(ctx: &Ctx, client: &Client) -> JmapResult<()> {
 async fn execute(ctx: &Ctx, client: &Client, cmd: &Command) -> JmapResult<()> {
     match cmd {
         Command::Sync => run_sync(ctx, client).await,
+        Command::Resync => {
+            let store = &ctx.shared.store;
+            store.set_jmap_email_state(&ctx.account.id, None)?;
+            store.set_jmap_mailbox_state(&ctx.account.id, None)?;
+            run_sync(ctx, client).await
+        }
         Command::Flags {
             ids,
             jmap_ids,
@@ -784,5 +811,24 @@ mod tests {
         assert!(matches!(next_command(&mut q), Some(Command::Flags { .. })));
         assert!(matches!(next_command(&mut q), Some(Command::Sync)));
         assert!(next_command(&mut q).is_none());
+
+        let mut q: VecDeque<Command> = VecDeque::from([
+            Command::Sync,
+            Command::Resync,
+            Command::Destroy {
+                jmap_ids: vec!["M1".into()],
+            },
+            Command::Resync,
+            Command::Sync,
+        ]);
+        assert!(matches!(next_command(&mut q), Some(Command::Resync)));
+        assert!(matches!(
+            next_command(&mut q),
+            Some(Command::Destroy { .. })
+        ));
+        assert!(
+            next_command(&mut q).is_none(),
+            "baştan eşitleme hepsini kapsar"
+        );
     }
 }

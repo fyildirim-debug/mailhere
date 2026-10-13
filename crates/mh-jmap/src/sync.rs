@@ -26,7 +26,8 @@ const MAX_CHANGES: u64 = 500;
 /// Bundan çok değişiklik birikmişse baştan eşitlemek daha ucuzdur.
 const RESYNC_THRESHOLD: usize = 3000;
 
-/// Eşitlenen kutu rolleri (IMAP motoruyla aynı).
+/// Gizli olsa da eşitlenen kutu rolleri (IMAP motoruyla aynı). Gereksiz ve
+/// diğer klasörler yalnız kenar çubuğunda görünürken eşitlenir.
 pub const SYNC_ROLES: [MailboxRole; 5] = [
     MailboxRole::Inbox,
     MailboxRole::Sent,
@@ -35,14 +36,26 @@ pub const SYNC_ROLES: [MailboxRole; 5] = [
     MailboxRole::Trash,
 ];
 
-/// Posta birden çok eşitlenen kutudaysa yerelde gösterileceği kutu.
-const PRIORITY: [MailboxRole; 5] = [
+/// Posta birden çok eşitlenen kutudaysa yerelde gösterileceği kutu (önce
+/// gelen); Gereksiz ve klasörler en sonda.
+const PRIORITY: [MailboxRole; 7] = [
     MailboxRole::Trash,
     MailboxRole::Inbox,
     MailboxRole::Drafts,
     MailboxRole::Sent,
     MailboxRole::Archive,
+    MailboxRole::Junk,
+    MailboxRole::Other,
 ];
+
+/// İlk eklemede gizlenen JMAP rolleri: başka kutulardaki postaların kopyası
+/// (tümü, yıldızlı, önemli). Eşitlenirse aynı posta iki kez görünür.
+const HIDDEN_ROLES: [&str; 3] = ["all", "flagged", "important"];
+
+/// Kutu yerelde izlenir mi? Rol kutuları her zaman, diğerleri görünürken.
+pub fn tracked(role: MailboxRole, hidden: bool) -> bool {
+    SYNC_ROLES.contains(&role) || !hidden
+}
 
 /// Yalnız sayaçları değişen kutular yeniden indirilmez.
 const COUNT_PROPS: [&str; 4] = [
@@ -257,7 +270,7 @@ impl Boxes {
             store
                 .mailboxes_for(account_id)?
                 .into_iter()
-                .filter(|m| SYNC_ROLES.contains(&m.mailbox.role))
+                .filter(|m| tracked(m.mailbox.role, m.mailbox.hidden))
                 .map(|m| (m.mailbox.path, (m.mailbox.id, m.mailbox.role)))
                 .collect(),
         ))
@@ -270,7 +283,9 @@ impl Boxes {
             .filter_map(|id| self.0.get(id))
             .map(|(local, role)| (local.as_str(), *role))
             .collect();
-        found.sort_by_key(|(_, r)| PRIORITY.iter().position(|p| p == r));
+        // Aynı öncelikte (iki klasör) kararlı seçim: posta eşitlemeler arasında
+        // kutudan kutuya atlamasın.
+        found.sort_by_key(|(local, r)| (PRIORITY.iter().position(|p| p == r), *local));
         found.into_iter().next()
     }
 }
@@ -293,11 +308,14 @@ pub async fn sync_mailboxes(
         )
         .await?;
     let r: GetResponse<JMailbox> = parse(v)?;
-    let before: HashSet<(String, String, MailboxRole)> = store
+    type Seen = (String, String, MailboxRole, Option<String>);
+    let shape = |m: mh_core::Mailbox| -> Seen { (m.id, m.name, m.role, m.parent_id) };
+    let before: HashSet<Seen> = store
         .mailboxes_for(account_id)?
         .into_iter()
-        .map(|m| (m.mailbox.id, m.mailbox.name, m.mailbox.role))
+        .map(|m| shape(m.mailbox))
         .collect();
+    let ids: HashSet<String> = r.list.iter().map(|m| m.id.clone()).collect();
     let mut list = r.list;
     // Aynı rol birden çok kutuda görünürse sıradaki ilk kutu alır.
     list.sort_by(|a, b| (a.sort_order, &a.name).cmp(&(b.sort_order, &b.name)));
@@ -313,7 +331,16 @@ pub async fn sync_mailboxes(
         } else {
             mb.name.trim()
         };
-        store.upsert_mailbox(account_id, &mb.id, name, role)?;
+        let parent = mb
+            .parent_id
+            .as_deref()
+            .filter(|p| *p != mb.id && ids.contains(*p))
+            .map(|p| mh_store::mailbox_id(account_id, p));
+        let hidden = mb
+            .role
+            .as_deref()
+            .is_some_and(|r| HIDDEN_ROLES.contains(&r.to_ascii_lowercase().as_str()));
+        store.upsert_mailbox(account_id, &mb.id, name, role, parent.as_deref(), hidden)?;
         keep.push(mb.id.clone());
     }
     let server: HashSet<String> = keep.iter().cloned().collect();
@@ -328,8 +355,9 @@ pub async fn sync_mailboxes(
     }
     let mut changed = store.remove_mailboxes_except(account_id, &keep)?;
     for m in store.mailboxes_for(account_id)? {
-        if !before.contains(&(m.mailbox.id.clone(), m.mailbox.name, m.mailbox.role)) {
-            changed.push(m.mailbox.id);
+        let id = m.mailbox.id.clone();
+        if !before.contains(&shape(m.mailbox)) {
+            changed.push(id);
         }
     }
     store.set_jmap_mailbox_state(account_id, Some(&r.state))?;
@@ -864,6 +892,36 @@ mod tests {
         assert_eq!(boxes.primary(&e(&["in", "tr"])).unwrap().0, "a:tr");
         assert_eq!(boxes.primary(&e(&["ozel", "ar"])).unwrap().0, "a:ar");
         assert!(boxes.primary(&e(&["ozel"])).is_none());
+
+        // Görünen klasör ve Gereksiz de izlenir; rol kutuları önce gelir.
+        let boxes = Boxes(HashMap::from([
+            ("in".to_string(), ("a:in".to_string(), MailboxRole::Inbox)),
+            ("ar".to_string(), ("a:ar".to_string(), MailboxRole::Archive)),
+            ("sp".to_string(), ("a:sp".to_string(), MailboxRole::Junk)),
+            ("p1".to_string(), ("a:p1".to_string(), MailboxRole::Other)),
+            ("p2".to_string(), ("a:p2".to_string(), MailboxRole::Other)),
+        ]));
+        assert_eq!(boxes.primary(&e(&["p1", "ar"])).unwrap().0, "a:ar");
+        assert_eq!(boxes.primary(&e(&["p1", "sp"])).unwrap().0, "a:sp");
+        assert_eq!(boxes.primary(&e(&["p2", "in"])).unwrap().0, "a:in");
+        for _ in 0..5 {
+            assert_eq!(boxes.primary(&e(&["p2", "p1"])).unwrap().0, "a:p1");
+        }
+        assert_eq!(
+            boxes.primary(&e(&["p2"])).unwrap(),
+            ("a:p2", MailboxRole::Other)
+        );
+    }
+
+    #[test]
+    fn izlenen_kutular() {
+        for r in SYNC_ROLES {
+            assert!(tracked(r, false) && tracked(r, true), "{r:?}");
+        }
+        for r in [MailboxRole::Junk, MailboxRole::Other] {
+            assert!(tracked(r, false), "{r:?}");
+            assert!(!tracked(r, true), "{r:?}");
+        }
     }
 
     #[test]

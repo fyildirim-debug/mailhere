@@ -132,6 +132,7 @@ async fn gercek_sunucu_uctan_uca() {
         signature: None,
         created_at: 0,
         auth: Default::default(),
+        notify: true,
     };
     store.insert_account(&account).unwrap();
     store.set_jmap_username(ACC, &user).unwrap();

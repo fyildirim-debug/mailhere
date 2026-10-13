@@ -19,7 +19,9 @@
   import Avatar from '../../lib/ui/Avatar.svelte';
   import FileBadge from '../../lib/ui/FileBadge.svelte';
   import Icon from '../../lib/ui/Icon.svelte';
+  import Menu, { type MenuItem } from '../../lib/ui/Menu.svelte';
   import WindowControls from '../../lib/ui/WindowControls.svelte';
+  import { settings } from '../../lib/stores/settings.svelte';
   import { baseSubject, displayName, fileSize, snoozeOptions } from '../../lib/util/format';
 
   interface Props {
@@ -64,6 +66,59 @@
 
   const from = $derived(accounts.find((a) => a.id === fromId));
   const locked = $derived(queued != null);
+
+  // İmza: gönderirken metnin sonuna eklenir. Hesap değişince o hesabın varsayılanı gelir.
+  let sigId = $state<string | null>(null);
+  $effect(() => {
+    const a = from;
+    sigId = a ? (mode === 'new' || mode === 'draft' ? a.signatureNew : a.signatureReply) : null;
+  });
+  const signature = $derived(from?.signatures.find((x) => x.id === sigId) ?? null);
+
+  let menu = $state<{ at: { x: number; y: number }; title: string; items: MenuItem[] } | null>(null);
+
+  function below(e: MouseEvent) {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    return { x: r.left, y: r.bottom + 4 };
+  }
+
+  function signatureMenu(e: MouseEvent) {
+    if (!from) return;
+    menu = {
+      at: below(e),
+      title: t('sig.pick'),
+      items: [
+        { label: t('sig.noneOption'), checked: sigId == null, onclick: () => (sigId = null) },
+        ...from.signatures.map((x) => ({ label: x.name || t('sig.unnamed'), checked: x.id === sigId, onclick: () => (sigId = x.id) })),
+      ],
+    };
+  }
+
+  /** Şablonu imlecin olduğu yere ekler; konu boşsa şablonun konusunu yazar. */
+  function insertTemplate(id: string) {
+    const tpl = settings.value.templates.find((x) => x.id === id);
+    if (!tpl) return;
+    if (tpl.subject && (!subject.trim() || mode === 'new')) subject = tpl.subject;
+    const el = bodyEl;
+    // İmleç konumu odak gitse de textarea'da kalır.
+    const at = el ? el.selectionStart : 0;
+    body = body.slice(0, at) + tpl.body + body.slice(at);
+    queueMicrotask(() => {
+      el?.focus();
+      el?.setSelectionRange(at + tpl.body.length, at + tpl.body.length);
+    });
+  }
+
+  function templateMenu(e: MouseEvent) {
+    const list = settings.value.templates;
+    menu = {
+      at: below(e),
+      title: t('tpl.insert'),
+      items: list.length
+        ? list.map((x) => ({ label: x.name, icon: 'template' as const, onclick: () => insertTemplate(x.id) }))
+        : [{ label: t('tpl.noneCompose'), disabled: true, onclick: () => {} }],
+    };
+  }
 
   onMount(() => {
     void init();
@@ -384,7 +439,8 @@
     if (!from || !msg) return;
     if (draftTimer) clearTimeout(draftTimer);
     if (saving) await saving;
-    const text = from.signature ? `${body.trimEnd()}\n\n${from.signature}` : body;
+    const sig = signature?.body.trimEnd();
+    const text = sig ? `${body.trimEnd()}\n\n${sig}` : body;
     try {
       const item = await call('send', { msg: { ...msg, bodyText: text, sendAt, draftId } });
       queued = { id: item.id, at: item.sendAt };
@@ -518,11 +574,18 @@
     <button class="btn-icon small" aria-label={t('compose.bullet')} title={t('compose.bullet')} onclick={bullet}><Icon name="list" size={16} /></button>
     <span class="vsep"></span>
     <button class="btn-icon small" aria-label={t('act.attach')} title={t('act.attach')} onclick={attach} disabled={locked}><Icon name="paperclip" size={16} /></button>
+    <button class="btn-icon small" aria-label={t('tpl.insert')} title={t('tpl.insert')} aria-haspopup="menu" onclick={templateMenu} disabled={locked}><Icon name="template" size={16} /></button>
+    <span class="grow"></span>
+    {#if from?.signatures.length}
+      <button class="btn-ghost sig-pick" aria-haspopup="menu" disabled={locked} onclick={signatureMenu}>
+        <Icon name="pen" size={14} />{t('compose.signature', { name: signature ? signature.name || t('sig.unnamed') : t('sig.noneOption') })}<Icon name="chevronDown" size={14} />
+      </button>
+    {/if}
   </div>
 
   <div class="editor">
     <textarea bind:this={bodyEl} bind:value={body} placeholder={t('compose.bodyPlaceholder')} aria-label={t('compose.body')} disabled={locked}></textarea>
-    {#if from?.signature}<div class="signature">{from.signature}</div>{/if}
+    {#if signature?.body.trim()}<div class="signature">{signature.body}</div>{/if}
     {#if attachments.length || carried.length}
       <div class="files">
         {#each carried as a (a.index)}
@@ -583,6 +646,8 @@
     </div>
   </footer>
 </div>
+
+{#if menu}<Menu at={menu.at} title={menu.title} items={menu.items} onclose={() => (menu = null)} />{/if}
 
 <style>
   .win {
@@ -709,6 +774,15 @@
     gap: 2px;
     padding: 6px 14px;
     border-bottom: 1px solid var(--line);
+  }
+
+  .sig-pick {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 30px;
+    font-size: var(--fs-meta);
+    color: var(--ink-2);
   }
 
   .vsep {

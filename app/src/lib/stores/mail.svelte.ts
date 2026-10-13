@@ -5,15 +5,18 @@ import {
   call,
   EVENTS,
   on,
+  openExternal,
   toAppError,
   type Account,
   type Category,
   type Counts,
+  type ListOnly,
   type Mailbox,
   type MessageDetail,
   type MessageId,
   type MessageSummary,
   type MoveTarget,
+  type Rule,
   type SyncStatus,
   type View,
 } from '../api';
@@ -22,7 +25,10 @@ import { showToast } from '../ui/toast.svelte';
 import { baseSubject, displayName, replyTargets } from '../util/format';
 import { settings } from './settings.svelte';
 
-export type Screen = 'mail' | 'settings' | 'onboarding';
+export type Screen = 'mail' | 'settings' | 'onboarding' | 'scheduled';
+
+/** Ayarlar sayfasının bölümü; hesap sayfası `account:<kimlik>`. */
+export type SettingsSection = 'general' | 'notifications' | 'compose' | 'accounts' | 'rules' | 'privacy' | 'about' | `account:${string}`;
 
 const PAGE = 100;
 
@@ -31,12 +37,17 @@ export const mail = $state({
   screen: 'mail' as Screen,
   accounts: [] as Account[],
   mailboxes: [] as Mailbox[],
-  counts: { inboxUnread: 0, snoozed: 0, drafts: 0, perAccountUnread: {} } as Counts,
+  counts: { inboxUnread: 0, snoozed: 0, drafts: 0, scheduled: 0, perAccountUnread: {} } as Counts,
   sync: {} as Record<string, SyncStatus>,
 
   view: { kind: 'inbox' } as View,
   accountId: null as string | null,
   category: null as Category | null,
+  /** Listede hızlı süzgeç (okunmamış, yıldızlı, ekli). */
+  only: null as ListOnly | null,
+  settingsSection: 'general' as SettingsSection,
+  /** Kurallar bölümü açılınca düzenleyicide gösterilecek taslak (postadan kural). */
+  ruleDraft: null as Rule | null,
 
   items: [] as MessageSummary[],
   nextCursor: null as string | null,
@@ -145,7 +156,7 @@ export async function refreshList(keepSelection = true) {
       return;
     }
     const page = await call('messages_list', {
-      query: { view: mail.view, accountId: mail.accountId, category: mail.category, cursor: null, limit: PAGE },
+      query: { view: mail.view, accountId: mail.accountId, category: mail.category, only: mail.only, cursor: null, limit: PAGE },
     });
     if (token !== listToken) return;
     mail.items = page.items;
@@ -165,7 +176,7 @@ export async function loadMore() {
   mail.loading = true;
   try {
     const page = await call('messages_list', {
-      query: { view: mail.view, accountId: mail.accountId, category: mail.category, cursor: mail.nextCursor, limit: PAGE },
+      query: { view: mail.view, accountId: mail.accountId, category: mail.category, only: mail.only, cursor: mail.nextCursor, limit: PAGE },
     });
     if (token !== listToken) return;
     const known = new Set(mail.items.map((m) => m.id));
@@ -188,7 +199,7 @@ function scheduleRefresh() {
   }, 150);
 }
 
-async function reloadMailboxes() {
+export async function reloadMailboxes() {
   try {
     mail.mailboxes = await call('mailboxes_list');
   } catch {
@@ -220,6 +231,60 @@ export function searchAll(q: string) {
 export function setCategory(category: Category | null) {
   mail.category = category;
   void refreshList();
+}
+
+export function setOnly(only: ListOnly | null) {
+  mail.only = mail.only === only ? null : only;
+  void refreshList(false);
+}
+
+/** Ayarları belirli bir bölümde açar. */
+export function openSettings(section: SettingsSection = mail.settingsSection) {
+  mail.settingsSection = section;
+  mail.screen = 'settings';
+}
+
+/** Kurallar bölümünü bu taslakla açar. */
+export function newRuleFrom(draft: Rule) {
+  mail.ruleDraft = draft;
+  openSettings('rules');
+}
+
+/** Gönderenin postaları bundan sonra çöpe gider ve bildirim göstermez. */
+export async function blockSender(accountId: string, email: string) {
+  try {
+    const rule = await call('rule_save', {
+      rule: {
+        id: '',
+        name: t('rule.blockedName', { email }),
+        enabled: true,
+        accountId,
+        match: 'all',
+        conditions: [{ kind: 'from', op: 'is', value: email }],
+        actions: [{ kind: 'trash' }, { kind: 'mute' }],
+        stop: true,
+      },
+    });
+    showToast({
+      text: t('toast.blocked', { email }),
+      action: {
+        label: t('act.undo'),
+        run: async () => {
+          await call('rule_delete', { id: rule.id });
+        },
+      },
+    });
+  } catch (e) {
+    errorToast(e);
+  }
+}
+
+/** Hesabın yeni posta ya da yanıt imzası (yoksa null). */
+export function signatureFor(account: Account | undefined, mode: 'new' | 'reply'): string | null {
+  if (!account) return null;
+  const id = mode === 'new' ? account.signatureNew : account.signatureReply;
+  const body = account.signatures.find((s) => s.id === id)?.body.trimEnd();
+  return body ? body : null;
 }
 
 export async function select(id: MessageId, opts: { markRead?: boolean } = {}) {
@@ -329,6 +394,60 @@ export async function moveTo(ids: MessageId[], target: MoveTarget) {
   }
 }
 
+/** Postaları bir klasöre taşır; geri alınca eski klasörlerine döner. */
+export async function moveToFolder(ids: MessageId[], mailbox: Mailbox, label: string) {
+  if (!ids.length) return;
+  const selected = mail.selectedId;
+  const from = new Map(mail.items.filter((m) => ids.includes(m.id)).map((m) => [m.id, m.mailboxId]));
+  if (mail.detail && ids.includes(mail.detail.id)) from.set(mail.detail.id, mail.detail.mailboxId);
+  takeOut(ids);
+  try {
+    await call('messages_move_to', { ids, mailboxId: mailbox.id });
+    void refreshCounts();
+    void reloadMailboxes();
+    showToast({
+      text: t('toast.movedTo', { folder: label }),
+      action: {
+        label: t('act.undo'),
+        run: async () => {
+          // Her posta geldiği klasöre döner.
+          const back = new Map<string, MessageId[]>();
+          for (const id of ids) {
+            const b = from.get(id);
+            if (b) back.set(b, [...(back.get(b) ?? []), id]);
+          }
+          for (const [box, list] of back) await call('messages_move_to', { ids: list, mailboxId: box });
+          await refreshList();
+          if (selected != null) void select(selected, { markRead: false });
+          void refreshCounts();
+        },
+      },
+    });
+  } catch (e) {
+    errorToast(e);
+    void refreshList();
+  }
+}
+
+/** Bültenden çıkar: arka uç yapabiliyorsa yapar, yoksa bağlantıyı tarayıcıda açar. */
+export async function unsubscribe(d: MessageDetail) {
+  if (!d.unsubscribe) return;
+  try {
+    const r = await call('unsubscribe', { id: d.id });
+    if (r === 'browser' && d.unsubscribe.url) {
+      await openExternal(d.unsubscribe.url);
+      showToast({ text: t('toast.unsubBrowser') });
+    } else {
+      showToast({
+        text: t('toast.unsubscribed', { name: displayName(d.from) }),
+        action: { label: t('read.archiveToo'), run: () => moveTo([d.id], 'archive') },
+      });
+    }
+  } catch (e) {
+    errorToast(e);
+  }
+}
+
 export async function snooze(ids: MessageId[], until: number) {
   if (!ids.length) return;
   const selected = mail.selectedId;
@@ -395,7 +514,7 @@ export async function sendQuickReply(d: MessageDetail, text: string, restore: (t
         cc: [],
         bcc: [],
         subject: `Re: ${baseSubject(d.subject)}`,
-        bodyText: quoteFor(d, account?.signature ? `${text}\n\n${account.signature}` : text),
+        bodyText: quoteFor(d, signatureFor(account, 'reply') ? `${text}\n\n${signatureFor(account, 'reply')}` : text),
         inReplyTo: d.id,
         attachments: [],
         sendAt: null,

@@ -389,6 +389,7 @@ fn demo_account(a: &DemoAccount, created_at: Millis) -> Account {
         signature: None,
         created_at,
         auth: Default::default(),
+        notify: true,
     }
 }
 
@@ -401,7 +402,7 @@ pub fn seed_demo(store: &Store, now: DateTime<FixedOffset>) -> AppResult<bool> {
     for (i, a) in ACCOUNTS.iter().enumerate() {
         store.insert_account(&demo_account(a, now_ms - 1000 + i as i64))?;
         for (path, role) in BOXES {
-            store.upsert_mailbox(a.id, path, path, role)?;
+            store.upsert_mailbox(a.id, path, path, role, None, false)?;
         }
     }
 

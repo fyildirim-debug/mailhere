@@ -8,6 +8,7 @@ mod cmd_cert;
 mod cmd_drafts;
 mod cmd_files;
 mod cmd_jmap;
+mod cmd_mailbox;
 mod cmd_oauth;
 mod commands;
 mod notify;
@@ -110,6 +111,7 @@ fn main() {
             commands::send_cancel,
             commands::settings_get,
             commands::settings_set,
+            commands::quick_replies_set,
             commands::sync_now,
             commands::open_main,
             commands::open_quick,
@@ -122,6 +124,11 @@ fn main() {
             cmd_jmap::jmap_discover,
             cmd_jmap::account_add_jmap,
             cmd_account::account_update,
+            cmd_account::account_update_server,
+            cmd_account::account_set_password,
+            cmd_mailbox::mailbox_set_hidden,
+            cmd_mailbox::mailbox_set_role,
+            cmd_mailbox::mailbox_roles_reset,
             cmd_drafts::draft_save,
             cmd_drafts::draft_delete,
             cmd_files::attachments_pick,

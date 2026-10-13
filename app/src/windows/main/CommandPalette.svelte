@@ -5,7 +5,7 @@
   import Icon from '../../lib/ui/Icon.svelte';
   import type { IconName } from '../../lib/ui/icons';
   import { displayName, snoozeOptions } from '../../lib/util/format';
-  import { mail, moveTo, searchAll, select, setView, snooze } from '../../lib/stores/mail.svelte';
+  import { mail, moveTo, openSettings, searchAll, select, setView, snooze } from '../../lib/stores/mail.svelte';
   import { resolvedTheme, toggleTheme } from '../../lib/stores/settings.svelte';
 
   interface Props {
@@ -90,8 +90,14 @@
       },
       { key: 'mute', label: t('act.muteHour'), icon: 'bellOff', run: done(() => call('notify_snooze', { minutes: 60 })) },
       { key: 'account', label: t('act.addAccount'), icon: 'plus', run: done(() => (mail.screen = 'onboarding')) },
-      { key: 'settings', label: t('act.settings'), kbd: 'Ctrl ,', icon: 'settings', run: done(() => (mail.screen = 'settings')) },
+      { key: 'settings', label: t('act.settings'), kbd: 'Ctrl ,', icon: 'settings', run: done(() => openSettings()) },
+      { key: 'rules', label: t('palette.rules'), icon: 'rules', run: done(() => openSettings('rules')) },
+      { key: 'templates', label: t('palette.templates'), icon: 'template', run: done(() => openSettings('compose')) },
+      { key: 'scheduled', label: t('palette.scheduled'), icon: 'calendarClock', run: done(() => (mail.screen = 'scheduled')) },
     );
+    for (const a of mail.accounts) {
+      list.push({ key: `acc-${a.id}`, label: t('palette.accountSettings', { name: a.name }), icon: 'user', run: done(() => openSettings(`account:${a.id}`)) });
+    }
     return list;
   });
 
@@ -118,6 +124,30 @@
     }
     const acts = actions.filter((a) => matches(a.label)).slice(0, needle ? 4 : 6);
     if (acts.length) out.push({ title: 'palette.actions', items: acts });
+    // Arama işleçleri: tıklayınca sorguya eklenir, palet açık kalır.
+    if (!needle || /^\S*$/.test(q.trim())) {
+      const ops: [string, string][] = [
+        ['from:', t('palette.op.from')],
+        ['has:ek', t('palette.op.attachment')],
+        ['is:okunmamış', t('palette.op.unread')],
+        ['in:arşiv', t('palette.op.in')],
+        ['after:2026-01-01', t('palette.op.after')],
+      ];
+      const tips = ops
+        .filter(([op]) => !needle || op.startsWith(needle))
+        .map(([op, meta]) => ({
+          key: `op-${op}`,
+          label: op,
+          meta,
+          icon: 'filter' as IconName,
+          plain: true,
+          run: () => {
+            q = `${q.trim() && !op.startsWith(needle) ? `${q.trim()} ` : ''}${op}`;
+            input?.focus();
+          },
+        }));
+      if (tips.length && !found.length) out.push({ title: 'palette.ops', items: tips.slice(0, needle ? 3 : 5) });
+    }
     const mails = needle ? found.slice(0, 5) : mail.items.slice(0, 3);
     if (mails.length) {
       out.push({

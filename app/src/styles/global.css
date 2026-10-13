@@ -365,6 +365,114 @@ textarea::placeholder {
   color: var(--ink-2);
 }
 
+/* ---------------------------------------------------------- ayar satırları */
+/* Ayarlar sayfası ve hızlı yanıt düzenleyicisi gibi biçimler ortak kullanır. */
+
+.set-row {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  align-items: center;
+  gap: 24px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.set-row.top {
+  align-items: start;
+}
+
+.set-row > .seg-track {
+  justify-self: start;
+}
+
+.set-name {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-weight: 500;
+}
+
+.set-hint {
+  font-size: var(--fs-meta);
+  font-weight: 400;
+  color: var(--ink-3);
+}
+
+.set-h {
+  margin: 32px 0 4px;
+  font-size: var(--fs-section);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.set-lead {
+  margin-bottom: 8px;
+  color: var(--ink-2);
+  max-width: 62ch;
+}
+
+.set-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+}
+
+.set-error {
+  font-size: var(--fs-meta);
+  color: var(--danger);
+}
+
+.switch {
+  appearance: none;
+  position: relative;
+  width: 40px;
+  height: 24px;
+  margin: 0;
+  flex: none;
+  border-radius: 999px;
+  background: var(--line-strong);
+  cursor: pointer;
+  transition: background var(--t-state);
+}
+
+.switch::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--paper);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  transition: transform var(--t-state) var(--ease);
+}
+
+.switch:checked {
+  background: var(--accent);
+}
+
+.switch:checked::after {
+  transform: translateX(16px);
+}
+
+.switch:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+textarea.input {
+  height: auto;
+  padding: 10px 12px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+select.input {
+  padding-right: 10px;
+}
+
 /* -------------------------------------------------------------- yüzeyler */
 
 .popover {

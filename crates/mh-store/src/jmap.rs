@@ -405,11 +405,11 @@ mod tests {
 
     fn setup() -> Store {
         let s = store_with_account("a");
-        s.upsert_mailbox("a", "mb-in", "Gelen", MailboxRole::Inbox)
+        s.upsert_mailbox("a", "mb-in", "Gelen", MailboxRole::Inbox, None, false)
             .unwrap();
-        s.upsert_mailbox("a", "mb-tr", "Çöp", MailboxRole::Trash)
+        s.upsert_mailbox("a", "mb-tr", "Çöp", MailboxRole::Trash, None, false)
             .unwrap();
-        s.upsert_mailbox("a", "mb-se", "Giden", MailboxRole::Sent)
+        s.upsert_mailbox("a", "mb-se", "Giden", MailboxRole::Sent, None, false)
             .unwrap();
         s
     }

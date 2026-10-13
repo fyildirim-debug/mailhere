@@ -52,6 +52,7 @@ fn account(url: &str) -> Account {
         signature: None,
         created_at: 0,
         auth: Default::default(),
+        notify: true,
     }
 }
 
@@ -362,6 +363,18 @@ async fn ilk_ve_artimli_esitleme() {
             ),
         ]
     });
+    // Kullanıcı özel klasörü ve Gereksiz'i gizlemiş: bunlar yerelde izlenmez.
+    for (path, name, role) in [
+        ("mb-pr", "Projeler", MailboxRole::Other),
+        ("mb-ju", "Junk Mail", MailboxRole::Junk),
+    ] {
+        store
+            .upsert_mailbox(ACC, path, name, role, None, false)
+            .unwrap();
+        store
+            .set_mailbox_hidden(&format!("{ACC}:{path}"), true)
+            .unwrap();
+    }
     let client = mh_jmap::connect(&store, &secrets, &account).await.unwrap();
     let out = mh_jmap::incremental_sync(&client, &store, ACC, &|_, _| {})
         .await
@@ -408,7 +421,7 @@ async fn ilk_ve_artimli_esitleme() {
     assert_eq!(
         store.jmap_known(ACC).unwrap().len(),
         4,
-        "özel klasör ve gereksiz kutusu eşitlenmez"
+        "gizli özel klasör ve gizli Gereksiz eşitlenmez"
     );
     assert!(
         server.with(|s| s.calls.iter().filter(|c| *c == "Email/get").count()) >= 3,
@@ -514,6 +527,137 @@ async fn ilk_ve_artimli_esitleme() {
         .await
         .unwrap();
     assert!(store.raw(cid).unwrap().is_some());
+}
+
+#[tokio::test]
+async fn klasor_agaci_gizli_roller_ve_gorunen_klasorler() {
+    let (server, store, secrets, account) = setup("gizli").await;
+    let ids = server.with(|s| {
+        for (id, name, role) in [
+            ("mb-p2", "2024", None),
+            ("mb-st", "Starred", Some("flagged")),
+            ("mb-al", "All Mail", Some("all")),
+            ("mb-im", "Important", Some("important")),
+        ] {
+            s.mailboxes
+                .push((id.into(), name.into(), role.map(str::to_owned)));
+        }
+        s.parents.insert("mb-p2".into(), "mb-pr".into());
+        // Rol kutusunun üst klasörü yok sayılır.
+        s.parents.insert("mb-se".into(), "mb-pr".into());
+        [
+            s.add_email(
+                "mb-pr",
+                mail("Can <can@ornek.com>", "Proje", "p1@ornek.com", "Klasörde"),
+                &[],
+                1_791_400_000_000,
+            ),
+            s.add_email(
+                "mb-ju",
+                mail("Kötü <spam@kotu.com>", "Kazandınız", "j1@kotu.com", "Tıkla"),
+                &[],
+                1_791_300_000_000,
+            ),
+            s.add_email(
+                "mb-st",
+                mail("Ayşe <ayse@ornek.com>", "Yıldızlı", "s1@ornek.com", "Kopya"),
+                &["$flagged"],
+                1_791_200_000_000,
+            ),
+            s.add_email(
+                "mb-p2",
+                mail(
+                    "Kerem <kerem@ornek.com>",
+                    "Mart",
+                    "m1@ornek.com",
+                    "Alt klasör",
+                ),
+                &[],
+                1_791_100_000_000,
+            ),
+        ]
+    });
+    let client = mh_jmap::connect(&store, &secrets, &account).await.unwrap();
+    mh_jmap::incremental_sync(&client, &store, ACC, &|_, _| {})
+        .await
+        .unwrap();
+    let mb = |id: &str| {
+        store
+            .mailbox(&format!("{ACC}:{id}"))
+            .unwrap()
+            .unwrap_or_else(|| panic!("{id} yok"))
+            .mailbox
+    };
+    assert_eq!(mb("mb-p2").parent_id.as_deref(), Some("acc:mb-pr"));
+    assert_eq!(mb("mb-pr").parent_id, None);
+    assert_eq!(mb("mb-se").parent_id, None, "rol kutusu köktedir");
+    for id in ["mb-st", "mb-al", "mb-im"] {
+        assert!(mb(id).hidden, "{id} ilk eklemede gizli");
+        assert_eq!(mb(id).role, MailboxRole::Other);
+    }
+    for id in ["mb-in", "mb-pr", "mb-p2", "mb-ju", "mb-se"] {
+        assert!(!mb(id).hidden, "{id} görünür");
+    }
+    // Görünen klasör ve Gereksiz izlenir; gizli kopya kutusu izlenmez.
+    let known = store.jmap_known(ACC).unwrap();
+    assert!(known.contains_key(&ids[0]) && known.contains_key(&ids[1]));
+    assert!(known.contains_key(&ids[3]));
+    assert!(
+        !known.contains_key(&ids[2]),
+        "gizli yıldızlı kutusu izlenmez"
+    );
+    let loc = |j: &str| {
+        let id = store.jmap_message(ACC, j).unwrap().unwrap();
+        store.jmap_locations(&[id]).unwrap().remove(0)
+    };
+    assert_eq!(loc(&ids[0]).mailbox_id, "acc:mb-pr");
+    assert_eq!(loc(&ids[1]).role, MailboxRole::Junk);
+
+    // Kullanıcının gizleme seçimi sonraki eşitlemede korunur; baştan
+    // eşitlemede gizlenen klasörün postaları yerelden kalkar.
+    store.set_mailbox_hidden("acc:mb-pr", true).unwrap();
+    store.set_mailbox_hidden("acc:mb-st", false).unwrap();
+    store.set_jmap_email_state(ACC, None).unwrap();
+    let out = mh_jmap::incremental_sync(&client, &store, ACC, &|_, _| {})
+        .await
+        .unwrap();
+    assert!(out.full);
+    assert!(mb("mb-pr").hidden && !mb("mb-st").hidden);
+    let known = store.jmap_known(ACC).unwrap();
+    assert!(!known.contains_key(&ids[0]), "gizlenen klasör izlenmez");
+    assert!(known.contains_key(&ids[2]), "gösterilen kutu izlenir");
+
+    // Yalnız klasör ve kopya kutusundaki posta: klasör önce (rol yok, kimlik sırası).
+    server.with(|s| {
+        s.update_email(&ids[2], |e| {
+            e.mailbox_ids = BTreeSet::from(["mb-st".to_string(), "mb-p2".to_string()])
+        })
+    });
+    mh_jmap::incremental_sync(&client, &store, ACC, &|_, _| {})
+        .await
+        .unwrap();
+    assert_eq!(loc(&ids[2]).mailbox_id, "acc:mb-p2");
+
+    // Elle rol: "2024" arşiv olur; sonraki eşitlemede de öyle kalır.
+    store
+        .set_mailbox_role("acc:mb-p2", MailboxRole::Archive)
+        .unwrap();
+    store.set_jmap_email_state(ACC, None).unwrap();
+    store.set_jmap_mailbox_state(ACC, None).unwrap();
+    mh_jmap::incremental_sync(&client, &store, ACC, &|_, _| {})
+        .await
+        .unwrap();
+    assert_eq!(mb("mb-p2").role, MailboxRole::Archive);
+    assert_eq!(mb("mb-p2").parent_id, None);
+    assert_eq!(loc(&ids[3]).role, MailboxRole::Archive);
+    // Sıfırlama: roller sunucudan yeniden bulunur.
+    store.reset_mailbox_roles(ACC).unwrap();
+    store.set_jmap_email_state(ACC, None).unwrap();
+    mh_jmap::incremental_sync(&client, &store, ACC, &|_, _| {})
+        .await
+        .unwrap();
+    assert_eq!(mb("mb-p2").role, MailboxRole::Other);
+    assert_eq!(mb("mb-p2").parent_id.as_deref(), Some("acc:mb-pr"));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

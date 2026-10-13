@@ -86,9 +86,9 @@ mod tests {
         let s = store_with_account("a");
         s.insert_account(&account("b")).unwrap();
         for acc in ["a", "b"] {
-            s.upsert_mailbox(acc, "INBOX", "INBOX", MailboxRole::Inbox)
+            s.upsert_mailbox(acc, "INBOX", "INBOX", MailboxRole::Inbox, None, false)
                 .unwrap();
-            s.upsert_mailbox(acc, "Drafts", "Drafts", MailboxRole::Drafts)
+            s.upsert_mailbox(acc, "Drafts", "Drafts", MailboxRole::Drafts, None, false)
                 .unwrap();
         }
         s

@@ -676,6 +676,7 @@ mod tests {
             signature: None,
             created_at: 0,
             auth: Default::default(),
+            notify: true,
         }
     }
 

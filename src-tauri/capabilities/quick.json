@@ -14,6 +14,7 @@
     "opener:allow-open-url",
     "opener:allow-default-urls",
     "allow-settings-get",
+    "allow-quick-replies-set",
     "allow-accounts-list",
     "allow-message-get",
     "allow-messages-flag",
