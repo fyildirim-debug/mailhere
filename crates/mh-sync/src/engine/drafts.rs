@@ -70,7 +70,11 @@ impl SyncManager {
                 touched.push(prev.mailbox_id.clone());
             }
             if prev.account_id == account_id {
-                remove.push(OldDraft::from(prev));
+                // Aynı sürüm yeniden kaydediliyorsa sunucudaki kopyası kalır.
+                if prev.message_id_header.is_none() || prev.message_id_header != m.message_id_header
+                {
+                    remove.push(OldDraft::from(prev));
+                }
             } else {
                 // Gönderen hesap değişti: eski hesabın taslağı da kalkar.
                 self.send(
@@ -122,9 +126,24 @@ pub(super) async fn apply(
     let mut touched: Vec<String> = Vec::new();
     if let Some(raw) = raw {
         ensure_mailbox(conn, dest).await?;
-        conn.session
-            .append(dest, Some("(\\Seen \\Draft)"), None, raw)
-            .await?;
+        // Bağlantı eklemeden hemen sonra koptuysa komut yeniden çalışır;
+        // aynı sürüm sunucudaysa ikinci kez eklenmez.
+        let query = mh_mime::parse(raw, true)
+            .and_then(|p| p.message_id)
+            .as_deref()
+            .and_then(header_search);
+        let present = match query {
+            Some(q) => {
+                conn.session.examine(dest).await?;
+                !conn.session.uid_search(q).await?.is_empty()
+            }
+            None => false,
+        };
+        if !present {
+            conn.session
+                .append(dest, Some("(\\Seen \\Draft)"), None, raw)
+                .await?;
+        }
         touched.push(dest.to_owned());
     }
     let mut paths: Vec<&str> = remove.iter().map(|o| o.path.as_str()).collect();

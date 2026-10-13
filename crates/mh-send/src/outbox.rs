@@ -494,6 +494,65 @@ mod tests {
         assert_eq!(a(fwd.id).bytes, a(original.id).bytes, "içerik aynen");
     }
 
+    /// Arayüz, ekli bir taslağı yeniden açınca `forward_from` ve `draft_id`
+    /// olarak taslağın kendi kimliğini verir.
+    #[tokio::test]
+    async fn yeniden_acilan_taslagin_ekleri_korunur() {
+        let (store, rec, outbox) = setup();
+        let dir = std::env::temp_dir().join(format!("mh-taslak-ek-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("Bütçe.xlsx");
+        std::fs::write(&path, b"PK\x03\x04 tablo").unwrap();
+
+        let mut m = msg();
+        m.attachments = vec![path.to_string_lossy().into_owned()];
+        let draft = outbox.save_draft(&m, 1_000).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+
+        // Yeniden açılan taslak: dosya yolu yok, ekler taslağın kendisinden.
+        m.attachments.clear();
+        m.forward_from = Some(draft);
+        m.draft_id = Some(draft);
+        m.body_text = "Güncel metin".into();
+        assert_eq!(outbox.save_draft(&m, 2_000).unwrap(), draft);
+        let d = store.detail(draft, &[]).unwrap();
+        assert_eq!(d.attachments.len(), 1);
+        assert_eq!(d.attachments[0].name, "Bütçe.xlsx");
+        assert_eq!(d.body_text.as_deref(), Some("Güncel metin"));
+
+        m.send_at = Some(0);
+        let item = outbox.enqueue(&m, 0).unwrap();
+        run_due(&store, &outbox).await;
+        assert_eq!(
+            rec.outbox.lock().unwrap().clone(),
+            vec![OutboxEvent {
+                id: item.id,
+                ok: true,
+                error: None
+            }]
+        );
+        assert!(store.summary(draft).unwrap().is_none());
+        let sent = view(&store, mh_core::View::Sent, "demo-is");
+        let d = store.detail(sent[0].id, &[]).unwrap();
+        assert_eq!(d.attachments.len(), 1);
+        assert_eq!(d.attachments[0].name, "Bütçe.xlsx");
+        let raw = store.raw(sent[0].id).unwrap().unwrap();
+        assert_eq!(
+            mh_mime::attachment(&raw, 0).unwrap().bytes,
+            b"PK\x03\x04 tablo"
+        );
+    }
+
+    #[tokio::test]
+    async fn olmayan_taslak_yerine_yenisi_acilir() {
+        let (store, _, outbox) = setup();
+        let mut m = msg();
+        m.draft_id = Some(424_242);
+        let id = outbox.save_draft(&m, 1_000).unwrap();
+        assert_ne!(id, 424_242);
+        assert_eq!(store.summary(id).unwrap().unwrap().subject, m.subject);
+    }
+
     #[tokio::test]
     async fn taslaktan_yanit_ayni_konusmada() {
         let (store, _, outbox) = setup();
