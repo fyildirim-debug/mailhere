@@ -51,13 +51,14 @@ fn is_tls(e: &(dyn std::error::Error + 'static)) -> bool {
         if err.downcast_ref::<rustls::Error>().is_some() {
             return true;
         }
-        if let Some(io) = err.downcast_ref::<std::io::Error>() {
-            if io
-                .get_ref()
-                .is_some_and(|inner| inner.downcast_ref::<rustls::Error>().is_some())
-            {
+        // `io::Error::source` iç hatayı atlar; iç içe io hatalarına elle in
+        // (hyper: Other → InvalidData → rustls).
+        let mut io = err.downcast_ref::<std::io::Error>();
+        while let Some(inner) = io.and_then(|e| e.get_ref()) {
+            if inner.downcast_ref::<rustls::Error>().is_some() {
                 return true;
             }
+            io = inner.downcast_ref::<std::io::Error>();
         }
         cur = err.source();
     }
@@ -106,10 +107,12 @@ impl JmapError {
         match self {
             Self::App(e) => e.clone(),
             Self::Auth => auth_error(),
-            Self::Http(e) if is_tls(e) => AppError::new(
-                ErrorCode::Tls,
-                "Güvenli bağlantı kurulamadı: sunucu sertifikası doğrulanamadı. Sunucu adresini denetle.",
-            ),
+            Self::Http(e) if is_tls(e) => crate::client::untrusted_for(e.url()).unwrap_or_else(|| {
+                AppError::new(
+                    ErrorCode::Tls,
+                    "Güvenli bağlantı kurulamadı: sunucu sertifikası doğrulanamadı. Sunucu adresini denetle.",
+                )
+            }),
             Self::Http(e) if e.is_timeout() => timeout_error(),
             Self::Http(e) if e.is_decode() => protocol_error(),
             Self::Http(e) => AppError::new(

@@ -7,7 +7,8 @@
 //! `ErrorCode::Untrusted` döner. Sessizce kabul yoktur. Onaylı sertifikada da
 //! el sıkışma imzası sertifikanın anahtarıyla doğrulanır.
 //!
-//! IMAP (bu crate) ve SMTP (`mh-send`) aynı doğrulayıcıyı kullanır.
+//! IMAP (bu crate), SMTP (`mh-send`) ve JMAP'in HTTPS bağlantıları (`mh-jmap`,
+//! [`HttpsTrust`] ile) aynı doğrulayıcıyı kullanır.
 
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::Duration;
@@ -181,6 +182,9 @@ impl ServerCertVerifier for PinVerifier {
         ocsp_response: &[u8],
         now: UnixTime,
     ) -> Result<ServerCertVerified, rustls::Error> {
+        // Doğrulayıcı birden çok el sıkışmada kullanılabilir (HTTPS istemcisi):
+        // önceki reddin izi yeni sonuca karışmasın.
+        *self.rejected.lock().unwrap_or_else(|p| p.into_inner()) = None;
         match webpki().verify_server_cert(
             end_entity,
             intermediates,
@@ -373,6 +377,52 @@ pub async fn handshake<S: AsyncRead + AsyncWrite + Unpin>(
             ErrorCode::Network,
             "Güvenli bağlantı zaman aşımına uğradı.",
         )),
+    }
+}
+
+// ------------------------------------------------------------------- HTTPS
+
+/// HTTPS istemcisi (JMAP) için sunucu + kapı başına doğrulayıcı: webpki,
+/// olmazsa yalnız onaylı sertifika. İstemci ömrü boyunca tutulur; istek
+/// sertifika yüzünden düşerse [`HttpsTrust::untrusted`] nedenini söyler.
+#[derive(Debug)]
+pub struct HttpsTrust {
+    host: String,
+    port: u16,
+    verifier: Arc<PinVerifier>,
+}
+
+impl HttpsTrust {
+    pub fn new(host: &str, port: u16) -> Self {
+        Self {
+            host: host_key(host),
+            port,
+            verifier: Arc::new(PinVerifier {
+                host: host_key(host),
+                port,
+                rejected: Mutex::new(None),
+            }),
+        }
+    }
+
+    /// reqwest'in `use_preconfigured_tls` ayarı (HTTP/1.1).
+    pub fn client_config(&self) -> AppResult<ClientConfig> {
+        let mut cfg = (*client_config(self.verifier.clone())?).clone();
+        cfg.alpn_protocols = vec![b"http/1.1".to_vec()];
+        Ok(cfg)
+    }
+
+    /// Son el sıkışmada sertifika reddedildiyse `ErrorCode::Untrusted` hatası.
+    pub fn untrusted(&self) -> Option<AppError> {
+        let chain = self
+            .verifier
+            .rejected
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone()?;
+        let name = server_name(&self.host).ok()?;
+        let problem = problems(&chain, &name, UnixTime::now()).join(", ");
+        Some(untrusted_error(&self.host, self.port, &problem))
     }
 }
 

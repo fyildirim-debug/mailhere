@@ -81,6 +81,7 @@ pub fn cert_trust(
         tracing::warn!(error = %e, "ayar olayı gönderilemedi");
     }
     state.sync.restart_host(&host)?;
+    state.jmap.restart_host(&host)?;
     Ok(())
 }
 

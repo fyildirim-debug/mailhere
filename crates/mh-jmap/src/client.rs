@@ -4,12 +4,14 @@
 //! gider. Şifresiz `http://` yalnız yerel test sunucularına (localhost)
 //! açıktır.
 
+use std::collections::HashMap;
 use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use mh_core::{AppError, AppResult, ErrorCode};
+use mh_sync::tls::HttpsTrust;
 use reqwest::header::{ACCEPT, CONTENT_TYPE, LOCATION};
 use reqwest::{RequestBuilder, StatusCode, Url};
 use serde_json::{json, Value};
@@ -57,20 +59,71 @@ impl fmt::Debug for Credentials {
     }
 }
 
-/// Tüm hesapların paylaştığı HTTP istemcisi (bağlantı havuzu). Yönlendirmeler
-/// elle izlenir: kimlik bilgisi yalnız güvenli hedeflere yeniden gönderilir.
-pub(crate) fn http() -> reqwest::Client {
+/// Yönlendirmeler elle izlenir: kimlik bilgisi yalnız güvenli hedeflere
+/// yeniden gönderilir.
+fn builder() -> reqwest::ClientBuilder {
+    reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(CONNECT_TIMEOUT)
+        .user_agent(concat!("Mailhere/", env!("CARGO_PKG_VERSION")))
+}
+
+/// Yerel düz http (test sunucuları) için ortak istemci.
+fn plain() -> reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT
-        .get_or_init(|| {
-            reqwest::Client::builder()
-                .redirect(reqwest::redirect::Policy::none())
-                .connect_timeout(CONNECT_TIMEOUT)
-                .user_agent(concat!("Mailhere/", env!("CARGO_PKG_VERSION")))
-                .build()
-                .unwrap_or_else(|_| reqwest::Client::new())
-        })
+        .get_or_init(|| builder().build().unwrap_or_else(|_| reqwest::Client::new()))
         .clone()
+}
+
+type Origins = Mutex<HashMap<(String, u16), (reqwest::Client, Arc<HttpsTrust>)>>;
+
+fn origins() -> &'static Origins {
+    static ORIGINS: OnceLock<Origins> = OnceLock::new();
+    ORIGINS.get_or_init(Origins::default)
+}
+
+fn origin_key(url: &Url) -> Option<(String, u16)> {
+    Some((
+        url.host_str()?.to_ascii_lowercase(),
+        url.port_or_known_default()?,
+    ))
+}
+
+/// Adresin kökenine (sunucu + kapı) ait HTTP istemcisi; bağlantı havuzu
+/// kökene özeldir. https'te sertifika webpki ile, olmazsa yalnız kullanıcının
+/// o sunucu + kapı için onayladığı parmak iziyle kabul edilir.
+pub(crate) fn http_for(url: &Url) -> reqwest::Client {
+    if url.scheme() != "https" {
+        return plain();
+    }
+    let Some(key) = origin_key(url) else {
+        return plain();
+    };
+    let mut map = origins().lock().unwrap_or_else(|p| p.into_inner());
+    if let Some((client, _)) = map.get(&key) {
+        return client.clone();
+    }
+    let trust = Arc::new(HttpsTrust::new(&key.0, key.1));
+    let built = trust
+        .client_config()
+        .ok()
+        .and_then(|cfg| builder().use_preconfigured_tls(cfg).build().ok());
+    match built {
+        Some(client) => {
+            map.insert(key, (client.clone(), trust));
+            client
+        }
+        // Kurulamazsa yalnız gömülü köklerle doğrulayan istemci (onay yok).
+        None => plain(),
+    }
+}
+
+/// İstek, sunucu sertifikası güvenilmediği için düştüyse `Untrusted` hatası.
+pub(crate) fn untrusted_for(url: Option<&Url>) -> Option<AppError> {
+    let key = origin_key(url?)?;
+    let map = origins().lock().unwrap_or_else(|p| p.into_inner());
+    map.get(&key)?.1.untrusted()
 }
 
 fn tls_required() -> AppError {
@@ -165,11 +218,10 @@ pub(crate) async fn get_following(
     accept: &str,
     limit: Duration,
 ) -> JmapResult<(reqwest::Response, Url)> {
-    let client = http();
     let mut url = url;
     for _ in 0..=MAX_REDIRECTS {
         check_url(&url)?;
-        let mut rb = client
+        let mut rb = http_for(&url)
             .get(url.clone())
             .header(ACCEPT, accept)
             .timeout(limit);
@@ -355,7 +407,7 @@ impl Client {
             .map(|(i, (m, args))| json!([m, args, i.to_string()]))
             .collect();
         let body = json!({ "using": using, "methodCalls": method_calls });
-        let rb = http()
+        let rb = http_for(&self.api_url)
             .post(self.api_url.clone())
             .header(CONTENT_TYPE, "application/json")
             .header(ACCEPT, "application/json")
@@ -466,7 +518,7 @@ impl Client {
             &self.session.upload_url,
             &[("accountId", &self.account_id)],
         ))?;
-        let rb = http()
+        let rb = http_for(&url)
             .post(url)
             .header(CONTENT_TYPE, ty)
             .header(ACCEPT, "application/json")
@@ -521,6 +573,70 @@ pub async fn test_login(session_url: &str, username: &str, password: &str) -> Ap
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Kendinden imzalı sertifikalı, her isteğe "ok" diyen HTTPS sunucusu.
+    async fn https_server() -> (u16, String) {
+        use rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let mut params = rcgen::CertificateParams::new(vec!["127.0.0.1".to_owned()]).unwrap();
+        params
+            .distinguished_name
+            .push(rcgen::DnType::CommonName, "127.0.0.1");
+        let key = rcgen::KeyPair::generate().unwrap();
+        let cert = params.self_signed(&key).unwrap();
+        let sha = mh_sync::tls::fingerprint(cert.der());
+        let cfg = rustls::ServerConfig::builder_with_provider(Arc::new(
+            rustls::crypto::ring::default_provider(),
+        ))
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_no_client_auth()
+        .with_single_cert(
+            vec![cert.der().clone()],
+            PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key.serialize_der())),
+        )
+        .unwrap();
+        let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(cfg));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((sock, _)) = listener.accept().await {
+                let acceptor = acceptor.clone();
+                tokio::spawn(async move {
+                    if let Ok(mut tls) = acceptor.accept(sock).await {
+                        let mut buf = [0u8; 4096];
+                        let _ = tls.read(&mut buf).await;
+                        let _ = tls
+                            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\nok")
+                            .await;
+                        let _ = tls.shutdown().await;
+                    }
+                });
+            }
+        });
+        (port, sha)
+    }
+
+    #[tokio::test]
+    async fn https_kendinden_imzali_onaysiz_reddedilir_onayla_gecer() {
+        let (port, sha) = https_server().await;
+        let url = Url::parse(&format!("https://127.0.0.1:{port}/.well-known/jmap")).unwrap();
+
+        let err = http_for(&url).get(url.clone()).send().await.unwrap_err();
+        let app = JmapError::Http(err).to_app();
+        assert_eq!(app.code, ErrorCode::Untrusted, "{}", app.message);
+        assert!(app.message.contains("kendinden imzalı"), "{}", app.message);
+
+        // Kullanıcı bu sunucu + kapı için parmak izini onaylar.
+        mh_sync::tls::trust(mh_core::TrustedCert {
+            host: "127.0.0.1".into(),
+            port,
+            sha256: sha,
+        });
+        let resp = http_for(&url).get(url).send().await.unwrap();
+        assert_eq!(resp.text().await.unwrap(), "ok");
+    }
 
     #[test]
     fn oturum_adresi_duzenlenir() {

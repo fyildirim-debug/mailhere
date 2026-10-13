@@ -270,6 +270,20 @@ impl JmapManager {
         self.handles().insert(account.id, Handle { tx, tasks });
     }
 
+    /// Oturum adresi `host` sunucusunda olan JMAP hesaplarını yeniden başlatır
+    /// (sertifika onaylandıktan sonra). Yeniden başlatılan hesap sayısını döner.
+    pub fn restart_host(&self, host: &str) -> AppResult<usize> {
+        let host = host.trim().trim_end_matches('.');
+        let mut n = 0;
+        for a in self.shared.store.accounts()? {
+            if a.kind == AccountKind::Jmap && endpoint(&a).0.eq_ignore_ascii_case(host) {
+                self.start(a);
+                n += 1;
+            }
+        }
+        Ok(n)
+    }
+
     /// Hesabın görevlerini durdurur.
     pub fn stop(&self, account_id: &str) {
         if let Some(h) = self.handles().remove(account_id) {
@@ -500,6 +514,21 @@ impl JmapManager {
     }
 }
 
+/// Hesabın JMAP sunucusu ve kapısı (oturum adresinden).
+fn endpoint(account: &Account) -> (String, u16) {
+    account
+        .jmap_url
+        .as_deref()
+        .and_then(|u| reqwest::Url::parse(u).ok())
+        .and_then(|u| {
+            Some((
+                u.host_str()?.to_ascii_lowercase(),
+                u.port_or_known_default()?,
+            ))
+        })
+        .unwrap_or_default()
+}
+
 // ------------------------------------------------------------ komut görevi
 
 async fn account_loop(ctx: Arc<Ctx>, mut rx: UnboundedReceiver<Command>) {
@@ -514,13 +543,25 @@ async fn account_loop(ctx: Arc<Ctx>, mut rx: UnboundedReceiver<Command>) {
         ctx.shared.forget(&ctx.account.id);
         let app = err.to_app();
         tracing::warn!(account = %ctx.account.id, error = %err, "JMAP eşitlemesi kesildi");
+        // Güvenilmeyen sertifika: kullanıcı onaylayana ya da elle eşitleyene
+        // kadar yeniden denenmez.
+        let wait_user = app.code == ErrorCode::Untrusted;
         ctx.status(match app.code {
             ErrorCode::Network => SyncState::Offline,
+            ErrorCode::Untrusted => {
+                let (host, port) = endpoint(&ctx.account);
+                SyncState::Untrusted { host, port }
+            }
             _ => SyncState::Error {
                 message: app.message,
             },
         });
-        let sleep = tokio::time::sleep(backoff);
+        let wait = if wait_user {
+            Duration::from_secs(365 * 24 * 3600)
+        } else {
+            backoff
+        };
+        let sleep = tokio::time::sleep(wait);
         tokio::pin!(sleep);
         loop {
             tokio::select! {

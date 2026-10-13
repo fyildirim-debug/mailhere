@@ -6,7 +6,7 @@ use reqwest::header::{ACCEPT, CACHE_CONTROL};
 use reqwest::StatusCode;
 use serde_json::Value;
 
-use crate::client::{http, Client};
+use crate::client::{http_for, Client};
 use crate::error::{JmapError, JmapResult};
 
 /// Tamponun üst sınırı: bozuk ya da kötü niyetli akış belleği şişirmesin.
@@ -114,7 +114,7 @@ pub async fn listen(
     let url = client
         .event_source_url("Email,Mailbox", ping_secs)
         .ok_or_else(|| JmapError::Protocol("sunucu durum akışı sunmuyor".into()))?;
-    let rb = http()
+    let rb = http_for(&url)
         .get(url)
         .header(ACCEPT, "text/event-stream")
         .header(CACHE_CONTROL, "no-cache");

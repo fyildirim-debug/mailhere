@@ -2792,12 +2792,14 @@ dependencies = [
  "mh-mime",
  "mh-store",
  "mh-sync",
+ "rcgen",
  "reqwest 0.12.28",
  "rustls",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
  "tokio",
+ "tokio-rustls",
  "tracing",
 ]
 
