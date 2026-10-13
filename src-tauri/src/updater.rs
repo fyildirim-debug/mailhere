@@ -213,7 +213,7 @@ async fn background_check(app: &AppHandle) {
 /// sonra, ardından 6 saatte bir). Tanıtım kipinde denetim yapılmaz.
 pub fn start(app: &AppHandle, rt: &tokio::runtime::Handle) {
     app.manage(UpdateState::default());
-    if std::env::var("MAILHERE_DEMO").is_ok_and(|v| v.trim() == "1") {
+    if crate::state::demo_mode() {
         return;
     }
     let app = app.clone();

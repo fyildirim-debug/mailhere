@@ -21,14 +21,14 @@ Yeni posta geldiğinde koca bir pencere açılmaz: ekranın köşesinde küçük
 - **Her hesap** — IMAP/SMTP (ayarlar kendiliğinden bulunur), Gmail ve Outlook / Microsoft 365 için tarayıcıyla giriş (OAuth 2, XOAUTH2), Stalwart gibi JMAP sunucuları (anlık bildirim dahil).
 - **Taslaklar ve iletme** — yazarken taslak kendiliğinden sunucuya kaydedilir; iletilen postanın ekleri de gider; imza hesap başına düzenlenir.
 - **Çevrimdışı güvenli** — arşivleme, bayrak, taşıma gibi sunucu işlemleri kalıcı bir kuyrukta bekler, bağlantı gelince sırayla uygulanır; uygulama kapansa da kaybolmaz.
-- **Gizlilik varsayılan** — parolalar ve jetonlar işletim sisteminin anahtar zincirinde; uzak görseller ve izleme pikselleri kapalı; HTML posta betiksiz ve yalıtılmış gösterilir. Kendinden imzalı sertifika ancak parmak izini görüp onayladığında kabul edilir.
+- **Gizlilik varsayılan** — parolalar ve jetonlar işletim sisteminin anahtar zincirinde; yerel posta veritabanı diskte şifreli (SQLCipher, AES-256; anahtarı anahtar zincirinde); uzak görseller ve izleme pikselleri kapalı; HTML posta betiksiz ve yalıtılmış gösterilir. Kendinden imzalı sertifika ancak parmak izini görüp onayladığında kabul edilir.
 - **Sakin bildirim** — tam ekran uygulama ya da sunum açıkken kart çıkmaz.
 - **İmzalı güncelleme** — yeni sürüm uygulama içinden kurulur; imzası tutmayan paket kurulmaz.
 - **Hafif** — Tauri 2 ile işletim sisteminin kendi web görünümü kullanılır; ayrı bir tarayıcı gömülmez.
 
 ## Geliştirme
 
-Gerekenler: Node 22, pnpm 10, Rust (stable). Linux'ta ayrıca `libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev`.
+Gerekenler: Node 22, pnpm 10, Rust (stable), Perl ve `make` (SQLCipher'in OpenSSL'i kaynaktan derlenir; ilk derleme birkaç dakika sürer). Linux'ta ayrıca `libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev`. Windows'ta Visual Studio derleme araçları ve [Strawberry Perl](https://strawberryperl.com) gerekir (Git Bash'in perl'i olmaz; gerekirse `OPENSSL_SRC_PERL` ile yolu verilir).
 
 ```bash
 pnpm install
@@ -42,12 +42,14 @@ pnpm tauri dev      # masaüstü uygulaması
 MAILHERE_DEMO=1 MAILHERE_SECRETS=memory MAILHERE_DATA_DIR=$(mktemp -d) pnpm tauri dev
 ```
 
+İlk üç değişken yalnız geliştirme derlemesinde (`pnpm tauri dev`) geçerlidir; sürüm derlemesi bunları yok sayar.
+
 | Ortam değişkeni | Etkisi |
 | --- | --- |
-| `MAILHERE_DEMO=1` | hesap yoksa örnek hesapları ve postaları yükler |
+| `MAILHERE_DEMO=1` | hesap yoksa örnek hesapları ve postaları yükler (bellek kipini de açar) |
 | `MAILHERE_DEMO_NOTIFY=<sn>` | açılıştan bu kadar sonra örnek bildirim kartı gösterir |
-| `MAILHERE_SECRETS=memory` | parolaları anahtar zinciri yerine bellekte tutar (yalnız deneme) |
-| `MAILHERE_DATA_DIR=<klasör>` | veritabanı ve önbellek klasörü |
+| `MAILHERE_SECRETS=memory` | parolaları ve veritabanı anahtarını anahtar zinciri yerine bellekte tutar; `MAILHERE_DATA_DIR` verilmezse veriler her açılışta yeni bir geçici klasöre yazılır |
+| `MAILHERE_DATA_DIR=<klasör>` | veritabanı ve önbellek klasörü (bellek kipinde boş olmalı) |
 | `MAILHERE_GOOGLE_CLIENT_ID`, `MAILHERE_GOOGLE_CLIENT_SECRET` | Google ile giriş (Gmail, XOAUTH2); masaüstü uygulaması OAuth istemcisi |
 | `MAILHERE_MICROSOFT_CLIENT_ID` | Microsoft ile giriş (Outlook / Microsoft 365, XOAUTH2); genel istemci |
 
@@ -85,7 +87,7 @@ pnpm tauri build
 | `app/` | Svelte 5 + TypeScript arayüzü; tüm pencereler tek uygulamada (`#/main`, `#/notify`, `#/quick/:id`, `#/compose/:mod/:id`) |
 | `src-tauri/` | Tauri kabuğu: pencereler, tepsi, komutlar |
 | `crates/mh-core` | arayüzle ortak tipler (sözleşme) |
-| `crates/mh-store` | SQLite + FTS5 yerel depo |
+| `crates/mh-store` | SQLite + FTS5 yerel depo (SQLCipher ile şifreli) |
 | `crates/mh-mime` | ayrıştırma, HTML temizleme, akıllı kategori |
 | `crates/mh-sync` | sunucu ayarı keşfi, IMAP eşitleme, anlık bildirim (IDLE) |
 | `crates/mh-send` | SMTP gönderim, giden kutusu, geri alma |

@@ -44,7 +44,9 @@ uuid = { version = "1.28.0", features = ["v4"] }
 base64 = "0.22.1"
 
 # Depo ve posta biçimi
-rusqlite = { version = "0.40.2", features = ["bundled"] }
+# SQLCipher: veritabanı diskte şifreli (AES-256). OpenSSL yalnız SQLCipher'in
+# libcrypto'su için kaynaktan derlenir ve statik bağlanır; TLS yine rustls.
+rusqlite = { version = "0.40.2", features = ["bundled-sqlcipher-vendored-openssl"] }
 mail-parser = "0.11.9"
 mail-builder = "0.4.4"
 ammonia = "4.1.7"
@@ -55,6 +57,8 @@ tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring
 webpki-roots = "1.0.9"
 # PKCE özeti ve güvenli rastgele değer (rustls zaten ring kullanır).
 ring = "0.17.14"
+# Bellekteki anahtar kopyalarını düşerken sıfırlamak için.
+zeroize = "1.9.1"
 async-imap = { version = "0.12.0", default-features = false, features = ["runtime-tokio"] }
 hickory-resolver = { version = "0.26.3", default-features = false, features = ["tokio", "system-config"] }
 # 0.41 öncesi RUSTSEC-2026-0194'ten etkilenir.

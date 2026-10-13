@@ -1,6 +1,6 @@
 [package]
 name = "mh-store"
-description = "Mailhere yerel depo (SQLite + FTS5)"
+description = "Mailhere yerel depo (SQLCipher ile şifreli SQLite + FTS5)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -16,3 +16,5 @@ serde_json.workspace = true
 mail-builder.workspace = true
 chrono.workspace = true
 tracing.workspace = true
+ring.workspace = true
+zeroize.workspace = true

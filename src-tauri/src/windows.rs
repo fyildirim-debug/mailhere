@@ -67,6 +67,11 @@ pub fn create_main(app: &AppHandle) -> tauri::Result<WebviewWindow> {
 
 /// Ana pencereyi gösterir ve öne alır (gerekirse yeniden oluşturur).
 pub fn show_main(app: &AppHandle) {
+    // Açılış başarısız (yalnız hata iletişim kutusu açık): ikinci açılış
+    // durumsuz bir ana pencere yaratmasın.
+    if app.try_state::<AppState>().is_none() {
+        return;
+    }
     match create_main(app) {
         Ok(w) => {
             let _ = w.unminimize();

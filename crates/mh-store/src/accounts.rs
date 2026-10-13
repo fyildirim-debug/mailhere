@@ -117,8 +117,15 @@ impl Store {
     }
 
     /// Hesabı ve tüm yerel verisini siler. Silindiyse `true`.
+    /// Hesabı ve (zincirleme) tüm postalarını siler; silinen içerik WAL'da da
+    /// beklemesin diye ardından WAL sıfırlanır.
     pub fn remove_account(&self, id: &AccountId) -> AppResult<bool> {
-        self.with(|c| Ok(c.execute("DELETE FROM accounts WHERE id = ?1", [id])? > 0))
+        let removed =
+            self.with(|c| Ok(c.execute("DELETE FROM accounts WHERE id = ?1", [id])? > 0))?;
+        if removed {
+            self.purge_freed()?;
+        }
+        Ok(removed)
     }
 }
 
