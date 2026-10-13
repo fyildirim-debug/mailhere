@@ -188,15 +188,33 @@ impl Store {
         })
     }
 
-    /// Yerel postayı sunucudaki kopyasına bağlar.
-    pub fn set_jmap_id(
+    /// Yerel postayı sunucudaki kopyasına bağlar (ör. sunucuya eklenen
+    /// taslak). Eşzamanlı bir eşitleme aynı sunucu postasını ayrı satır olarak
+    /// yazmışsa o satır silinir; etkilenen kutuları döner.
+    pub fn jmap_bind(
         &self,
         id: MessageId,
         account_id: &str,
         jmap_id: &str,
         blob_id: Option<&str>,
-    ) -> AppResult<()> {
-        self.with_tx(|tx| map_row(tx, id, account_id, jmap_id, blob_id))
+    ) -> AppResult<Vec<String>> {
+        self.with_tx(|tx| {
+            let dupes: Vec<(MessageId, String)> = {
+                let mut st = tx.prepare_cached(
+                    "SELECT m.id, m.mailbox_id FROM jmap_messages j JOIN messages m ON m.id = j.message_id
+                     WHERE j.account_id = ?1 AND j.jmap_id = ?2 AND j.message_id != ?3",
+                )?;
+                let rows = st.query_map(params![account_id, jmap_id, id], |r| {
+                    Ok((r.get(0)?, r.get(1)?))
+                })?;
+                rows.collect::<rusqlite::Result<_>>()?
+            };
+            for (dupe, _) in &dupes {
+                tx.execute("DELETE FROM messages WHERE id = ?1", [dupe])?;
+            }
+            map_row(tx, id, account_id, jmap_id, blob_id)?;
+            Ok(dupes.into_iter().map(|(_, mb)| mb).collect())
+        })
     }
 
     /// JMAP postasını ekler ya da kutusunu/bayraklarını günceller. Sunucu
@@ -527,10 +545,33 @@ mod tests {
         with_raw.raw = Some(b"Subject: x\r\n\r\ngovde".to_vec());
         s.jmap_upsert(&with_raw, "E2", None, None).unwrap();
         assert!(s.jmap_locations(&[id]).unwrap()[0].has_raw);
-        s.set_jmap_id(id, "a", "E2", Some("B2")).unwrap();
+        assert!(s.jmap_bind(id, "a", "E2", Some("B2")).unwrap().is_empty());
         assert_eq!(
             s.jmap_locations(&[id]).unwrap()[0].blob_id.as_deref(),
             Some("B2")
         );
+    }
+
+    #[test]
+    fn baglama_eszamanli_kopyayi_siler() {
+        let s = setup();
+        // Taslak yerelde kuruldu; eşitleme aynı sunucu postasını ayrı satır yazdı.
+        let local = s
+            .upsert_message(&msg("a", "a:mb-in", "Taslak", 1_000))
+            .unwrap()
+            .id;
+        let synced = s
+            .jmap_upsert(&msg("a", "a:mb-in", "Taslak", 1_000), "D1", None, None)
+            .unwrap()
+            .id;
+        assert_ne!(local, synced);
+        let touched = s.jmap_bind(local, "a", "D1", Some("B")).unwrap();
+        assert_eq!(touched, vec!["a:mb-in".to_string()]);
+        assert!(s.summary(synced).unwrap().is_none());
+        assert_eq!(s.jmap_message("a", "D1").unwrap(), Some(local));
+        // Yeni sürüm: aynı satır başka sunucu postasına bağlanır.
+        s.jmap_bind(local, "a", "D2", None).unwrap();
+        assert_eq!(s.jmap_message("a", "D2").unwrap(), Some(local));
+        assert_eq!(s.jmap_message("a", "D1").unwrap(), None);
     }
 }

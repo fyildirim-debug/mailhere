@@ -514,8 +514,21 @@ async fn yonetici_islemler_akis_gonderim_taslak() {
     assert_eq!(server.with(|s| s.emails.len()), before);
     server.with(|s| s.reject_submission = false);
 
-    // Taslaklar: kaydet, yerine yaz, sil.
-    let d1 = mgr
+    // Taslaklar: yerelde hemen, sunucuya kuyrukla; yerine yazmada kimlik korunur.
+    let drafts_on_server = |server: &FakeServer| {
+        server.with(|s| {
+            s.emails
+                .values()
+                .filter(|e| e.mailbox_ids.contains("mb-dr"))
+                .map(|e| {
+                    assert!(e.keywords.contains("$draft"));
+                    mh_mime::parse(&e.raw, true).unwrap().subject
+                })
+                .collect::<Vec<_>>()
+        })
+    };
+    let now = 1_791_800_000_000;
+    let (d1, touched) = mgr
         .save_draft(
             ACC,
             mail(
@@ -525,22 +538,24 @@ async fn yonetici_islemler_akis_gonderim_taslak() {
                 "Yarım",
             ),
             None,
+            now,
         )
-        .await
         .unwrap();
+    assert_eq!(touched, vec![format!("{ACC}:mb-dr")]);
+    assert!(list(&store, View::Drafts)
+        .iter()
+        .any(|m| m.subject == "Taslak 1"));
+    wait_until("taslak sunucuda", || {
+        drafts_on_server(&server) == vec!["Taslak 1".to_string()]
+            && store.jmap_locations(&[d1]).unwrap()[0].jmap_id.is_some()
+    })
+    .await;
     let j1 = store.jmap_locations(&[d1]).unwrap()[0]
         .jmap_id
         .clone()
         .unwrap();
-    server.with(|s| {
-        let e = &s.emails[&j1];
-        assert_eq!(e.mailbox_ids, BTreeSet::from(["mb-dr".to_string()]));
-        assert!(e.keywords.contains("$draft"));
-    });
-    assert!(list(&store, View::Drafts)
-        .iter()
-        .any(|m| m.subject == "Taslak 1"));
-    let d2 = mgr
+
+    let (d2, _) = mgr
         .save_draft(
             ACC,
             mail(
@@ -550,29 +565,55 @@ async fn yonetici_islemler_akis_gonderim_taslak() {
                 "Daha az yarım",
             ),
             Some(d1),
+            now,
         )
-        .await
         .unwrap();
-    let j2 = store.jmap_locations(&[d2]).unwrap()[0]
-        .jmap_id
-        .clone()
-        .unwrap();
-    assert!(server.with(|s| !s.emails.contains_key(&j1) && s.emails.contains_key(&j2)));
-    // Eşzamanlı eşitleme eski taslağı önce silmiş olabilir (SQLite satır
-    // kimliği yeniden kullanılır); yerel kimlik değil sunucu kimliği denetlenir.
-    wait_until("yerelde yalnız yeni taslak", || {
-        store.jmap_message(ACC, &j1).unwrap().is_none()
+    assert_eq!(d2, d1, "yerine yazınca kimlik korunur");
+    wait_until("yeni sürüm sunucuda, eskisi silindi", || {
+        drafts_on_server(&server) == vec!["Taslak 2".to_string()]
+            && store.jmap_locations(&[d1]).unwrap()[0]
+                .jmap_id
+                .as_ref()
+                .is_some_and(|j| *j != j1)
+    })
+    .await;
+
+    // Kuyruk çalışmadan art arda iki kayıt: sunucuda yalnız son sürüm kalır.
+    for (subject, msgid) in [("Taslak 3", "t3@ornek.com"), ("Taslak 4", "t4@ornek.com")] {
+        let (id, _) = mgr
+            .save_draft(
+                ACC,
+                mail("Furkan <furkan@ornek.com>", subject, msgid, "Son"),
+                Some(d1),
+                now,
+            )
+            .unwrap();
+        assert_eq!(id, d1);
+    }
+    wait_until("yalnız son sürüm", || {
+        drafts_on_server(&server) == vec!["Taslak 4".to_string()]
             && list(&store, View::Drafts)
                 .into_iter()
                 .map(|m| m.subject)
                 .collect::<Vec<_>>()
-                == vec!["Taslak 2".to_string()]
+                == vec!["Taslak 4".to_string()]
     })
     .await;
-    mgr.delete_draft(d2).await.unwrap();
-    assert!(server.with(|s| !s.emails.contains_key(&j2)));
-    wait_until("taslak yerelden silindi", || {
-        store.jmap_message(ACC, &j2).unwrap().is_none() && list(&store, View::Drafts).is_empty()
+
+    // Silme: yerelden hemen, sunucudan kuyrukla; taslak olmayan posta silinmez.
+    assert_eq!(mgr.delete_draft(id_b).unwrap_err().code, ErrorCode::Invalid);
+    assert_eq!(mgr.delete_draft(d1).unwrap(), vec![format!("{ACC}:mb-dr")]);
+    assert!(store.summary(d1).unwrap().is_none());
+    assert!(
+        mgr.delete_draft(d1).unwrap().is_empty(),
+        "ikinci silme sessiz"
+    );
+    wait_until("sunucuda taslak kalmadı", || {
+        drafts_on_server(&server).is_empty()
+    })
+    .await;
+    wait_until("eşitleme taslağı geri getirmez", || {
+        list(&store, View::Drafts).is_empty()
     })
     .await;
 
@@ -681,7 +722,7 @@ async fn tanitim_hesabi_aga_cikmaz() {
         }]
     );
     // Tanıtım taslağı yalnız yerelde.
-    let id = mgr
+    let (id, _) = mgr
         .save_draft(
             &demo.id,
             mail(
@@ -691,10 +732,14 @@ async fn tanitim_hesabi_aga_cikmaz() {
                 "x",
             ),
             None,
+            0,
         )
-        .await
         .unwrap();
     assert!(store.jmap_locations(&[id]).unwrap()[0].jmap_id.is_none());
-    mgr.delete_draft(id).await.unwrap();
+    assert_eq!(
+        store.jmap_locations(&[id]).unwrap()[0].role,
+        MailboxRole::Drafts
+    );
+    mgr.delete_draft(id).unwrap();
     assert!(store.summary(id).unwrap().is_none());
 }

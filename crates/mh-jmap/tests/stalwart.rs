@@ -269,8 +269,16 @@ async fn gercek_sunucu_uctan_uca() {
     let k = keywords(&client, &jmap_id).await;
     assert_eq!(k["mailboxIds"], json!({ trash.clone(): true }));
 
-    // Taslaklar: kaydet, yerine yaz, sil.
-    let d1 = mgr
+    // Taslaklar: kaydet, yerine yaz (aynı yerel kimlik), sil.
+    let server_id = |id| {
+        store
+            .jmap_locations(&[id])
+            .unwrap()
+            .first()
+            .and_then(|l| l.jmap_id.clone())
+    };
+    let now = chrono::Utc::now().timestamp_millis();
+    let (d1, _) = mgr
         .save_draft(
             ACC,
             raw(
@@ -281,16 +289,13 @@ async fn gercek_sunucu_uctan_uca() {
                 "Yarım",
             ),
             None,
+            now,
         )
-        .await
         .unwrap();
-    let j1 = store.jmap_locations(&[d1]).unwrap()[0]
-        .jmap_id
-        .clone()
-        .unwrap();
-    let k = keywords(&client, &j1).await;
-    assert_eq!(k["keywords"]["$draft"], true);
-    let d2 = mgr
+    wait_until("taslak sunucuda", 30, || server_id(d1).is_some()).await;
+    let j1 = server_id(d1).unwrap();
+    assert_eq!(keywords(&client, &j1).await["keywords"]["$draft"], true);
+    let (d2, _) = mgr
         .save_draft(
             ACC,
             raw(
@@ -301,34 +306,54 @@ async fn gercek_sunucu_uctan_uca() {
                 "Daha az yarım",
             ),
             Some(d1),
+            now,
         )
-        .await
         .unwrap();
-    let j2 = store.jmap_locations(&[d2]).unwrap()[0]
-        .jmap_id
-        .clone()
-        .unwrap();
-    let gone = client
-        .call(
-            "Email/get",
-            json!({ "accountId": client.account_id(), "ids": [j1], "properties": ["id"] }),
-        )
-        .await
-        .unwrap();
+    assert_eq!(d2, d1, "yerine yazınca kimlik korunur");
+    wait_until("yeni sürüm sunucuda", 30, || {
+        server_id(d1).is_some_and(|j| j != j1)
+    })
+    .await;
+    let j2 = server_id(d1).unwrap();
+    let mut gone = Value::Null;
+    for _ in 0..100 {
+        gone = client
+            .call(
+                "Email/get",
+                json!({ "accountId": client.account_id(), "ids": [j1], "properties": ["id"] }),
+            )
+            .await
+            .unwrap();
+        if gone["notFound"] == json!([j1]) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
     assert_eq!(
         gone["notFound"],
         json!([j1]),
         "önceki taslak sunucudan silinir"
     );
-    mgr.delete_draft(d2).await.unwrap();
-    let gone = client
-        .call(
-            "Email/get",
-            json!({ "accountId": client.account_id(), "ids": [j2], "properties": ["id"] }),
-        )
-        .await
-        .unwrap();
-    assert_eq!(gone["notFound"], json!([j2]));
+    mgr.delete_draft(d1).unwrap();
+    assert!(store.summary(d1).unwrap().is_none());
+    for _ in 0..100 {
+        gone = client
+            .call(
+                "Email/get",
+                json!({ "accountId": client.account_id(), "ids": [j2], "properties": ["id"] }),
+            )
+            .await
+            .unwrap();
+        if gone["notFound"] == json!([j2]) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(
+        gone["notFound"],
+        json!([j2]),
+        "silinen taslak sunucudan kalkar"
+    );
 
     // Temizlik: testin oluşturduğu postalar.
     let mut ids = vec![jmap_id];

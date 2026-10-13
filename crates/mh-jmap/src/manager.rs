@@ -76,6 +76,16 @@ enum Command {
         items: Vec<(String, Option<String>)>,
         dest: Dest,
     },
+    /// Yerelde kaydedilmiş taslağı sunucuya ekler ve önceki sürümleri siler.
+    Draft {
+        /// Yerel taslak kimliği (yerine yazmada korunur).
+        id: MessageId,
+        raw: Vec<u8>,
+        /// Silinecek önceki sürümlerin sunucu kimlikleri.
+        remove: Vec<String>,
+    },
+    /// Postaları sunucudan siler (taslak silme).
+    Destroy { jmap_ids: Vec<String> },
 }
 
 impl Command {
@@ -93,13 +103,6 @@ fn next_command(pending: &mut VecDeque<Command>) -> Option<Command> {
         pending.retain(Command::is_action);
     }
     Some(cmd)
-}
-
-fn now_ms() -> Millis {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as Millis)
-        .unwrap_or(0)
 }
 
 fn not_found() -> AppError {
@@ -414,92 +417,84 @@ impl JmapManager {
         })
     }
 
-    /// Taslağı kaydeder: sunucudaki Taslaklar kutusuna `$draft` ile eklenir,
-    /// `replace` verilirse önceki taslak sunucudan ve yerelden silinir.
-    /// Tanıtım hesabında yalnız yereldir. Yeni taslağın yerel kimliğini döner.
-    pub async fn save_draft(
+    /// Taslağı kaydeder: yerelde hemen yazılır (`replace` bir taslaksa onun
+    /// yerine, aynı hesapta aynı kimlikle), sunucuya ekleme ve önceki sürümün
+    /// silinmesi hesabın komut kuyruğunda yapılır (çevrimdışıyken de kayıt
+    /// kaybolmaz). Sunucuda Taslaklar kutusuna `$draft` ile eklenir. Tanıtım
+    /// hesabında yalnız yereldir. (taslak kimliği, etkilenen kutular) döner;
+    /// `SyncManager::save_draft` ile aynı biçimdedir.
+    pub fn save_draft(
         &self,
         account_id: &str,
         raw: Vec<u8>,
         replace: Option<MessageId>,
-    ) -> AppResult<MessageId> {
+        now: Millis,
+    ) -> AppResult<(MessageId, Vec<String>)> {
         let store = &self.shared.store;
         let account = store
             .account(account_id)?
             .ok_or_else(|| AppError::new(ErrorCode::NotFound, "Hesap bulunamadı."))?;
-        let old = match replace {
+        let previous = match replace {
             Some(id) => store
                 .jmap_locations(&[id])?
                 .into_iter()
                 .next()
-                .filter(|l| l.account_id == account.id),
+                .filter(|l| l.role == MailboxRole::Drafts),
             None => None,
         };
-        let mut client = None;
-        let mut saved = None;
-        if is_syncable(&account) {
-            let c = self.shared.client(&account).await.map_err(|e| e.to_app())?;
-            let s = send::save_draft(&c, &raw, old.as_ref().and_then(|l| l.jmap_id.as_deref()))
-                .await
-                .map_err(|e| e.to_app())?;
-            client = Some(c);
-            saved = Some(s);
-        }
-        let drafts = match store.mailbox_by_role(&account.id, MailboxRole::Drafts)? {
+        let dest = match store.mailbox_by_role(&account.id, MailboxRole::Drafts)? {
             Some(m) => m.mailbox.id,
-            None => match &client {
-                Some(c) => {
-                    sync::sync_mailboxes(c, store, &account.id)
-                        .await
-                        .map_err(|e| e.to_app())?;
-                    store
-                        .mailbox_by_role(&account.id, MailboxRole::Drafts)?
-                        .map(|m| m.mailbox.id)
-                        .ok_or_else(|| {
-                            AppError::new(ErrorCode::Internal, "Taslaklar kutusu bulunamadı.")
-                        })?
-                }
-                None => {
-                    store.upsert_mailbox(&account.id, "Drafts", "Drafts", MailboxRole::Drafts)?
-                }
-            },
+            None => store.upsert_mailbox(&account.id, "Drafts", "Drafts", MailboxRole::Drafts)?,
         };
-        let mut m = NewMessage::from_raw(raw, false, &account.id, &drafts, now_ms())
-            .ok_or_else(|| AppError::new(ErrorCode::Invalid, "Taslak ayrıştırılamadı."))?;
+        let mut m = NewMessage::from_raw(raw.clone(), false, &account.id, &dest, now)
+            .ok_or_else(|| AppError::new(ErrorCode::Internal, "Taslak oluşturulamadı."))?;
         m.unread = false;
-        let id = match &saved {
-            Some(s) => store.jmap_upsert(&m, &s.id, s.blob_id.as_deref(), None)?.id,
-            None => store.upsert_message(&m)?.id,
-        };
-        let mut touched = vec![drafts];
-        if let Some(old) = old.filter(|o| o.id != id) {
-            store.delete_messages(&[old.id])?;
-            touched.push(old.mailbox_id);
+        let put = store.put_draft(&m, replace)?;
+        let mut touched = vec![dest];
+        let mut remove = Vec::new();
+        if let Some(prev) = previous {
+            if !touched.contains(&prev.mailbox_id) {
+                touched.push(prev.mailbox_id.clone());
+            }
+            if let Some(j) = prev.jmap_id {
+                if prev.account_id == account.id {
+                    remove.push(j);
+                } else {
+                    // Gönderen hesap değişti: eski hesabın sunucu kopyası da kalkar.
+                    self.send(&prev.account_id, Command::Destroy { jmap_ids: vec![j] });
+                }
+            }
         }
-        self.shared.changed(touched);
-        Ok(id)
+        if is_syncable(&account) {
+            self.send(
+                &account.id,
+                Command::Draft {
+                    id: put.id,
+                    raw,
+                    remove,
+                },
+            );
+        }
+        Ok((put.id, touched))
     }
 
-    /// Taslağı sunucudan ve yerelden siler.
-    pub async fn delete_draft(&self, id: MessageId) -> AppResult<()> {
+    /// Taslağı yerelden hemen siler, sunucudan silinmesini kuyruğa alır.
+    /// Taslak olmayan posta silinmez (`Invalid`); zaten yoksa sessizce geçer.
+    /// Etkilenen kutuları döner; `SyncManager::delete_draft` ile aynı biçimdedir.
+    pub fn delete_draft(&self, id: MessageId) -> AppResult<Vec<String>> {
         let store = &self.shared.store;
-        let loc = store
+        let jmap_id = store
             .jmap_locations(&[id])?
             .into_iter()
             .next()
-            .ok_or_else(not_found)?;
-        let account = store
-            .account(&loc.account_id)?
-            .ok_or_else(|| AppError::new(ErrorCode::NotFound, "Postanın hesabı bulunamadı."))?;
-        if let (true, Some(jmap_id)) = (is_syncable(&account), loc.jmap_id.as_deref()) {
-            let c = self.shared.client(&account).await.map_err(|e| e.to_app())?;
-            send::delete_draft(&c, jmap_id)
-                .await
-                .map_err(|e| e.to_app())?;
+            .and_then(|l| l.jmap_id);
+        let Some(taken) = store.take_draft(id)? else {
+            return Ok(Vec::new());
+        };
+        if let Some(j) = jmap_id {
+            self.send(&taken.account_id, Command::Destroy { jmap_ids: vec![j] });
         }
-        store.delete_messages(&[id])?;
-        self.shared.changed(vec![loc.mailbox_id]);
-        Ok(())
+        Ok(vec![taken.mailbox_id])
     }
 }
 
@@ -655,6 +650,31 @@ async fn execute(ctx: &Ctx, client: &Client, cmd: &Command) -> JmapResult<()> {
             ops::move_emails(client, items, &dest).await?;
             run_sync(ctx, client).await
         }
+        Command::Draft { id, raw, remove } => {
+            let store = &ctx.shared.store;
+            let mut old = remove.clone();
+            // Taslak bu arada silindiyse yalnız eski sürümler kalkar.
+            let current = store
+                .jmap_locations(&[*id])?
+                .into_iter()
+                .next()
+                .filter(|l| l.account_id == ctx.account.id);
+            if let Some(loc) = current {
+                let saved = send::save_draft(client, raw, None).await?;
+                // Kuyrukta bekleyen önceki kayıt sunucuya eklenip bağlanmışsa o da eski sürümdür.
+                if let Some(j) = loc.jmap_id.filter(|j| *j != saved.id) {
+                    old.push(j);
+                }
+                let mut touched =
+                    store.jmap_bind(*id, &ctx.account.id, &saved.id, saved.blob_id.as_deref())?;
+                touched.push(loc.mailbox_id);
+                ctx.shared.changed(touched);
+            }
+            old.sort();
+            old.dedup();
+            ops::destroy_emails(client, &old).await
+        }
+        Command::Destroy { jmap_ids } => ops::destroy_emails(client, jmap_ids).await,
     }
 }
 
