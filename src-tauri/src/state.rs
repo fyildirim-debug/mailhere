@@ -47,8 +47,25 @@ pub fn internal(e: impl std::fmt::Display) -> AppError {
     )
 }
 
-fn env_flag(name: &str, value: &str) -> bool {
-    std::env::var(name).is_ok_and(|v| v.trim().eq_ignore_ascii_case(value))
+/// Geliştirme ve deneme anahtarı (`MAILHERE_DEMO`, `MAILHERE_SECRETS`,
+/// `MAILHERE_DEMO_NOTIFY`). Yalnız geliştirme derlemesinde okunur; sürüm
+/// derlemesi bunları sessizce yok sayar: gerçek veritabanına örnek veri
+/// yazılmaz, parolalar ve veritabanı anahtarı belleğe düşmez.
+fn dev_env(name: &str) -> Option<String> {
+    if cfg!(debug_assertions) {
+        std::env::var(name).ok()
+    } else {
+        None
+    }
+}
+
+fn dev_flag(name: &str, value: &str) -> bool {
+    dev_env(name).is_some_and(|v| v.trim().eq_ignore_ascii_case(value))
+}
+
+/// Tanıtım kipi (`MAILHERE_DEMO=1`, yalnız geliştirme derlemesi).
+pub fn demo_mode() -> bool {
+    dev_flag("MAILHERE_DEMO", "1")
 }
 
 const DB_FILE: &str = "mailhere.db";
@@ -137,9 +154,9 @@ fn startup_failed(app: &AppHandle, e: &AppError) {
 
 pub fn setup(app: &mut App, rt: tokio::runtime::Handle) -> Result<(), Box<dyn std::error::Error>> {
     let handle = app.handle().clone();
-    let demo = env_flag("MAILHERE_DEMO", "1");
+    let demo = demo_mode();
     // Tanıtım ve deneme kipi: parolalar ve veritabanı anahtarı bellekte.
-    let memory = demo || env_flag("MAILHERE_SECRETS", "memory");
+    let memory = demo || dev_flag("MAILHERE_SECRETS", "memory");
     let secrets: Arc<dyn SecretStore> = if memory {
         tracing::info!("parolalar ve veritabanı anahtarı bellekte (tanıtım ya da test kipi)");
         Arc::new(MemorySecrets::new())
@@ -206,9 +223,7 @@ pub fn setup(app: &mut App, rt: tokio::runtime::Handle) -> Result<(), Box<dyn st
     crate::tray::refresh(&handle);
 
     // Tanıtım kipinde ekran görüntüsü otomasyonu: N saniye sonra örnek kart.
-    let demo_card = std::env::var("MAILHERE_DEMO_NOTIFY")
-        .ok()
-        .and_then(|v| v.trim().parse::<u64>().ok());
+    let demo_card = dev_env("MAILHERE_DEMO_NOTIFY").and_then(|v| v.trim().parse::<u64>().ok());
     if let (true, Some(secs)) = (demo, demo_card) {
         let app = handle.clone();
         rt.spawn(async move {

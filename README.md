@@ -42,11 +42,13 @@ pnpm tauri dev      # masaüstü uygulaması
 MAILHERE_DEMO=1 MAILHERE_SECRETS=memory MAILHERE_DATA_DIR=$(mktemp -d) pnpm tauri dev
 ```
 
+İlk üç değişken yalnız geliştirme derlemesinde (`pnpm tauri dev`) geçerlidir; sürüm derlemesi bunları yok sayar.
+
 | Ortam değişkeni | Etkisi |
 | --- | --- |
-| `MAILHERE_DEMO=1` | hesap yoksa örnek hesapları ve postaları yükler |
+| `MAILHERE_DEMO=1` | hesap yoksa örnek hesapları ve postaları yükler (bellek kipini de açar) |
 | `MAILHERE_DEMO_NOTIFY=<sn>` | açılıştan bu kadar sonra örnek bildirim kartı gösterir |
-| `MAILHERE_SECRETS=memory` | parolaları ve veritabanı anahtarını anahtar zinciri yerine bellekte tutar (yalnız deneme); `MAILHERE_DATA_DIR` verilmezse veriler her açılışta yeni bir geçici klasöre yazılır |
+| `MAILHERE_SECRETS=memory` | parolaları ve veritabanı anahtarını anahtar zinciri yerine bellekte tutar; `MAILHERE_DATA_DIR` verilmezse veriler her açılışta yeni bir geçici klasöre yazılır |
 | `MAILHERE_DATA_DIR=<klasör>` | veritabanı ve önbellek klasörü (bellek kipinde boş olmalı) |
 | `MAILHERE_GOOGLE_CLIENT_ID`, `MAILHERE_GOOGLE_CLIENT_SECRET` | Google ile giriş (Gmail, XOAUTH2); masaüstü uygulaması OAuth istemcisi |
 | `MAILHERE_MICROSOFT_CLIENT_ID` | Microsoft ile giriş (Outlook / Microsoft 365, XOAUTH2); genel istemci |
