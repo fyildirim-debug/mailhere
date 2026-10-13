@@ -104,12 +104,13 @@ async fn check(app: &AppHandle) -> Res<Option<Update>> {
         Ok(update) => Ok(update),
         // Bu işletim sistemi/mimari için paket yayımlanmamış: güncelleme yok sayılır.
         Err(UpdaterError::TargetNotFound(_) | UpdaterError::TargetsNotFound(_)) => Ok(None),
-        Err(
-            e @ (UpdaterError::Reqwest(_)
-            | UpdaterError::Network(_)
-            | UpdaterError::ReleaseNotFound
-            | UpdaterError::Io(_)),
-        ) => {
+        // Sunucu yanıt verdi ama sürüm bilgisi yok (ör. son sürümde latest.json
+        // yayımlanmamış): yeni sürüm yok.
+        Err(UpdaterError::ReleaseNotFound) => {
+            tracing::info!("son sürümde güncelleme bilgisi (latest.json) yok");
+            Ok(None)
+        }
+        Err(e @ (UpdaterError::Reqwest(_) | UpdaterError::Network(_) | UpdaterError::Io(_))) => {
             tracing::info!(error = %e, "güncelleme sunucusuna ulaşılamadı");
             Err(network_error())
         }
