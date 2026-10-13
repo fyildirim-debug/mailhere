@@ -4,6 +4,14 @@ Windows ve Linux için hızlı, sakin, klavyeyle yönetilen masaüstü e-posta i
 
 Yeni posta geldiğinde koca bir pencere açılmaz: ekranın köşesinde küçük bir kart belirir. "Aç" dediğinde yalnız o postayı gösteren hızlı okuma penceresi gelir; yanıtlarsın, arşivlersin, işine dönersin.
 
+![Mailhere ana pencere](docs/img/ana-pencere.png)
+
+| Köşe kartı | Hızlı okuma |
+| --- | --- |
+| ![Yeni posta bildirimi](docs/img/bildirim-karti.png) | ![Hızlı okuma penceresi](docs/img/hizli-okuma.png) |
+
+![Koyu tema](docs/img/koyu-tema.png)
+
 ## Öne çıkanlar
 
 - **Köşe kartı ve hızlı okuma** — bildirimler yalnız kişilerden gelen postada çıkar; bülten ve otomatik bildirimler tepsideki sayaçta kalır. Sessiz saatler, bir saat sessize alma, kart konumu ve süresi ayarlanır.

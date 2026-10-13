@@ -39,4 +39,18 @@ Ayrıntılı plan belgesi: [Mailhere — proje planı](https://claude.ai/code/ar
 | 5 · Sağlayıcılar | Gmail / Outlook OAuth, JMAP (Stalwart) |
 | 6 · Yayın | Windows ve Linux paketleri, imzalı otomatik güncelleme → **0.1.0 beta** |
 
+## Durum (2026-10-13)
+
+| Aşama | Durum |
+| --- | --- |
+| 0 · İskelet | tamam |
+| 1 · Okuma | tamam (IMAP; Gmail "Tüm Postalar" eşitlenmez, arşiv hedefi olarak kullanılır) |
+| 2 · Yazma | tamam; eksik: taslağın sunucuya kaydı, imza düzenleme ekranı, iletilen postanın eklerini taşıma |
+| 3 · Bildirim | tamam; GNOME Wayland'de sistem bildirimine düşüş gerçek masaüstünde denenecek |
+| 4 · Akıllı kutu | tamam |
+| 5 · Sağlayıcılar | başlamadı (OAuth uygulama kaydı ve JMAP eşitleme) |
+| 6 · Yayın | Linux paketleri yerelde üretildi; imzalı otomatik güncelleme yok |
+
+Açık işler: geçersiz sertifika için onay ekranı, çevrimdışı sunucu eylemlerinin kalıcı kuyruğu, tam ekran algılama.
+
 İlk sürüm dışında: takvim, PGP ve S/MIME, Exchange'e özel protokol, mobil.
