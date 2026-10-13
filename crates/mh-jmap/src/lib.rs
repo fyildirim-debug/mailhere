@@ -15,6 +15,7 @@ mod push;
 mod send;
 mod sync;
 mod types;
+mod vacation;
 
 use std::sync::Arc;
 
@@ -36,6 +37,9 @@ pub use sync::{
     to_new_message, SyncOutcome, INITIAL_FETCH, SYNC_ROLES,
 };
 pub use types::{Email, Session, CORE, MAIL, SUBMISSION};
+pub use vacation::{
+    get_vacation, normalize_vacation, set_vacation, vacation_get, vacation_set, VACATION,
+};
 
 /// Tanıtım hesabı mı (oturum adresi yok ya da `.invalid` alanında)? Ağa
 /// hiç çıkılmaz.

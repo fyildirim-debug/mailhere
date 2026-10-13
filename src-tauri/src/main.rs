@@ -10,6 +10,7 @@ mod cmd_files;
 mod cmd_jmap;
 mod cmd_oauth;
 mod cmd_unsubscribe;
+mod cmd_vacation;
 mod commands;
 mod notify;
 mod secrets;
@@ -135,6 +136,8 @@ fn main() {
             cmd_cert::cert_inspect,
             cmd_cert::cert_trust,
             cmd_unsubscribe::unsubscribe,
+            cmd_vacation::vacation_get,
+            cmd_vacation::vacation_set,
         ])
         .build(tauri::generate_context!())
         .expect("Mailhere başlatılamadı");

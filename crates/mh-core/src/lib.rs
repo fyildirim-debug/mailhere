@@ -607,6 +607,20 @@ pub struct Template {
     pub body: String,
 }
 
+/// Sunucu tarafı otomatik yanıt (JMAP `VacationResponse`, RFC 8621 §8).
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Vacation {
+    pub enabled: bool,
+    /// Bu andan önce yanıt verilmez; yoksa hemen başlar.
+    pub from_date: Option<Millis>,
+    /// Bu andan sonra yanıt verilmez; yoksa süresiz.
+    pub to_date: Option<Millis>,
+    pub subject: String,
+    /// Düz metin yanıt.
+    pub body: String,
+}
+
 /// Kullanıcının elle güvendiği sunucu sertifikası.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -940,6 +954,21 @@ mod tests {
         assert_eq!(s.templates.len(), 1);
         assert_eq!(s.templates[0].name, "Teşekkür");
         assert!(Settings::default().templates.is_empty());
+    }
+
+    #[test]
+    fn otomatik_yanit_json_bicimi() {
+        let vac = Vacation {
+            enabled: true,
+            from_date: Some(1_000),
+            to_date: None,
+            subject: "İzindeyim".into(),
+            body: "Pazartesi dönüyorum.".into(),
+        };
+        assert_eq!(
+            serde_json::to_value(&vac).unwrap(),
+            serde_json::json!({"enabled": true, "fromDate": 1000, "toDate": null, "subject": "İzindeyim", "body": "Pazartesi dönüyorum."})
+        );
     }
 
     #[test]

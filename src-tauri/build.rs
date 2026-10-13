@@ -44,6 +44,8 @@ fn main() {
         "cert_inspect",
         "cert_trust",
         "unsubscribe",
+        "vacation_get",
+        "vacation_set",
     ];
     tauri_build::try_build(
         tauri_build::Attributes::new()

@@ -48,6 +48,8 @@
     "allow-account-add-oauth",
     "allow-cert-inspect",
     "allow-cert-trust",
-    "allow-unsubscribe"
+    "allow-unsubscribe",
+    "allow-vacation-get",
+    "allow-vacation-set"
   ]
 }
