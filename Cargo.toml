@@ -74,6 +74,8 @@ tauri-plugin-single-instance = "2.5.3"
 tauri-plugin-notification = "2.6.0"
 tauri-plugin-opener = "2.7.1"
 tauri-plugin-dialog = "2.8.2"
+# Uygulama içi güncelleme (imzalı paketler, GitHub sürümleri)
+tauri-plugin-updater = { version = "2.13.3", default-features = false, features = ["rustls-tls", "system-proxy"] }
 keyring = "3.6.3"
 
 [profile.dev]

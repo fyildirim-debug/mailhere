@@ -278,6 +278,9 @@ pub struct MessageDetail {
     #[serde(flatten)]
     pub summary: MessageSummary,
     pub cc: Vec<Address>,
+    /// Gizli alıcılar; yalnız başlığında Bcc saklanan postalarda (taslaklar) dolu.
+    #[serde(default)]
+    pub bcc: Vec<Address>,
     pub reply_to: Vec<Address>,
     /// Message-ID başlığı (yanıt için).
     pub message_id_header: Option<String>,
@@ -691,6 +694,7 @@ mod tests {
         let d = MessageDetail {
             summary: s,
             cc: vec![],
+            bcc: vec![],
             reply_to: vec![],
             message_id_header: None,
             references: vec![],

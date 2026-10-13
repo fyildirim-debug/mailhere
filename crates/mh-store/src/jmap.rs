@@ -12,7 +12,7 @@ use rusqlite::types::Value;
 use rusqlite::{params, params_from_iter, OptionalExtension, Transaction};
 
 use crate::codec::role_from;
-use crate::messages::{insert, NewMessage};
+use crate::messages::{insert_as, NewMessage};
 use crate::Store;
 
 /// JMAP hesabının yerelde tutulan eşitleme bilgisi.
@@ -246,7 +246,7 @@ impl Store {
                     touched,
                 });
             }
-            let id = insert(tx, m)?;
+            let id = insert_as(tx, m, None)?;
             map_row(tx, id, &m.account_id, jmap_id, blob_id)?;
             if let Some(t) = thread_id {
                 tx.prepare_cached("UPDATE messages SET thread_id = ?2 WHERE id = ?1")?

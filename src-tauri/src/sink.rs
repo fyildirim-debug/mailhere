@@ -48,6 +48,9 @@ impl EventSink for TauriSink {
         let Some(state) = self.app.try_state::<AppState>() else {
             return;
         };
+        // Kartta hesabın güncel adı ve rengi görünsün (`account_update` sonrası).
+        let fresh = state.store.account(&account.id).ok().flatten();
+        let account = fresh.as_ref().unwrap_or(account);
         let settings = match state.store.settings() {
             Ok(s) => s,
             Err(_) => return,

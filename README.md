@@ -58,7 +58,7 @@ cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace
 Gerçek bir IMAP sunucusuna karşı tümleşik test (kutuları boşaltır, yalnız test sunucusunda çalıştır):
 
 ```bash
-MH_TEST_IMAP=127.0.0.1:10143:kullanici:parola:none cargo test -p mh-sync --test imap
+MH_TEST_IMAP=127.0.0.1:10143:kullanici:parola:none cargo test -p mh-sync --test imap --test drafts_imap
 ```
 
 XOAUTH2 girişi için Dovecot `oauth2` passdb'sine karşı test (sahte sağlayıcıyı test kendisi `127.0.0.1:<introspection kapısı>` üzerinde açar; Dovecot ayarında `introspection_url = http://127.0.0.1:<kapı>/introspect`, `introspection_mode = post`, `username_attribute = username`):
