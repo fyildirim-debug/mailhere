@@ -202,9 +202,8 @@ impl Outbox {
             tracing::warn!(error = %e, "gönderilen postanın yerel kopyası yazılamadı");
             failed = true;
         }
-        Ok(failed.then(|| {
-            "Posta gönderildi ancak Gönderilenler kutusuna kaydedilemedi.".to_owned()
-        }))
+        Ok(failed
+            .then(|| "Posta gönderildi ancak Gönderilenler kutusuna kaydedilemedi.".to_owned()))
     }
 
     /// Postanın yerel kopyası; sunucu kopyası eşitlemede Message-ID ile eşleşir.
@@ -398,7 +397,9 @@ mod tests {
             let (sock, _) = listener.accept().await.unwrap();
             crate::transport::tests::fake_session(sock, true).await
         });
-        store.insert_account(&real_account(port, "127.0.0.1")).unwrap();
+        store
+            .insert_account(&real_account(port, "127.0.0.1"))
+            .unwrap();
         outbox.secrets.set("gercek", "parola").unwrap();
         let mut m = msg();
         m.account_id = "gercek".into();
@@ -407,7 +408,11 @@ mod tests {
         for row in store.outbox_claim_due(now_ms()).unwrap() {
             outbox.process(row).await;
         }
-        assert!(server.await.unwrap().data.contains("Subject: Re: Cumartesi"));
+        assert!(server
+            .await
+            .unwrap()
+            .data
+            .contains("Subject: Re: Cumartesi"));
         assert_eq!(
             rec.outbox.lock().unwrap().clone(),
             vec![OutboxEvent {

@@ -139,13 +139,20 @@ mod tests {
 
     #[test]
     fn protokol_kitapliklari_ayrintili_yazmaz() {
-        for t in ["async_imap", "async_imap::imap_stream", "lettre::transport::smtp"] {
+        for t in [
+            "async_imap",
+            "async_imap::imap_stream",
+            "lettre::transport::smtp",
+        ] {
             assert!(!log_allowed(t, Level::TRACE), "{t}");
             assert!(!log_allowed(t, Level::DEBUG), "{t}");
             assert!(log_allowed(t, Level::INFO), "{t}");
             assert!(log_allowed(t, Level::WARN), "{t}");
         }
         assert!(log_allowed("mh_sync::engine", Level::TRACE));
-        assert!(log_allowed("async_imapx", Level::TRACE), "yalnız tam ad eşleşir");
+        assert!(
+            log_allowed("async_imapx", Level::TRACE),
+            "yalnız tam ad eşleşir"
+        );
     }
 }

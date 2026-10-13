@@ -222,7 +222,9 @@ mod tests {
                     while let Ok(Some(line)) = lines.next_line().await {
                         let tag = line.split(' ').next().unwrap_or("*").to_owned();
                         if line.to_ascii_uppercase().ends_with("LOGOUT") {
-                            let _ = w.write_all(format!("* BYE\r\n{tag} OK\r\n").as_bytes()).await;
+                            let _ = w
+                                .write_all(format!("* BYE\r\n{tag} OK\r\n").as_bytes())
+                                .await;
                             break;
                         }
                         w.write_all(format!("{tag} OK tamam\r\n").as_bytes())

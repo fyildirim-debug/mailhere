@@ -283,9 +283,17 @@ mod tests {
         assert!(!s.mailbox(&id).unwrap().unwrap().nosync);
         s.set_mailbox_nosync(&id, true).unwrap();
         // Yeniden LIST (ad/rol güncellemesi) bayrağı silmez.
-        s.upsert_mailbox("a", "[Gmail]/All Mail", "Tüm Postalar", MailboxRole::Archive)
+        s.upsert_mailbox(
+            "a",
+            "[Gmail]/All Mail",
+            "Tüm Postalar",
+            MailboxRole::Archive,
+        )
+        .unwrap();
+        let info = s
+            .mailbox_by_role("a", MailboxRole::Archive)
+            .unwrap()
             .unwrap();
-        let info = s.mailbox_by_role("a", MailboxRole::Archive).unwrap().unwrap();
         assert!(info.nosync);
 
         assert_eq!(s.namespace("a").unwrap(), None);

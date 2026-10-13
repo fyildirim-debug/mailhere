@@ -18,7 +18,9 @@ use rustls::client::{verify_server_cert_signed_by_trust_anchor, verify_server_na
 use rustls::crypto::CryptoProvider;
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::server::ParsedCertificate;
-use rustls::{CertificateError, ClientConfig, DigitallySignedStruct, RootCertStore, SignatureScheme};
+use rustls::{
+    CertificateError, ClientConfig, DigitallySignedStruct, RootCertStore, SignatureScheme,
+};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
@@ -179,8 +181,13 @@ impl ServerCertVerifier for PinVerifier {
         ocsp_response: &[u8],
         now: UnixTime,
     ) -> Result<ServerCertVerified, rustls::Error> {
-        match webpki().verify_server_cert(end_entity, intermediates, server_name, ocsp_response, now)
-        {
+        match webpki().verify_server_cert(
+            end_entity,
+            intermediates,
+            server_name,
+            ocsp_response,
+            now,
+        ) {
             Ok(ok) => Ok(ok),
             Err(e @ rustls::Error::InvalidCertificate(_)) => {
                 if is_trusted(&self.host, self.port, &fingerprint(end_entity)) {
@@ -265,7 +272,11 @@ impl ServerCertVerifier for CaptureVerifier {
 // ------------------------------------------------------------------- sorunlar
 
 /// Zincirin neden güvenilmediği (Türkçe, kısa). Geçerli sertifikada boş.
-fn problems(chain: &[CertificateDer<'_>], name: &ServerName<'_>, now: UnixTime) -> Vec<&'static str> {
+fn problems(
+    chain: &[CertificateDer<'_>],
+    name: &ServerName<'_>,
+    now: UnixTime,
+) -> Vec<&'static str> {
     let mut out = Vec::new();
     let Some(leaf) = chain.first() else {
         return vec!["sertifika yok"];
@@ -294,7 +305,13 @@ fn problems(chain: &[CertificateDer<'_>], name: &ServerName<'_>, now: UnixTime) 
             if !self_signed {
                 let algs = provider().signature_verification_algorithms.all;
                 if let Err(rustls::Error::InvalidCertificate(CertificateError::UnknownIssuer)) =
-                    verify_server_cert_signed_by_trust_anchor(&parsed, &roots(), &chain[1..], now, algs)
+                    verify_server_cert_signed_by_trust_anchor(
+                        &parsed,
+                        &roots(),
+                        &chain[1..],
+                        now,
+                        algs,
+                    )
                 {
                     out.push("tanınmayan kuruluş");
                 }
@@ -432,10 +449,11 @@ pub async fn smtp_starttls(s: &mut TcpStream, hello: &str) -> AppResult<()> {
         if code != 250 {
             return Err(protocol_error());
         }
-        if !lines
-            .iter()
-            .any(|l| l.split_whitespace().next().is_some_and(|k| k.eq_ignore_ascii_case("STARTTLS")))
-        {
+        if !lines.iter().any(|l| {
+            l.split_whitespace()
+                .next()
+                .is_some_and(|k| k.eq_ignore_ascii_case("STARTTLS"))
+        }) {
             return Err(starttls_refused());
         }
         write_line(s, "STARTTLS").await?;
@@ -501,7 +519,9 @@ fn cert_info(
             match n {
                 x509_parser::extensions::GeneralName::DNSName(d) => names.push((*d).to_owned()),
                 x509_parser::extensions::GeneralName::IPAddress(ip) => match ip.len() {
-                    4 => names.push(std::net::Ipv4Addr::new(ip[0], ip[1], ip[2], ip[3]).to_string()),
+                    4 => {
+                        names.push(std::net::Ipv4Addr::new(ip[0], ip[1], ip[2], ip[3]).to_string())
+                    }
                     16 => {
                         let mut b = [0u8; 16];
                         b.copy_from_slice(ip);
@@ -662,7 +682,9 @@ pub(crate) mod tests {
     fn parmak_izi_bicimi() {
         let fp = fingerprint(b"mailhere");
         assert_eq!(fp.len(), 32 * 3 - 1);
-        assert!(fp.chars().all(|c| c == ':' || c.is_ascii_hexdigit() && !c.is_ascii_lowercase()));
+        assert!(fp
+            .chars()
+            .all(|c| c == ':' || c.is_ascii_hexdigit() && !c.is_ascii_lowercase()));
         let plain = fp.replace(':', "").to_ascii_lowercase();
         assert_eq!(normalize_fingerprint(&plain).as_deref(), Some(fp.as_str()));
         assert_eq!(normalize_fingerprint("AB:CD"), None);
@@ -713,7 +735,11 @@ pub(crate) mod tests {
         let info = inspect("127.0.0.1", port, Security::Tls).await.unwrap();
         assert_eq!(info.sha256, cert.sha256());
         assert_eq!(info.names, vec!["posta.ornek.test".to_string()]);
-        assert!(info.subject.contains("posta.ornek.test"), "{}", info.subject);
+        assert!(
+            info.subject.contains("posta.ornek.test"),
+            "{}",
+            info.subject
+        );
         assert_eq!(info.subject, info.issuer);
         assert!(info.not_after.unwrap() < info.not_before.unwrap() + 400 * 86_400_000);
         for p in ["kendinden imzalı", "süresi dolmuş", "ad uyuşmuyor"] {
@@ -751,7 +777,9 @@ pub(crate) mod tests {
             sock.write_all(b"m1 OK baslat\r\n").await.unwrap();
             let _ = acceptor.accept(sock).await;
         });
-        let info = inspect("localhost", port, Security::Starttls).await.unwrap();
+        let info = inspect("localhost", port, Security::Starttls)
+            .await
+            .unwrap();
         assert_eq!(info.sha256, cert.sha256());
         assert_eq!(info.problem, "kendinden imzalı");
     }
@@ -776,6 +804,9 @@ pub(crate) mod tests {
         let leaf = leaf_params.signed_by(&leaf_key, &issuer).unwrap();
         let chain = vec![leaf.der().clone(), ca.der().clone()];
         let name = server_name("posta.ornek.test").unwrap();
-        assert_eq!(problems(&chain, &name, UnixTime::now()), vec!["tanınmayan kuruluş"]);
+        assert_eq!(
+            problems(&chain, &name, UnixTime::now()),
+            vec!["tanınmayan kuruluş"]
+        );
     }
 }

@@ -472,7 +472,10 @@ pub async fn fetch_body(
         // Taşıması bekleyen posta sunucuda hâlâ kaynak kutudadır.
         let mb = session.examine(&loc.server_path).await?;
         let uid = match loc.server_uid {
-            Some(uid) if loc.server_uidvalidity.is_none() || mb.uid_validity == loc.server_uidvalidity => {
+            Some(uid)
+                if loc.server_uidvalidity.is_none()
+                    || mb.uid_validity == loc.server_uidvalidity =>
+            {
                 Some(uid)
             }
             _ => match loc.message_id_header.as_deref() {
@@ -523,7 +526,10 @@ fn imap_quote(s: &str) -> Option<String> {
 
 /// Seçili kutuda Message-ID başlığıyla arar.
 async fn search_message_id(session: &mut ImapSession, message_id: &str) -> SyncResult<Option<u32>> {
-    let mid = message_id.trim().trim_start_matches('<').trim_end_matches('>');
+    let mid = message_id
+        .trim()
+        .trim_start_matches('<')
+        .trim_end_matches('>');
     let Some(q) = imap_quote(&format!("<{mid}>")) else {
         return Ok(None);
     };
@@ -735,7 +741,11 @@ async fn run_actions(
 }
 
 /// Tek işlemi uygular; ardından eşitlenecek kutuları döner.
-async fn run_action(ctx: &AccountCtx, conn: &mut Conn, qa: &QueuedAction) -> SyncResult<Vec<String>> {
+async fn run_action(
+    ctx: &AccountCtx,
+    conn: &mut Conn,
+    qa: &QueuedAction,
+) -> SyncResult<Vec<String>> {
     match &qa.action {
         Action::SetFlag { ids, flag, value } => {
             apply_flag(ctx, conn, qa.id, ids, *flag, *value).await?;
@@ -1488,7 +1498,11 @@ mod tests {
         assert_eq!(next_sync(&mut q), Some(path("Archive")));
         assert_eq!(next_sync(&mut q), Some(path("Sent")));
         assert_eq!(next_sync(&mut q), Some(Command::SyncAll));
-        assert_eq!(next_sync(&mut q), None, "tam eşitleme gelen kutusunu kapsar");
+        assert_eq!(
+            next_sync(&mut q),
+            None,
+            "tam eşitleme gelen kutusunu kapsar"
+        );
         let mut q = VecDeque::from([Command::SyncInbox, Command::SyncInbox]);
         assert_eq!(next_sync(&mut q), Some(Command::SyncInbox));
         assert!(q.is_empty());
@@ -1660,8 +1674,16 @@ mod tests {
         mgr.move_messages(&[x], MoveTarget::Inbox).unwrap();
         assert!(!store.has_pending_moves("a").unwrap());
 
-        assert!(mgr.append("a", MailboxRole::Sent, b"Message-ID: <g@o>\r\n\r\nx".to_vec()).unwrap());
-        assert!(!mgr.append("demo", MailboxRole::Sent, b"x".to_vec()).unwrap());
+        assert!(mgr
+            .append(
+                "a",
+                MailboxRole::Sent,
+                b"Message-ID: <g@o>\r\n\r\nx".to_vec()
+            )
+            .unwrap());
+        assert!(!mgr
+            .append("demo", MailboxRole::Sent, b"x".to_vec())
+            .unwrap());
         let last = store.actions("a").unwrap().pop().unwrap();
         assert_eq!(
             last.action,

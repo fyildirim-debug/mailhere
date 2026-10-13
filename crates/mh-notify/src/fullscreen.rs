@@ -34,9 +34,8 @@ mod platform {
     };
 
     // Taşınabilir eşleme (`quns_suppresses`) Windows değerleriyle aynı kalsın.
-    const _: () = assert!(
-        QUNS_BUSY == 2 && QUNS_RUNNING_D3D_FULL_SCREEN == 3 && QUNS_PRESENTATION_MODE == 4
-    );
+    const _: () =
+        assert!(QUNS_BUSY == 2 && QUNS_RUNNING_D3D_FULL_SCREEN == 3 && QUNS_PRESENTATION_MODE == 4);
 
     pub fn is_fullscreen() -> bool {
         let mut state: QUERY_USER_NOTIFICATION_STATE = 0;

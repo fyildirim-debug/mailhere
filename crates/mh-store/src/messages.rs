@@ -1362,9 +1362,19 @@ pub(crate) mod tests {
         let bad = vec!["com".to_string(), "@com".into(), "@".into(), "x@".into()];
         assert!(!remote_allowed(&bad, "kim@ornek.com"));
         assert!(!remote_allowed(&bad, "com"));
-        assert!(!remote_allowed(&list, "bulten.co"), "bozuk gönderen eşleşmez");
+        assert!(
+            !remote_allowed(&list, "bulten.co"),
+            "bozuk gönderen eşleşmez"
+        );
         assert!(is_full_address("ayse@eposta.com"));
-        for a in ["com", "@eposta.com", "ayse@", "ayse@com", "a@b..c", "a b@c.d e"] {
+        for a in [
+            "com",
+            "@eposta.com",
+            "ayse@",
+            "ayse@com",
+            "a@b..c",
+            "a b@c.d e",
+        ] {
             assert!(!is_full_address(a), "{a}");
         }
         assert!(is_remote_entry("ornek.com") && is_remote_entry("@ornek.com"));
@@ -1396,7 +1406,11 @@ pub(crate) mod tests {
         s.move_local(&[id], "a:Trash").unwrap();
         let p = s.pending_moves("a").unwrap();
         assert_eq!(
-            (p[0].src_path.as_str(), p[0].src_uid, p[0].dest_path.as_str()),
+            (
+                p[0].src_path.as_str(),
+                p[0].src_uid,
+                p[0].dest_path.as_str()
+            ),
             ("INBOX", Some(7), "Trash")
         );
 
@@ -1469,13 +1483,20 @@ pub(crate) mod tests {
         let p = s.pending_moves("a").unwrap();
         assert_eq!(p.len(), 1);
         assert_eq!(
-            (p[0].src_path.as_str(), p[0].src_uid, p[0].dest_path.as_str()),
+            (
+                p[0].src_path.as_str(),
+                p[0].src_uid,
+                p[0].dest_path.as_str()
+            ),
             ("Archive", Some(12), "INBOX")
         );
         // İkinci taşıma onaylanınca UID bilinmez; eşitleme Message-ID ile bulur.
         assert!(!s.confirm_move(id, "a:INBOX", None, None).unwrap());
         let loc = s.location(id).unwrap().unwrap();
-        assert_eq!((loc.mailbox_id.as_str(), loc.uid, loc.pending), ("a:INBOX", None, false));
+        assert_eq!(
+            (loc.mailbox_id.as_str(), loc.uid, loc.pending),
+            ("a:INBOX", None, false)
+        );
     }
 
     #[test]
@@ -1486,8 +1507,14 @@ pub(crate) mod tests {
         let touched = s.revert_move(id).unwrap();
         assert_eq!(touched, vec!["a:Archive".to_string(), "a:INBOX".into()]);
         let loc = s.location(id).unwrap().unwrap();
-        assert_eq!((loc.role, loc.uid, loc.pending), (MailboxRole::Inbox, Some(7), false));
-        assert!(s.revert_move(id).unwrap().is_empty(), "bekleyen yoksa bir şey yapılmaz");
+        assert_eq!(
+            (loc.role, loc.uid, loc.pending),
+            (MailboxRole::Inbox, Some(7), false)
+        );
+        assert!(
+            s.revert_move(id).unwrap().is_empty(),
+            "bekleyen yoksa bir şey yapılmaz"
+        );
 
         // Yeni UID'si arşivde başka (yinelenen) bir satırdaysa o satır silinir.
         s.move_local(&[id], "a:Archive").unwrap();
@@ -1496,13 +1523,19 @@ pub(crate) mod tests {
         let dup_id = s.upsert_message(&dup).unwrap().id;
         assert!(!s.confirm_move(id, "a:Archive", Some(30), Some(1)).unwrap());
         assert!(s.summary(dup_id).unwrap().is_none());
-        assert_eq!(s.local_uids("a:Archive").unwrap(), vec![(id, 30, true, false)]);
+        assert_eq!(
+            s.local_uids("a:Archive").unwrap(),
+            vec![(id, 30, true, false)]
+        );
 
         // Sunucuda hiç olmayan yerel kopya: bekleyen taşıma düşer, posta kalır.
         s.move_local(&[id], "a:Trash").unwrap();
         s.forget_server_copy(id).unwrap();
         let loc = s.location(id).unwrap().unwrap();
-        assert_eq!((loc.role, loc.uid, loc.pending), (MailboxRole::Trash, None, false));
+        assert_eq!(
+            (loc.role, loc.uid, loc.pending),
+            (MailboxRole::Trash, None, false)
+        );
     }
 
     #[test]

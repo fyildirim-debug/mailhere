@@ -303,7 +303,10 @@ pub(crate) mod tests {
         };
         send(&cfg, "parola", message()).await.unwrap();
         let seen = server.await.unwrap();
-        assert!(seen.commands[0].starts_with("EHLO"), "TLS sonrası yeniden EHLO");
+        assert!(
+            seen.commands[0].starts_with("EHLO"),
+            "TLS sonrası yeniden EHLO"
+        );
         assert!(seen.commands.iter().any(|c| c.starts_with("AUTH PLAIN")));
         assert!(seen.data.contains("Subject: Cumartesi"));
     }

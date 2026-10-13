@@ -24,7 +24,7 @@ use mh_sync::{
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 /// Testler aynı sunucu kutularını boşaltıp doldurur: biri bitmeden öbürü başlamasın.
-static SIRA: Mutex<()> = Mutex::new(());
+static SIRA: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 fn env_config() -> Option<(ServerConfig, String)> {
     let v = std::env::var("MH_TEST_IMAP").ok()?;
@@ -199,7 +199,7 @@ async fn imap_esitleme_uctan_uca() {
         eprintln!("MH_TEST_IMAP tanımlı değil; IMAP tümleşik testi atlandı");
         return;
     };
-    let _sira = SIRA.lock().unwrap_or_else(|e| e.into_inner());
+    let _sira = SIRA.lock().await;
 
     // Sunucuyu hazırla: kutuları boşalt, örnek postaları yükle.
     let mut s = reset_server(&cfg, &pass).await;
@@ -442,7 +442,7 @@ async fn imap_yarida_kalan_esitleme_ve_geri_alma() {
         eprintln!("MH_TEST_IMAP tanımlı değil; IMAP tümleşik testi atlandı");
         return;
     };
-    let _sira = SIRA.lock().unwrap_or_else(|e| e.into_inner());
+    let _sira = SIRA.lock().await;
     let plain = cfg.security == Security::None;
 
     let mut s = reset_server(&cfg, &pass).await;
@@ -547,15 +547,28 @@ async fn imap_yarida_kalan_esitleme_ve_geri_alma() {
 
     let mgr = manager();
     mgr.start(test_account(&cfg));
-    wait_for("kuyruk boşalır", 30, || store.actions("t").unwrap().is_empty()).await;
+    wait_for("kuyruk boşalır", 30, || {
+        store.actions("t").unwrap().is_empty()
+    })
+    .await;
     wait_server(&cfg, &pass, "Archive", "ALL", 1, "yalnız b arşivde").await;
-    wait_server(&cfg, &pass, "Archive", "FLAGGED", 1, "taşımadan sonra yıldız").await;
+    wait_server(
+        &cfg,
+        &pass,
+        "Archive",
+        "FLAGGED",
+        1,
+        "taşımadan sonra yıldız",
+    )
+    .await;
     wait_server(&cfg, &pass, "INBOX", "ALL", 249, "a gelen kutusunda kaldı").await;
     wait_server(&cfg, &pass, "INBOX", "SEEN", 0, "c okunmadı kaldı").await;
     wait_for("b arşivde UID'li ve yıldızlı", 30, || {
-        store.location(b.id).unwrap().is_some_and(|l| {
-            l.role == MailboxRole::Archive && l.uid.is_some() && !l.pending
-        }) && store.summary(b.id).unwrap().is_some_and(|m| m.starred)
+        store
+            .location(b.id)
+            .unwrap()
+            .is_some_and(|l| l.role == MailboxRole::Archive && l.uid.is_some() && !l.pending)
+            && store.summary(b.id).unwrap().is_some_and(|m| m.starred)
     })
     .await;
 
@@ -574,9 +587,10 @@ async fn imap_yarida_kalan_esitleme_ve_geri_alma() {
     wait_server(&cfg, &pass, "Archive", "ALL", 1, "c arşivden çıktı").await;
     wait_server(&cfg, &pass, "INBOX", "ALL", 249, "c gelen kutusunda").await;
     wait_for("c gelen kutusunda UID'li", 30, || {
-        store.location(c.id).unwrap().is_some_and(|l| {
-            l.role == MailboxRole::Inbox && l.uid.is_some() && !l.pending
-        })
+        store
+            .location(c.id)
+            .unwrap()
+            .is_some_and(|l| l.role == MailboxRole::Inbox && l.uid.is_some() && !l.pending)
     })
     .await;
     mgr.sync_now();

@@ -339,10 +339,19 @@ mod tests {
     #[test]
     fn tasimalar_tek_bekler() {
         let s = store_with_account("a");
-        assert!(s.action_push("a", &Action::Moves, None, 1).unwrap().is_some());
+        assert!(s
+            .action_push("a", &Action::Moves, None, 1)
+            .unwrap()
+            .is_some());
         // Baş uygulanıyor olabilir: arkasına bir tane daha girer.
-        assert!(s.action_push("a", &Action::Moves, None, 2).unwrap().is_some());
-        assert!(s.action_push("a", &Action::Moves, None, 3).unwrap().is_none());
+        assert!(s
+            .action_push("a", &Action::Moves, None, 2)
+            .unwrap()
+            .is_some());
+        assert!(s
+            .action_push("a", &Action::Moves, None, 3)
+            .unwrap()
+            .is_none());
         assert_eq!(kinds(&s, "a"), vec![Action::Moves, Action::Moves]);
     }
 

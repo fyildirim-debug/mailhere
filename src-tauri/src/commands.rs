@@ -228,9 +228,9 @@ pub fn remote_allow(
     }
     let mut settings = state.store.settings()?;
     if !settings
-            .remote_allow
-            .iter()
-            .any(|e| e.eq_ignore_ascii_case(&email))
+        .remote_allow
+        .iter()
+        .any(|e| e.eq_ignore_ascii_case(&email))
     {
         settings.remote_allow.push(email);
         state.store.set_settings(&settings)?;
@@ -271,15 +271,23 @@ pub fn is_risky(name: &str) -> bool {
         "exe", "com", "bat", "cmd", "scr", "pif", "msi", "msix", "msp", "ps1", "psm1", "vbs",
         "vbe", "js", "jse", "wsf", "wsh", "hta", "cpl", "msc", "jar", "lnk", "reg", "inf", "dll",
         "sys", "appx", "sh", "bash", "run", "bin", "desktop", "appimage", "deb", "rpm", "py", "pl",
-        "iso", "img", "vhd", "vhdx", "url", "chm", "appref-ms", "application", "xll",
-        "settingcontent-ms",
-        // Makro içerebilen Office belgeleri ve eklentileri
+        "iso", "img", "vhd", "vhdx", "url", "chm", "xll",
+    ];
+    /// Uzun adlı Windows kısayol ve uygulama türleri.
+    const LAUNCHERS: &[&str] = &["appref-ms", "application", "settingcontent-ms"];
+    /// Makro içerebilen Office belgeleri, şablonları ve eklentileri.
+    const MACRO: &[&str] = &[
         "docm", "dotm", "xlsm", "xltm", "xlam", "pptm", "potm", "ppsm", "ppam",
     ];
     Path::new(name)
         .extension()
         .and_then(|e| e.to_str())
-        .is_some_and(|e| RISKY.contains(&e.to_ascii_lowercase().as_str()))
+        .map(str::to_ascii_lowercase)
+        .is_some_and(|e| {
+            [RISKY, LAUNCHERS, MACRO]
+                .iter()
+                .any(|l| l.contains(&e.as_str()))
+        })
 }
 
 /// Windows: dosyayı "İnternet'ten geldi" olarak işaretler (Zone.Identifier

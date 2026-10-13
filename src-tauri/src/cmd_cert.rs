@@ -49,7 +49,9 @@ pub fn with_trust(mut settings: Settings, host: &str, port: u16, sha256: &str) -
             "Sertifika parmak izi geçersiz; sertifikayı yeniden incele.",
         )
     })?;
-    settings.trusted_certs.push(TrustedCert { host, port, sha256 });
+    settings
+        .trusted_certs
+        .push(TrustedCert { host, port, sha256 });
     settings.trusted_certs = normalize_trusted(settings.trusted_certs);
     Ok(settings)
 }
@@ -90,7 +92,13 @@ mod tests {
 
     #[test]
     fn onay_eklenir_ve_degisir() {
-        let s = with_trust(Settings::default(), " Posta.Ornek.com. ", 993, &FP.to_lowercase()).unwrap();
+        let s = with_trust(
+            Settings::default(),
+            " Posta.Ornek.com. ",
+            993,
+            &FP.to_lowercase(),
+        )
+        .unwrap();
         assert_eq!(
             s.trusted_certs,
             vec![TrustedCert {
