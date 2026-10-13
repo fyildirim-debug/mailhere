@@ -12,6 +12,7 @@
 //! saklar, geri alınan taşıma sunucuya hiç gitmez.
 
 mod drafts;
+mod moves;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};

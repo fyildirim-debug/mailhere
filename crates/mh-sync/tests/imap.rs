@@ -142,6 +142,7 @@ fn view(store: &Store, view: mh_core::View) -> Vec<MessageSummary> {
                 view,
                 account_id: None,
                 category: None,
+                only: None,
                 cursor: None,
                 limit: 500,
             },

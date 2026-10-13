@@ -290,7 +290,7 @@ impl Outbox {
     /// gönderir; hata doğrudan döner (yeniden denenmez, taslağa kaydedilmez).
     /// Abonelikten çıkma postası gibi kısa, kullanıcının açıkça istediği
     /// postalar içindir. Gönderilen posta Gönderilenler'e yazılır.
-    pub async fn send_now(&self, msg: &OutgoingMessage) -> AppResult<()> {
+    pub async fn send_immediately(&self, msg: &OutgoingMessage) -> AppResult<()> {
         validate_with(msg, 0, false)?;
         let row = OutboxRow {
             id: uuid::Uuid::new_v4().to_string(),
@@ -431,7 +431,7 @@ mod tests {
         let account = store.accounts().unwrap().remove(0);
         let msg =
             mailto_message(&account.id, "mailto:cik@bulten.com?subject=Liste%20iptal").unwrap();
-        outbox.send_now(&msg).await.unwrap();
+        outbox.send_immediately(&msg).await.unwrap();
         let sent = store.find_by_subject("Liste iptal").unwrap().unwrap();
         assert_eq!(sent.account_id, account.id);
         assert_eq!(sent.to, vec![Address::new(None, "cik@bulten.com")]);
@@ -444,7 +444,7 @@ mod tests {
         let mut bad = msg;
         bad.to.clear();
         assert_eq!(
-            outbox.send_now(&bad).await.unwrap_err().code,
+            outbox.send_immediately(&bad).await.unwrap_err().code,
             ErrorCode::Invalid
         );
     }

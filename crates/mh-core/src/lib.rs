@@ -443,6 +443,18 @@ pub enum View {
     Mailbox { id: String },
 }
 
+/// Listede hızlı süzgeç.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ListOnly {
+    /// Yalnız okunmamışlar.
+    Unread,
+    /// Yalnız yıldızlılar.
+    Starred,
+    /// Yalnız ekliler.
+    Attachments,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ListQuery {
@@ -450,6 +462,9 @@ pub struct ListQuery {
     /// Yalnız bu hesap; yoksa birleşik görünüm.
     pub account_id: Option<AccountId>,
     pub category: Option<Category>,
+    /// Hızlı süzgeç; yoksa tümü.
+    #[serde(default)]
+    pub only: Option<ListOnly>,
     /// Önceki sayfanın `nextCursor` değeri.
     pub cursor: Option<String>,
     pub limit: u32,
@@ -468,6 +483,8 @@ pub struct Counts {
     pub inbox_unread: u32,
     pub snoozed: u32,
     pub drafts: u32,
+    /// Giden kutusunda bekleyen (planlanmış) gönderimler.
+    pub scheduled: u32,
     pub per_account_unread: HashMap<AccountId, u32>,
 }
 
@@ -509,6 +526,113 @@ pub struct OutgoingMessage {
 pub struct OutboxItem {
     pub id: String,
     pub send_at: Millis,
+}
+
+/// Giden kutusundaki planlanmış gönderim.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduledItem {
+    pub id: String,
+    pub account_id: AccountId,
+    pub send_at: Millis,
+    /// Alıcılar (Kime, Bilgi, Gizli sırasıyla).
+    pub to: Vec<Address>,
+    pub subject: String,
+    /// Son denemenin hatası (gönderilemediyse).
+    pub error: Option<String>,
+}
+
+// ------------------------------------------------------------------- kurallar
+
+/// Metin koşulunun karşılaştırması. Büyük/küçük harf ve Türkçe harfler
+/// (ı/i, ş/s …) ayırt edilmez.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum RuleOp {
+    Contains,
+    NotContains,
+    /// Tam eşitlik (gönderen ve alıcıda adresin ya da adın kendisi).
+    Is,
+}
+
+/// Kural koşulu.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum RuleCondition {
+    /// Gönderenin adı ve adresi.
+    From {
+        op: RuleOp,
+        value: String,
+    },
+    /// Alıcıların (Kime + Bilgi) adı ve adresi.
+    To {
+        op: RuleOp,
+        value: String,
+    },
+    Subject {
+        op: RuleOp,
+        value: String,
+    },
+    /// Gövde metni (inmediyse önizleme).
+    Body {
+        op: RuleOp,
+        value: String,
+    },
+    HasAttachment,
+    Category {
+        value: Category,
+    },
+}
+
+/// Kural eylemi.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum RuleAction {
+    /// Kuralın hesabındaki bir klasöre taşır.
+    Move {
+        #[serde(rename = "mailboxId")]
+        mailbox_id: String,
+    },
+    Archive,
+    Trash,
+    MarkRead,
+    Star,
+    /// Kart ve bildirim gösterilmez.
+    Mute,
+    /// Postayı bu adrese iletir (postayı alan hesaptan).
+    Forward {
+        to: String,
+    },
+}
+
+/// Koşulların birleşimi.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum RuleMatch {
+    /// Tüm koşullar.
+    #[default]
+    All,
+    /// Herhangi bir koşul.
+    Any,
+}
+
+/// Gelen kutusuna yeni düşen postaya sırayla uygulanan kural.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Rule {
+    /// Yeni kuralda boş; arka uç kimlik verir.
+    pub id: String,
+    pub name: String,
+    pub enabled: bool,
+    /// `None`: tüm hesaplar (klasöre taşıma için hesap zorunlu).
+    pub account_id: Option<AccountId>,
+    #[serde(rename = "match")]
+    pub match_: RuleMatch,
+    pub conditions: Vec<RuleCondition>,
+    pub actions: Vec<RuleAction>,
+    /// Eşleşirse sonraki kurallar denenmez.
+    #[serde(default)]
+    pub stop: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -1048,6 +1172,93 @@ mod tests {
         assert_eq!(
             serde_json::to_value(CardPosition::BottomRight).unwrap(),
             "bottomRight"
+        );
+    }
+
+    #[test]
+    fn kural_json_bicimi() {
+        let json = serde_json::json!({
+            "id": "k1",
+            "name": "Faturalar",
+            "enabled": true,
+            "accountId": "a",
+            "match": "any",
+            "conditions": [
+                {"kind": "from", "op": "contains", "value": "fatura"},
+                {"kind": "subject", "op": "notContains", "value": "reklam"},
+                {"kind": "hasAttachment"},
+                {"kind": "category", "value": "notifications"}
+            ],
+            "actions": [
+                {"kind": "move", "mailboxId": "a:Faturalar"},
+                {"kind": "archive"},
+                {"kind": "trash"},
+                {"kind": "markRead"},
+                {"kind": "star"},
+                {"kind": "mute"},
+                {"kind": "forward", "to": "muhasebe@ornek.com"}
+            ],
+            "stop": true
+        });
+        let rule: Rule = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(rule.match_, RuleMatch::Any);
+        assert_eq!(
+            rule.actions[0],
+            RuleAction::Move {
+                mailbox_id: "a:Faturalar".into()
+            }
+        );
+        assert_eq!(
+            rule.conditions[1],
+            RuleCondition::Subject {
+                op: RuleOp::NotContains,
+                value: "reklam".into()
+            }
+        );
+        assert_eq!(serde_json::to_value(&rule).unwrap(), json);
+        // Tüm hesaplar: `accountId` null.
+        let mut all = rule.clone();
+        all.account_id = None;
+        assert_eq!(
+            serde_json::to_value(&all).unwrap()["accountId"],
+            serde_json::Value::Null
+        );
+    }
+
+    #[test]
+    fn planli_gonderim_ve_liste_suzgeci() {
+        let item = ScheduledItem {
+            id: "o1".into(),
+            account_id: "a".into(),
+            send_at: 5,
+            to: vec![Address::new(None, "ayse@ornek.com")],
+            subject: "Selam".into(),
+            error: None,
+        };
+        assert_eq!(
+            serde_json::to_value(&item).unwrap(),
+            serde_json::json!({
+                "id": "o1", "accountId": "a", "sendAt": 5,
+                "to": [{"name": null, "email": "ayse@ornek.com"}],
+                "subject": "Selam", "error": null
+            })
+        );
+        // `only` alanı olmayan eski istek de okunur.
+        let q: ListQuery = serde_json::from_value(serde_json::json!({
+            "view": {"kind": "inbox"}, "accountId": null, "category": null,
+            "cursor": null, "limit": 50
+        }))
+        .unwrap();
+        assert_eq!(q.only, None);
+        let q: ListQuery = serde_json::from_value(serde_json::json!({
+            "view": {"kind": "inbox"}, "accountId": null, "category": null,
+            "only": "attachments", "cursor": null, "limit": 50
+        }))
+        .unwrap();
+        assert_eq!(q.only, Some(ListOnly::Attachments));
+        assert_eq!(
+            serde_json::to_value(Counts::default()).unwrap()["scheduled"],
+            0
         );
     }
 

@@ -18,6 +18,10 @@ use crate::parts::{forwarded_local, reply_ref, total_size};
 /// Kalıcı olmayan hatada en fazla deneme.
 const MAX_ATTEMPTS: u32 = 3;
 
+/// Kuralın kullanıcı yerine ilettiği postaların giden kutusu kimliği öneki
+/// (`Auto-Submitted` başlığı bununla eklenir; kimlik kalıcıdır).
+const AUTO_PREFIX: &str = "kural-";
+
 pub struct Outbox {
     pub(crate) store: Arc<Store>,
     secrets: Arc<dyn SecretStore>,
@@ -25,7 +29,7 @@ pub struct Outbox {
     /// JMAP hesaplarının taslakları için; uygulama açılışta bağlar.
     pub(crate) jmap: OnceLock<Arc<JmapManager>>,
     pub(crate) sink: Arc<dyn EventSink>,
-    wake: Notify,
+    pub(crate) wake: Notify,
 }
 
 fn now_ms() -> Millis {
@@ -75,6 +79,27 @@ impl Outbox {
     /// sonunda gönderilir. İletilen postanın ekleri (`forward_from`) sınıra
     /// dahildir; içerik yerelde yoksa gönderimde indirilir.
     pub fn enqueue(&self, msg: &OutgoingMessage, now: Millis) -> AppResult<OutboxItem> {
+        let undo = i64::from(self.store.settings()?.undo_send_seconds) * 1000;
+        let send_at = msg.send_at.unwrap_or(now + undo);
+        self.enqueue_as(uuid::Uuid::new_v4().to_string(), msg, send_at, now)
+    }
+
+    /// Kuralın kullanıcı yerine gönderdiği postayı (iletme) hemen gönderilmek
+    /// üzere sıraya alır; geri alma süresi yoktur. Posta
+    /// `Auto-Submitted: auto-forwarded` başlığıyla gider ve gönderilemezse
+    /// taslağa çevrilmez.
+    pub fn enqueue_auto(&self, msg: &OutgoingMessage, now: Millis) -> AppResult<OutboxItem> {
+        let id = format!("{AUTO_PREFIX}{}", uuid::Uuid::new_v4());
+        self.enqueue_as(id, msg, now, now)
+    }
+
+    fn enqueue_as(
+        &self,
+        id: String,
+        msg: &OutgoingMessage,
+        send_at: Millis,
+        now: Millis,
+    ) -> AppResult<OutboxItem> {
         let forwarded = match msg.forward_from {
             Some(id) => forwarded_local(&self.store, id)?.map_or(0, |list| total_size(&list)),
             None => 0,
@@ -86,11 +111,10 @@ impl Outbox {
                 "Gönderen hesap bulunamadı.",
             ));
         }
-        let undo = i64::from(self.store.settings()?.undo_send_seconds) * 1000;
-        let send_at = msg.send_at.unwrap_or(now + undo);
-        let id = uuid::Uuid::new_v4().to_string();
         self.store.outbox_add(&id, msg, send_at, now)?;
         self.wake.notify_one();
+        // Planlananlar sayacı tazelensin.
+        self.sink.changed(Vec::new());
         Ok(OutboxItem { id, send_at })
     }
 
@@ -99,6 +123,7 @@ impl Outbox {
         let removed = self.store.outbox_cancel(id)?;
         if removed {
             self.wake.notify_one();
+            self.sink.changed(Vec::new());
         }
         Ok(removed)
     }
@@ -133,8 +158,15 @@ impl Outbox {
         });
     }
 
-    async fn process(&self, row: OutboxRow) {
-        match self.deliver(&row).await {
+    pub(crate) async fn process(&self, row: OutboxRow) {
+        self.process_row(&row).await;
+        // Giden kutusu değişti (gönderildi, yeniden zamanlandı ya da düştü).
+        self.sink.changed(Vec::new());
+    }
+
+    async fn process_row(&self, row: &OutboxRow) {
+        let auto = row.id.starts_with(AUTO_PREFIX);
+        match self.deliver(row).await {
             Ok(note) => {
                 let _ = self.store.outbox_remove(&row.id);
                 if let Some(draft) = row.msg.draft_id {
@@ -165,7 +197,8 @@ impl Outbox {
                     let _ = self.store.outbox_retry(&row.id, retry_at, &e.message);
                     return;
                 }
-                let saved = self.save_as_draft(&row).is_ok();
+                // Kuralın iletmesi kullanıcının taslağı değildir.
+                let saved = !auto && self.save_as_draft(row).is_ok();
                 let _ = self.store.outbox_remove(&row.id);
                 let msg = if saved {
                     format!("{} Posta Taslaklar'a kaydedildi.", e.message)
@@ -195,6 +228,7 @@ impl Outbox {
             reply: reply.as_ref(),
             extra: &extra,
             draft: false,
+            auto_forwarded: row.id.starts_with(AUTO_PREFIX),
         };
         let message = build_with(&account, &row.msg, &opts, now)?;
         let raw = message.formatted();
@@ -380,6 +414,7 @@ mod tests {
                     view: mh_core::View::Sent,
                     account_id: Some(m.account_id.clone()),
                     category: None,
+                    only: None,
                     cursor: None,
                     limit: 10,
                 },
@@ -404,6 +439,7 @@ mod tests {
                     view,
                     account_id: Some(account.into()),
                     category: None,
+                    only: None,
                     cursor: None,
                     limit: 100,
                 },

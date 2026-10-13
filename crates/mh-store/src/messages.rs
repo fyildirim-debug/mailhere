@@ -1,7 +1,7 @@
 //! Postalar: ekleme, listeleme, bayraklar, taşıma, erteleme, konuşmalar.
 
 use mh_core::{
-    Address, AppError, AppResult, Category, Counts, ErrorCode, ListQuery, MailboxRole,
+    Address, AppError, AppResult, Category, Counts, ErrorCode, ListOnly, ListQuery, MailboxRole,
     MessageDetail, MessageId, MessageSummary, Millis, Page, ThreadEntry, View,
 };
 use mh_mime::{fold_tr, normalize_subject, ParsedMessage};
@@ -617,6 +617,12 @@ impl Store {
             sql += " AND m.category = ?";
             p.push(Value::Text(category_str(c).into()));
         }
+        sql += match q.only {
+            Some(ListOnly::Unread) => " AND m.unread = 1",
+            Some(ListOnly::Starred) => " AND m.starred = 1",
+            Some(ListOnly::Attachments) => " AND m.has_attachments = 1",
+            None => "",
+        };
         if let Some(c) = q.cursor.as_deref().filter(|c| !c.is_empty()) {
             let (d, i) = parse_cursor(c)?;
             sql += " AND (m.date < ? OR (m.date = ? AND m.id < ?))";
@@ -1033,6 +1039,8 @@ impl Store {
                 [],
                 |r| r.get::<_, i64>(0),
             )? as u32;
+            counts.scheduled =
+                c.query_row("SELECT COUNT(*) FROM outbox", [], |r| r.get::<_, i64>(0))? as u32;
             Ok(counts)
         })
     }
@@ -1172,6 +1180,7 @@ pub(crate) mod tests {
             view,
             account_id: None,
             category: None,
+            only: None,
             cursor: None,
             limit: 2,
         }
@@ -1274,6 +1283,59 @@ pub(crate) mod tests {
         assert_eq!(s.snoozes_expired_between(100, 600).unwrap(), 1);
         let c = s.counts(600).unwrap();
         assert_eq!((c.inbox_unread, c.snoozed), (2, 0));
+    }
+
+    #[test]
+    fn hizli_suzgec() {
+        let s = setup();
+        let read = s
+            .upsert_message(&msg("a", "a:INBOX", "Okunmuş", 10))
+            .unwrap()
+            .id;
+        let starred = s
+            .upsert_message(&msg("a", "a:INBOX", "Yıldızlı", 11))
+            .unwrap()
+            .id;
+        let mut ekli = msg("a", "a:INBOX", "Ekli", 12);
+        ekli.has_attachments = true;
+        let ekli = s.upsert_message(&ekli).unwrap().id;
+        s.set_flags(&[read, starred, ekli], Some(false), None)
+            .unwrap();
+        s.set_flags(&[starred], None, Some(true)).unwrap();
+        s.upsert_message(&msg("a", "a:INBOX", "Yeni", 13)).unwrap();
+        // Çöpteki yıldızlı posta gelen kutusu süzgecine girmez.
+        let trash = s
+            .upsert_message(&msg("a", "a:Trash", "Çöp", 14))
+            .unwrap()
+            .id;
+        s.set_flags(&[trash], None, Some(true)).unwrap();
+
+        let titles = |only: Option<ListOnly>| {
+            let mut q = query(View::Inbox);
+            q.limit = 50;
+            q.only = only;
+            s.list(&q, 100)
+                .unwrap()
+                .items
+                .into_iter()
+                .map(|m| m.subject)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(titles(None), vec!["Yeni", "Ekli", "Yıldızlı", "Okunmuş"]);
+        assert_eq!(titles(Some(ListOnly::Unread)), vec!["Yeni"]);
+        assert_eq!(titles(Some(ListOnly::Starred)), vec!["Yıldızlı"]);
+        assert_eq!(titles(Some(ListOnly::Attachments)), vec!["Ekli"]);
+
+        // Kategoriyle birlikte ve sayfalı.
+        let mut q = query(View::Inbox);
+        q.limit = 1;
+        q.only = Some(ListOnly::Unread);
+        q.category = Some(Category::Newsletters);
+        assert!(s.list(&q, 100).unwrap().items.is_empty());
+        q.category = Some(Category::People);
+        let page = s.list(&q, 100).unwrap();
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.next_cursor, None);
     }
 
     #[test]

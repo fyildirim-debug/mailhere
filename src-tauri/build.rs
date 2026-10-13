@@ -52,6 +52,15 @@ fn main() {
         "unsubscribe",
         "vacation_get",
         "vacation_set",
+        "rules_list",
+        "rule_save",
+        "rule_delete",
+        "rules_reorder",
+        "rule_run",
+        "messages_move_to",
+        "outbox_list",
+        "outbox_send_now",
+        "outbox_to_draft",
     ];
     tauri_build::try_build(
         tauri_build::Attributes::new()

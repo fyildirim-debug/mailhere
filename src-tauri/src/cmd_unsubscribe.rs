@@ -81,7 +81,7 @@ pub async fn unsubscribe(state: State<'_, AppState>, id: MessageId) -> Res<Unsub
                     "Abonelikten çıkma adresi geçersiz. Gönderenin sitesinden aboneliği kapatmayı dene.",
                 )
             })?;
-            state.outbox.send_now(&msg).await?;
+            state.outbox.send_immediately(&msg).await?;
             Ok(UnsubscribeResult::Done)
         }
         Step::Browser => Ok(UnsubscribeResult::Browser),

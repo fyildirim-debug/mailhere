@@ -526,6 +526,7 @@ mod tests {
                     view: View::Sent,
                     account_id: Some("a".into()),
                     category: None,
+                    only: None,
                     cursor: None,
                     limit: 10,
                 },

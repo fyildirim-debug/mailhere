@@ -36,6 +36,12 @@ Son denetim: 2026-10-13 (beş alanda kod denetimi; bulgular doğrulanıp düzelt
 - Pencereler uygulama dışı adrese yönlendirilemez. Dış bağlantılar yalnız `http`, `https` ve `mailto` ile, varsayılan tarayıcıda açılır.
 - Deneme anahtarları (`MAILHERE_DEMO`, `MAILHERE_SECRETS=memory`) ve OAuth kimliğini çalışırken değiştirme yalnız geliştirme derlemesinde çalışır.
 
+**Kurallar ve arama**
+- Kurallar (ve kuralla iletme) yalnız ana pencerenin komutlarıyla kurulur; bildirim kartı ve hızlı okuma bu komutlara erişemez.
+- Kuralla iletilen postaya `Auto-Submitted: auto-forwarded` eklenir. Döngü koruması: hesapların kendi adreslerinden gelen ve `Auto-Submitted` başlığı taşıyan postalar iletilmez; aynı posta aynı kuralla bir kez iletilir; kural başına saatte en çok 30 iletme. Kayıt veritabanında tutulur, yeniden başlatınca sıfırlanmaz.
+- İletme adresi tek ve geçerli bir adres olmalı (en çok 254 karakter, ad ya da liste kabul edilmez). Kural iletmesi gönderilemezse taslağa çevrilmez.
+- Arama işleçlerinin (`from:`, `in:`, `önce:` …) değerleri SQL'e hep parametreyle gider; serbest metin FTS sorgusuna yalnız tırnaklı önek terimleri olarak girer.
+
 **Ağ ve kimlik doğrulama**
 - TLS zorunlu; şifresiz bağlantı yalnız `localhost`'a. STARTTLS reddedilirse düz metne düşülmez.
 - Geçersiz sertifika yalnız sunucunun gerçekten sunduğu sertifika için onaylanabilir. Onay ayrıca işletim sisteminin kendi penceresinde istenir. Büyük sağlayıcılarda (Gmail, Outlook…) onay verilemez.

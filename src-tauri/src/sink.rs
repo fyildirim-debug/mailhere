@@ -45,6 +45,11 @@ impl EventSink for TauriSink {
     }
 
     fn new_mail(&self, account: &Account, messages: Vec<MessageSummary>) {
+        // Kurallar kart kararından önce uygulanır; eşzamansız iş gerekirse
+        // kalan postalar kurallardan sonra bu yönteme yeniden gelir.
+        let Some(messages) = crate::rules::before_notify(&self.app, account, messages) else {
+            return;
+        };
         let Some(state) = self.app.try_state::<AppState>() else {
             return;
         };

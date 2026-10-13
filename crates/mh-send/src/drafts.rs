@@ -31,6 +31,7 @@ impl Outbox {
             reply: reply.as_ref(),
             extra: &extra,
             draft: true,
+            auto_forwarded: false,
         };
         let raw = build_with(&account, msg, &opts, now)?.formatted();
         // Gönderen hesap başka türdeyse (IMAP ↔ JMAP) eski taslağı kendi

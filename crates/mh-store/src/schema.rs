@@ -183,6 +183,25 @@ const MIGRATIONS: &[&str] = &[
     -- olan postaları da alınsın diye sonraki eşitleme baştan yapılır.
     UPDATE jmap_accounts SET email_state = NULL, mailbox_state = NULL;
     "#,
+    // 7: kurallar ve kuralla iletilen postaların kaydı (döngü ve sıklık
+    // koruması). Hesaba bağlı kural hesapla birlikte silinir.
+    r#"
+    CREATE TABLE rules (
+        id          TEXT PRIMARY KEY,
+        account_id  TEXT REFERENCES accounts(id) ON DELETE CASCADE,
+        position    INTEGER NOT NULL,
+        json        TEXT NOT NULL
+    );
+    CREATE INDEX rules_position ON rules(position);
+
+    CREATE TABLE rule_forwards (
+        rule_id      TEXT NOT NULL REFERENCES rules(id) ON DELETE CASCADE,
+        message_key  TEXT NOT NULL,
+        at           INTEGER NOT NULL,
+        PRIMARY KEY (rule_id, message_key)
+    );
+    CREATE INDEX rule_forwards_at ON rule_forwards(rule_id, at);
+    "#,
 ];
 
 /// Dallar ayrı geliştirilirken ana dalın ara sürümleri bazı geçişleri yer

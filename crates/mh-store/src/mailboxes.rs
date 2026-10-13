@@ -157,14 +157,14 @@ impl Store {
         self.mailbox(id)?.ok_or_else(not_found)
     }
 
-    /// Kutuya elle rol atar (Gönderilenler, Taslaklar, Arşiv, Çöp, Gereksiz).
+    /// Kutuya elle rol atar (Gönderilenler, Taslaklar, Arşiv, Çöp, İstenmeyen).
     /// Hesapta bu rolü taşıyan diğer kutular sıradan klasöre döner ve sonraki
     /// eşitlemelerde de öyle kalır. Etkilenen kutuları döner.
     pub fn set_mailbox_role(&self, id: &str, role: MailboxRole) -> AppResult<Vec<String>> {
         if !role.is_special() {
             return Err(AppError::new(
                 ErrorCode::Invalid,
-                "Bir klasöre yalnız Gönderilenler, Taslaklar, Arşiv, Çöp ya da Gereksiz görevi atanabilir.",
+                "Bir klasöre yalnız Gönderilenler, Taslaklar, Arşiv, Çöp ya da İstenmeyen görevi atanabilir.",
             ));
         }
         let info = self.mailbox(id)?.ok_or_else(not_found)?;

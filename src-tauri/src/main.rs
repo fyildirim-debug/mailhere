@@ -10,10 +10,13 @@ mod cmd_files;
 mod cmd_jmap;
 mod cmd_mailbox;
 mod cmd_oauth;
+mod cmd_outbox;
+mod cmd_rules;
 mod cmd_unsubscribe;
 mod cmd_vacation;
 mod commands;
 mod notify;
+mod rules;
 mod secrets;
 mod signatures;
 mod sink;
@@ -145,6 +148,15 @@ fn main() {
             cmd_unsubscribe::unsubscribe,
             cmd_vacation::vacation_get,
             cmd_vacation::vacation_set,
+            cmd_rules::rules_list,
+            cmd_rules::rule_save,
+            cmd_rules::rule_delete,
+            cmd_rules::rules_reorder,
+            cmd_rules::rule_run,
+            cmd_rules::messages_move_to,
+            cmd_outbox::outbox_list,
+            cmd_outbox::outbox_send_now,
+            cmd_outbox::outbox_to_draft,
         ])
         .build(tauri::generate_context!())
         .expect("Mailhere başlatılamadı");

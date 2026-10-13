@@ -4,7 +4,7 @@ use std::path::Path;
 use std::time::{Duration, UNIX_EPOCH};
 
 use lettre::address::Envelope;
-use lettre::message::header::ContentType;
+use lettre::message::header::{ContentType, HeaderName, HeaderValue};
 use lettre::message::{Attachment, Mailbox, MultiPart, SinglePart};
 use lettre::Message;
 use mh_core::{Account, Address, AppError, AppResult, ErrorCode, Millis, OutgoingMessage};
@@ -134,6 +134,9 @@ pub struct BuildOptions<'a> {
     pub extra: &'a [AttachmentData],
     /// Taslak: alıcı zorunlu değil, gizli alıcılar başlıkta saklanır.
     pub draft: bool,
+    /// Kullanıcı yerine kural gönderiyor: `Auto-Submitted: auto-forwarded`
+    /// (RFC 3834) eklenir; alıcının otomatik yanıtları ve kuralları döngüye girmez.
+    pub auto_forwarded: bool,
 }
 
 /// Postayı kurar. Message-ID gönderenin alan adıyla üretilir.
@@ -193,6 +196,12 @@ pub fn build_with(
             }
             b = b.references(refs.join(" "));
         }
+    }
+    if opts.auto_forwarded {
+        b = b.raw_header(HeaderValue::new(
+            HeaderName::new_from_ascii_str("Auto-Submitted"),
+            "auto-forwarded".into(),
+        ));
     }
     if opts.draft {
         // Taslak gönderilmez; zarf yalnız kurulum için gönderenin kendisidir.
@@ -360,6 +369,24 @@ mod tests {
             ErrorCode::Invalid,
             "iletilen eklerle 25 MB sınırı"
         );
+    }
+
+    #[test]
+    fn kuralla_iletilen_posta_isaretlenir() {
+        let opts = BuildOptions {
+            auto_forwarded: true,
+            ..BuildOptions::default()
+        };
+        let raw = build_with(&account(), &out(), &opts, 0)
+            .unwrap()
+            .formatted();
+        let text = String::from_utf8_lossy(&raw);
+        assert!(
+            text.contains("Auto-Submitted: auto-forwarded\r\n"),
+            "{text}"
+        );
+        let raw = build(&account(), &out(), None, 0).unwrap().formatted();
+        assert!(!String::from_utf8_lossy(&raw).contains("Auto-Submitted"));
     }
 
     #[test]
