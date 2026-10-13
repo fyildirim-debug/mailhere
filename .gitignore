@@ -23,3 +23,6 @@ src-tauri/gen/
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# Claude Code çalışma ağaçları
+.claude/worktrees/

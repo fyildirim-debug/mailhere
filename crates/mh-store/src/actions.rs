@@ -57,6 +57,12 @@ pub enum Action {
     },
     /// Sunucudan kalıcı sil (yerel satırlar zaten silindi).
     Delete { items: Vec<ServerRef> },
+    /// Taslağın yeni sürümünü `path` kutusuna ekle (ham veri ayrı sütunda;
+    /// yoksa yalnız silme) ve eski kopyalarını kaldır.
+    Draft {
+        path: String,
+        remove: Vec<ServerRef>,
+    },
 }
 
 /// Kuyruktaki bir işlem.
@@ -154,7 +160,7 @@ impl Store {
                     }
                 }
                 Action::Delete { items } if items.is_empty() => return Ok(None),
-                Action::Append { .. } | Action::Delete { .. } => {}
+                Action::Append { .. } | Action::Delete { .. } | Action::Draft { .. } => {}
             }
             tx.execute(
                 "INSERT INTO actions (account_id, payload, raw, created_at) VALUES (?1, ?2, ?3, ?4)",

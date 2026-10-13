@@ -11,6 +11,7 @@ rust-version.workspace = true
 mh-core.workspace = true
 mh-store.workspace = true
 mh-mime.workspace = true
+mh-oauth.workspace = true
 tokio.workspace = true
 futures.workspace = true
 tracing.workspace = true
@@ -30,3 +31,4 @@ x509-parser.workspace = true
 [dev-dependencies]
 chrono.workspace = true
 rcgen.workspace = true
+mh-oauth = { workspace = true, features = ["testing"] }

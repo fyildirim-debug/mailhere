@@ -10,7 +10,8 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 
-use crate::error::{auth_error, network_error, SyncError, SyncResult};
+use crate::credentials::{imap_login, Credentials};
+use crate::error::{network_error, SyncError, SyncResult};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(30);
@@ -80,8 +81,14 @@ async fn greeting<T: ImapIo>(client: &mut Client<T>) -> SyncResult<()> {
     }
 }
 
-/// Bağlanır, gerekirse STARTTLS ile yükseltir ve oturum açar.
+/// Bağlanır, gerekirse STARTTLS ile yükseltir ve parolayla oturum açar.
 pub async fn connect(cfg: &ServerConfig, password: &str) -> SyncResult<ImapSession> {
+    connect_with(cfg, &Credentials::Password(password.to_owned())).await
+}
+
+/// Bağlanır, gerekirse STARTTLS ile yükseltir ve oturum açar (parola ya da
+/// OAuth 2 erişim jetonuyla XOAUTH2).
+pub async fn connect_with(cfg: &ServerConfig, creds: &Credentials) -> SyncResult<ImapSession> {
     let host = cfg.host.trim();
     let stream = tcp(host, cfg.port).await?;
     let client: Client<ImapStream> = match cfg.security {
@@ -117,19 +124,21 @@ pub async fn connect(cfg: &ServerConfig, password: &str) -> SyncResult<ImapSessi
             c
         }
     };
-    match timeout(LOGIN_TIMEOUT, client.login(cfg.username.trim(), password)).await? {
-        Ok(session) => Ok(session),
-        Err((async_imap::error::Error::No(m) | async_imap::error::Error::Bad(m), _)) => {
-            tracing::info!(host, reply = %m.trim(), "giriş reddedildi");
-            Err(auth_error().into())
-        }
-        Err((e, _)) => Err(e.into()),
-    }
+    timeout(
+        LOGIN_TIMEOUT,
+        imap_login(client, host, cfg.username.trim(), creds),
+    )
+    .await?
 }
 
 /// Hesap eklerken ayarları ve parolayı dener.
 pub async fn test_login(cfg: &ServerConfig, password: &str) -> AppResult<()> {
-    let mut session = connect(cfg, password).await.map_err(|e| e.to_app())?;
+    test_login_with(cfg, &Credentials::Password(password.to_owned())).await
+}
+
+/// Hesap eklerken ayarları ve kimlik bilgisini (parola ya da jeton) dener.
+pub async fn test_login_with(cfg: &ServerConfig, creds: &Credentials) -> AppResult<()> {
+    let mut session = connect_with(cfg, creds).await.map_err(|e| e.to_app())?;
     let _ = timeout(Duration::from_secs(5), session.logout()).await;
     Ok(())
 }

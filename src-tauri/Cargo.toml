@@ -22,6 +22,7 @@ mh-mime.workspace = true
 mh-sync.workspace = true
 mh-send.workspace = true
 mh-notify.workspace = true
+mh-oauth.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
@@ -35,6 +36,7 @@ tauri-plugin-single-instance.workspace = true
 tauri-plugin-notification.workspace = true
 tauri-plugin-opener.workspace = true
 tauri-plugin-dialog.workspace = true
+tauri-plugin-updater.workspace = true
 keyring = { workspace = true, features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
 
 [features]

@@ -3,10 +3,12 @@
 use std::path::Path;
 use std::time::{Duration, UNIX_EPOCH};
 
+use lettre::address::Envelope;
 use lettre::message::header::ContentType;
 use lettre::message::{Attachment, Mailbox, MultiPart, SinglePart};
 use lettre::Message;
 use mh_core::{Account, Address, AppError, AppResult, ErrorCode, Millis, OutgoingMessage};
+use mh_mime::AttachmentData;
 
 /// Yanıtlanan postanın başlıkları (köşeli parantezsiz).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -44,13 +46,19 @@ fn file_name(path: &str) -> String {
 
 /// Gönderim öncesi denetim: alıcı var mı, ekler okunabilir ve sınır içinde mi?
 pub fn validate(msg: &OutgoingMessage) -> AppResult<()> {
-    if msg.to.is_empty() && msg.cc.is_empty() && msg.bcc.is_empty() {
+    validate_with(msg, 0, false)
+}
+
+/// [`validate`]; `extra` bellekten eklenecek eklerin (ör. iletilen postanın)
+/// toplam boyutudur. Taslakta alıcı zorunlu değildir.
+pub fn validate_with(msg: &OutgoingMessage, extra: u64, draft: bool) -> AppResult<()> {
+    if !draft && msg.to.is_empty() && msg.cc.is_empty() && msg.bcc.is_empty() {
         return Err(AppError::new(ErrorCode::Invalid, "En az bir alıcı ekle."));
     }
     for a in msg.to.iter().chain(&msg.cc).chain(&msg.bcc) {
         mailbox(a)?;
     }
-    let mut total = 0u64;
+    let mut total = extra;
     for path in &msg.attachments {
         let meta = std::fs::metadata(path).map_err(|_| {
             AppError::new(
@@ -76,6 +84,17 @@ fn bracket(id: &str) -> String {
     )
 }
 
+/// Postayı kurmanın seçenekleri.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BuildOptions<'a> {
+    /// Yanıtlanan postanın başlıkları.
+    pub reply: Option<&'a ReplyRef>,
+    /// Bellekten eklenecek dosyalar (ör. iletilen postanın ekleri).
+    pub extra: &'a [AttachmentData],
+    /// Taslak: alıcı zorunlu değil, gizli alıcılar başlıkta saklanır.
+    pub draft: bool,
+}
+
 /// Postayı kurar. Message-ID gönderenin alan adıyla üretilir.
 pub fn build(
     account: &Account,
@@ -83,6 +102,25 @@ pub fn build(
     reply: Option<&ReplyRef>,
     now: Millis,
 ) -> AppResult<Message> {
+    build_with(
+        account,
+        msg,
+        &BuildOptions {
+            reply,
+            ..BuildOptions::default()
+        },
+        now,
+    )
+}
+
+/// Seçenekli [`build`]: iletilen ekler ve taslak kipi.
+pub fn build_with(
+    account: &Account,
+    msg: &OutgoingMessage,
+    opts: &BuildOptions<'_>,
+    now: Millis,
+) -> AppResult<Message> {
+    let reply = opts.reply;
     let from = mailbox(&Address::new(Some(&account.display_name), &account.email))?;
     let domain = account
         .email
@@ -90,7 +128,7 @@ pub fn build(
         .map(|(_, d)| d)
         .unwrap_or("mailhere.local");
     let mut b = Message::builder()
-        .from(from)
+        .from(from.clone())
         .subject(msg.subject.trim())
         .date(UNIX_EPOCH + Duration::from_millis(now.max(0) as u64))
         .message_id(Some(format!("<{}@{domain}>", uuid::Uuid::new_v4())))
@@ -115,11 +153,24 @@ pub fn build(
             b = b.references(refs.join(" "));
         }
     }
+    if opts.draft {
+        // Taslak gönderilmez; zarf yalnız kurulum için gönderenin kendisidir.
+        let envelope = Envelope::new(Some(from.email.clone()), vec![from.email]).map_err(|e| {
+            AppError::new(ErrorCode::Invalid, format!("Taslak oluşturulamadı: {e}"))
+        })?;
+        b = b.keep_bcc().envelope(envelope);
+    }
     let text = SinglePart::plain(msg.body_text.clone());
-    let built = if msg.attachments.is_empty() {
+    let built = if msg.attachments.is_empty() && opts.extra.is_empty() {
         b.singlepart(text)
     } else {
         let mut mp = MultiPart::mixed().singlepart(text);
+        for a in opts.extra {
+            let ct = ContentType::parse(&a.mime).unwrap_or_else(|_| {
+                ContentType::parse("application/octet-stream").expect("geçerli tür")
+            });
+            mp = mp.singlepart(Attachment::new(a.name.clone()).body(a.bytes.clone(), ct));
+        }
         for path in &msg.attachments {
             let bytes = std::fs::read(path).map_err(|_| {
                 AppError::new(
@@ -218,6 +269,68 @@ mod tests {
         assert_eq!(r.attachments[0].name, "Sözleşme_v3.pdf");
         assert_eq!(r.attachments[0].mime, "application/pdf");
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn iletilen_ekler_kopyalanir() {
+        let extra = vec![
+            AttachmentData {
+                name: "Sözleşme_v3.pdf".into(),
+                mime: "application/pdf".into(),
+                bytes: b"%PDF-1.4 iletilen".to_vec(),
+            },
+            AttachmentData {
+                name: "plan.bilinmez".into(),
+                mime: "bozuk tür".into(),
+                bytes: vec![0, 1, 2],
+            },
+        ];
+        let mut o = out();
+        o.subject = "Fwd: Sözleşme".into();
+        validate_with(&o, 20, false).unwrap();
+        let opts = BuildOptions {
+            extra: &extra,
+            ..BuildOptions::default()
+        };
+        let raw = build_with(&account(), &o, &opts, 0).unwrap().formatted();
+        let copied = mh_mime::visible_attachments(&raw);
+        assert_eq!(copied.len(), 2);
+        assert_eq!(copied[0], extra[0], "ad, tür ve içerik aynen kopyalanır");
+        assert_eq!(copied[1].mime, "application/octet-stream");
+        assert_eq!(copied[1].bytes, vec![0, 1, 2]);
+        let r = mh_mime::render(&raw, false).unwrap();
+        assert!(r.text.unwrap().contains("masayı ayırt"));
+        assert_eq!(
+            validate_with(&o, MAX_ATTACHMENTS + 1, false)
+                .unwrap_err()
+                .code,
+            ErrorCode::Invalid,
+            "iletilen eklerle 25 MB sınırı"
+        );
+    }
+
+    #[test]
+    fn taslak_kipi() {
+        let mut o = out();
+        o.to.clear();
+        o.cc.clear();
+        let opts = BuildOptions {
+            draft: true,
+            ..BuildOptions::default()
+        };
+        // Gizli alıcı taslakta saklanır (yeniden açınca kaybolmasın).
+        let raw = build_with(&account(), &o, &opts, 0).unwrap().formatted();
+        let r = mh_mime::render(&raw, false).unwrap();
+        assert_eq!(r.bcc, vec![Address::new(None, "gizli@ornek.com.tr")]);
+        // Alıcısız taslak kurulabilir; gönderim denetimi yine reddeder.
+        o.bcc.clear();
+        validate_with(&o, 0, true).unwrap();
+        assert_eq!(validate(&o).unwrap_err().code, ErrorCode::Invalid);
+        let raw = build_with(&account(), &o, &opts, 0).unwrap().formatted();
+        let p = mh_mime::parse(&raw, false).unwrap();
+        assert!(p.to.is_empty() && p.cc.is_empty());
+        assert_eq!(p.subject, "Re: Cumartesi kahvaltı?");
+        assert!(p.message_id.unwrap().ends_with("@ornek.com.tr"));
     }
 
     #[test]

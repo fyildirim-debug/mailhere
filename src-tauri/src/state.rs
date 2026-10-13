@@ -111,6 +111,7 @@ pub fn setup(app: &mut App, rt: tokio::runtime::Handle) -> Result<(), Box<dyn st
         tracing::warn!(error = %e, "tepsi simgesi oluşturulamadı");
     }
     outbox.start(&rt);
+    crate::updater::start(&handle, &rt);
     sync.start_all().map_err(|e| e.message)?;
     rt.spawn(crate::sink::snooze_ticker(handle.clone()));
     crate::tray::refresh(&handle);

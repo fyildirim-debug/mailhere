@@ -10,6 +10,7 @@
   import { isEditing, shortcutFor } from '../../lib/util/keys';
   import { initMail, mail, move, moveTo, select, selectedIds, setUnread, toggleStar } from '../../lib/stores/mail.svelte';
   import { resolvedTheme, toggleTheme } from '../../lib/stores/settings.svelte';
+  import { initUpdate } from '../../lib/stores/update.svelte';
   import CommandPalette from './CommandPalette.svelte';
   import MessageList from './MessageList.svelte';
   import Onboarding from './Onboarding.svelte';
@@ -21,6 +22,7 @@
 
   onMount(() => {
     void initMail();
+    initUpdate();
   });
 
   // Görev çubuğunda okunmamış sayısı.

@@ -1,12 +1,26 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { appWindow, call, EVENTS, on, pickFiles, toAppError, type Account, type Address, type ComposeMode, type MessageDetail } from '../../lib/api';
-  import { t, when, type MessageKey } from '../../lib/i18n/index.svelte';
+  import {
+    appWindow,
+    call,
+    EVENTS,
+    on,
+    pickFiles,
+    toAppError,
+    type Account,
+    type Address,
+    type Attachment,
+    type ComposeMode,
+    type MessageDetail,
+    type MessageId,
+    type OutgoingMessage,
+  } from '../../lib/api';
+  import { locale, t, when, type MessageKey } from '../../lib/i18n/index.svelte';
   import Avatar from '../../lib/ui/Avatar.svelte';
   import FileBadge from '../../lib/ui/FileBadge.svelte';
   import Icon from '../../lib/ui/Icon.svelte';
   import WindowControls from '../../lib/ui/WindowControls.svelte';
-  import { baseSubject, displayName, snoozeOptions } from '../../lib/util/format';
+  import { baseSubject, displayName, fileSize, snoozeOptions } from '../../lib/util/format';
 
   interface Props {
     mode: ComposeMode;
@@ -35,6 +49,19 @@
   let suggest = $state<{ field: 'to' | 'cc' | 'bcc'; items: Address[]; active: number } | null>(null);
   let suggestTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // Taslak: sunucudaki Taslaklar kutusuna kendiliğinden kaydedilir.
+  let draftId = $state<MessageId | null>(null);
+  /** İletilen (ya da yeniden açılan taslaktaki) postanın ekleri; gönderimde arka uç ekler. */
+  let forwardFrom = $state<MessageId | null>(null);
+  let carried = $state<Attachment[]>([]);
+  let draftState = $state<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  let draftError = $state<string | null>(null);
+  let baseline = '';
+  let draftTimer: ReturnType<typeof setTimeout> | null = null;
+  let saving: Promise<void> | null = null;
+  let ready = $state(false);
+  let discarded = false;
+
   const from = $derived(accounts.find((a) => a.id === fromId));
   const locked = $derived(queued != null);
 
@@ -48,7 +75,16 @@
         queued = null;
       }
     });
-    return off;
+    // Pencere kapanırken bekleyen değişikliği kaydetmeyi dene.
+    const flush = () => {
+      if (!discarded && !queued && dirty()) void saveDraft();
+    };
+    window.addEventListener('pagehide', flush);
+    return () => {
+      off();
+      window.removeEventListener('pagehide', flush);
+      if (draftTimer) clearTimeout(draftTimer);
+    };
   });
 
   async function init() {
@@ -57,13 +93,18 @@
     if (messageId != null) {
       try {
         const d = await call('message_get', { id: messageId });
-        original = d;
         fromId = d.accountId;
-        prefill(d);
+        if (mode === 'draft') openDraft(d);
+        else {
+          original = d;
+          prefill(d);
+        }
       } catch (e) {
         error = toAppError(e).message;
       }
     }
+    baseline = snapshot();
+    ready = true;
     document.title = title();
     setTimeout(() => {
       if (to.length && bodyEl) {
@@ -89,6 +130,10 @@
     if (mode === 'forward') {
       subject = `Fwd: ${baseSubject(d.subject)}`;
       body = `\n\n${t('compose.forwarded')}\n${displayName(d.from)} <${d.from.email}>\n${when(d.date)}\n${d.subject}\n\n${d.bodyText ?? d.snippet}`;
+      if (d.attachments.length) {
+        forwardFrom = d.id;
+        carried = d.attachments;
+      }
       return;
     }
     subject = `Re: ${baseSubject(d.subject)}`;
@@ -101,10 +146,111 @@
     body = `\n\n${header}\n${quoted}`;
   }
 
+  /** Kayıtlı bir taslağı düzenlemek için açar. */
+  function openDraft(d: MessageDetail) {
+    draftId = d.id;
+    to = [...d.to];
+    cc = [...d.cc];
+    bcc = [...d.bcc];
+    showCc = cc.length > 0;
+    showBcc = bcc.length > 0;
+    subject = d.subject;
+    body = d.bodyText ?? '';
+    if (d.attachments.length) {
+      forwardFrom = d.id;
+      carried = d.attachments;
+    }
+  }
+
   function title() {
+    if (mode === 'draft') return t('compose.draft', { subject: subject.trim() || t('compose.noSubject') });
     if (mode === 'forward' && original) return t('compose.forward', { subject: baseSubject(original.subject) });
     if (original) return t('compose.reply', { subject: baseSubject(original.subject) });
     return t('compose.new');
+  }
+
+  function outgoing(): OutgoingMessage | null {
+    if (!from) return null;
+    return {
+      accountId: from.id,
+      to: [...to],
+      cc: [...cc],
+      bcc: [...bcc],
+      subject,
+      bodyText: body,
+      inReplyTo: original?.id ?? null,
+      attachments: [...attachments],
+      sendAt: null,
+      forwardFrom,
+      draftId,
+    };
+  }
+
+  function snapshot(): string {
+    return JSON.stringify([fromId, to, cc, bcc, subject, body, attachments, forwardFrom]);
+  }
+
+  function dirty(): boolean {
+    return ready && snapshot() !== baseline;
+  }
+
+  // Her değişiklikten 1,5 sn sonra kaydet (yazarken her tuşta değil).
+  $effect(() => {
+    const snap = snapshot();
+    if (!ready || locked || snap === baseline) return;
+    if (draftTimer) clearTimeout(draftTimer);
+    draftTimer = setTimeout(() => void saveDraft(), 1500);
+  });
+
+  async function saveDraft(): Promise<void> {
+    if (saving) {
+      await saving;
+      if (!dirty()) return;
+    }
+    const msg = outgoing();
+    if (!msg || discarded || queued) return;
+    const snap = snapshot();
+    draftState = 'saving';
+    saving = (async () => {
+      try {
+        try {
+          draftId = await call('draft_save', { msg });
+        } catch (e) {
+          // Taslak bu arada silinmiş olabilir (ör. gönderildi ve geri alındı): yenisini yaz.
+          // Ekler o taslaktan geliyorsa artık okunamaz; onlarsız kaydet.
+          if (msg.draftId == null || toAppError(e).code !== 'notFound') throw e;
+          const lost = msg.forwardFrom != null && msg.forwardFrom === msg.draftId;
+          if (lost) {
+            forwardFrom = null;
+            carried = [];
+          }
+          draftId = await call('draft_save', { msg: { ...msg, draftId: null, forwardFrom: lost ? null : msg.forwardFrom } });
+        }
+        baseline = snap;
+        draftState = 'saved';
+        draftError = null;
+      } catch (e) {
+        draftState = 'error';
+        draftError = toAppError(e).message;
+      } finally {
+        saving = null;
+      }
+    })();
+    await saving;
+  }
+
+  async function discard() {
+    discarded = true;
+    if (draftTimer) clearTimeout(draftTimer);
+    if (saving) await saving;
+    if (draftId != null) {
+      try {
+        await call('draft_delete', { id: draftId });
+      } catch {
+        /* zaten yoksa sorun değil */
+      }
+    }
+    await appWindow.close();
   }
 
   function parse(text: string): Address | null {
@@ -234,22 +380,13 @@
       error = t('compose.needRecipient');
       return;
     }
-    if (!from) return;
+    const msg = outgoing();
+    if (!from || !msg) return;
+    if (draftTimer) clearTimeout(draftTimer);
+    if (saving) await saving;
     const text = from.signature ? `${body.trimEnd()}\n\n${from.signature}` : body;
     try {
-      const item = await call('send', {
-        msg: {
-          accountId: from.id,
-          to: [...to],
-          cc: [...cc],
-          bcc: [...bcc],
-          subject,
-          bodyText: text,
-          inReplyTo: original?.id ?? null,
-          attachments: [...attachments],
-          sendAt,
-        },
-      });
+      const item = await call('send', { msg: { ...msg, bodyText: text, sendAt, draftId } });
       queued = { id: item.id, at: item.sendAt };
       laterOpen = false;
     } catch (e) {
@@ -260,13 +397,20 @@
   async function undo() {
     if (!queued) return;
     const ok = await call('send_cancel', { id: queued.id });
-    if (ok) queued = null;
+    if (ok) {
+      queued = null;
+      // Gönderimde taslak silinmiş olabilir; içerik kaybolmasın diye yeniden kaydet.
+      baseline = '';
+    }
   }
 
   function onKey(e: KeyboardEvent) {
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       e.preventDefault();
       if (!locked) void send();
+    } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+      e.preventDefault();
+      if (!locked && ready) void saveDraft();
     } else if (e.key === 'Escape' && laterOpen) {
       laterOpen = false;
     }
@@ -379,8 +523,15 @@
   <div class="editor">
     <textarea bind:this={bodyEl} bind:value={body} placeholder={t('compose.bodyPlaceholder')} aria-label={t('compose.body')} disabled={locked}></textarea>
     {#if from?.signature}<div class="signature">{from.signature}</div>{/if}
-    {#if attachments.length}
+    {#if attachments.length || carried.length}
       <div class="files">
+        {#each carried as a (a.index)}
+          <span class="file" title="{a.name} · {t('compose.original')}">
+            <FileBadge name={a.name} />
+            <span class="trunc">{a.name}</span>
+            <span class="meta num size">{fileSize(a.size, locale())}</span>
+          </span>
+        {/each}
         {#each attachments as path (path)}
           <span class="file" title={path}>
             <FileBadge name={fileName(path)} />
@@ -401,11 +552,17 @@
       <span class="status err" role="alert">{error}</span>
     {:else if sendAt}
       <span class="status"><Icon name="clock" size={14} />{t('compose.scheduled', { when: when(sendAt) })}<button class="link" onclick={() => (sendAt = null)}>{t('act.cancel')}</button></span>
+    {:else if draftState === 'saving'}
+      <span class="meta" role="status">{t('compose.draftSaving')}</span>
+    {:else if draftState === 'saved'}
+      <span class="meta" role="status">{t('compose.draftSaved')}</span>
+    {:else if draftState === 'error'}
+      <span class="status err" role="alert">{t('compose.draftFailed', { message: draftError ?? '' })}</span>
     {:else}
       <span class="meta">{t('read.sendHint')}</span>
     {/if}
     <span class="grow"></span>
-    <button class="btn-icon" aria-label={t('compose.discard')} title={t('compose.discard')} onclick={() => appWindow.close()}><Icon name="trash" /></button>
+    <button class="btn-icon" aria-label={t('compose.discard')} title={t('compose.discard')} disabled={locked} onclick={discard}><Icon name="trash" /></button>
     <div class="split">
       <button class="send" onclick={send} disabled={locked}><Icon name="send" size={16} />{sendAt ? t('act.schedule') : t('act.send')}<span class="kbd on-accent">Ctrl Enter</span></button>
       <button class="more" aria-label={t('compose.later')} title={t('compose.later')} aria-haspopup="menu" aria-expanded={laterOpen} disabled={locked} onclick={() => (laterOpen = !laterOpen)}>
@@ -601,6 +758,10 @@
     border-radius: var(--r-row);
     background: var(--surface);
     border: 1px solid var(--line);
+  }
+
+  .file .size {
+    padding-right: 8px;
   }
 
   .foot {

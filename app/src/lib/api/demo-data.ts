@@ -189,6 +189,7 @@ export function createDemoData(now = new Date()): DemoData {
       category: s.category,
       snoozedUntil: null,
       cc: s.cc ?? [],
+      bcc: [],
       replyTo: [],
       messageIdHeader: `<${s.key}@mailhere.demo>`,
       references: [],

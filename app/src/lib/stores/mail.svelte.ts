@@ -419,10 +419,14 @@ export async function sendQuickReply(d: MessageDetail, text: string, restore: (t
   }
 }
 
-export function syncLabel(): { text: string; tone: 'ok' | 'busy' | 'warn' } {
+export function syncLabel(): { text: string; tone: 'ok' | 'busy' | 'warn'; untrusted?: { host: string; port: number } } {
   const n = mail.accounts.length;
   if (!n) return { text: t('sync.noAccounts'), tone: 'warn' };
-  const states = Object.values(mail.sync);
+  const states = Object.values(mail.sync).filter((s) => mail.accounts.some((a) => a.id === s.accountId));
+  const bad = states.find((s) => s.state === 'untrusted');
+  if (bad && bad.state === 'untrusted') {
+    return { text: t('sync.untrusted', { host: bad.host }), tone: 'warn', untrusted: { host: bad.host, port: bad.port } };
+  }
   const err = states.find((s) => s.state === 'error');
   if (err) return { text: t('sync.error'), tone: 'warn' };
   const busy = states.find((s) => s.state === 'syncing');

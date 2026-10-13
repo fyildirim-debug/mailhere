@@ -147,7 +147,7 @@ pub async fn open(cfg: &ServerConfig) -> AppResult<AsyncSmtpConnection> {
         Ok(Ok(conn)) => Ok(conn),
         Ok(Err(e)) => {
             tracing::warn!(host, error = %e, "SMTP oturumu açılamadı");
-            Err(crate::transport::map_err(&e, cfg))
+            Err(crate::transport::map_err(&e, cfg, false))
         }
         Err(_) => Err(unreachable_server(cfg)),
     }

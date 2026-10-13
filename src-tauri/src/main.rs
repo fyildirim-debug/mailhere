@@ -3,13 +3,17 @@
 // Windows'ta sürüm derlemesinde konsol penceresi açılmasın.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod cmd_account;
 mod cmd_cert;
+mod cmd_drafts;
+mod cmd_oauth;
 mod commands;
 mod notify;
 mod secrets;
 mod sink;
 mod state;
 mod tray;
+mod updater;
 mod windows;
 
 use std::sync::atomic::Ordering;
@@ -80,6 +84,8 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(cmd_oauth::OAuthState::default())
         .setup(move |app| state::setup(app, rt.clone()))
         .on_window_event(windows::on_window_event)
         .invoke_handler(tauri::generate_handler![
@@ -110,6 +116,14 @@ fn main() {
             commands::notify_pending,
             commands::notify_snooze,
             commands::demo_notify,
+            cmd_account::account_update,
+            cmd_drafts::draft_save,
+            cmd_drafts::draft_delete,
+            updater::update_check,
+            updater::update_install,
+            cmd_oauth::oauth_providers,
+            cmd_oauth::oauth_sign_in,
+            cmd_oauth::account_add_oauth,
             cmd_cert::cert_inspect,
             cmd_cert::cert_trust,
         ])

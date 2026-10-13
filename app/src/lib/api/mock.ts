@@ -182,7 +182,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       id, accountId: account.id, mailboxId: boxFor(account.id, 'drafts'), threadId: `draft-${id}`,
       from: { name: account.displayName, email: account.email }, to: msg.to, subject: msg.subject,
       snippet: msg.bodyText.replace(/\s+/g, ' ').slice(0, 200), date: now(), unread: false, starred: false,
-      hasAttachments: msg.attachments.length > 0, category: 'people', snoozedUntil: null, cc: msg.cc, replyTo: [],
+      hasAttachments: msg.attachments.length > 0, category: 'people', snoozedUntil: null, cc: msg.cc, bcc: msg.bcc, replyTo: [],
       messageIdHeader: null, references: [], bodyText: msg.bodyText, bodyHtml: null, hasRemoteContent: false,
       remoteAllowed: false, attachments: [], thread: [],
     };
@@ -303,7 +303,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
               id: nextId++, accountId: account.id, mailboxId: boxFor(account.id, 'sent'), threadId: `out-${id}`,
               from: { name: account.displayName, email: account.email }, to: msg.to, subject: msg.subject,
               snippet: msg.bodyText.replace(/\s+/g, ' ').slice(0, 200), date: now(), unread: false, starred: false,
-              hasAttachments: msg.attachments.length > 0, category: 'people', snoozedUntil: null, cc: msg.cc, replyTo: [],
+              hasAttachments: msg.attachments.length > 0, category: 'people', snoozedUntil: null, cc: msg.cc, bcc: [], replyTo: [],
               messageIdHeader: null, references: [], bodyText: msg.bodyText, bodyHtml: null, hasRemoteContent: false,
               remoteAllowed: false, attachments: [], thread: [],
             });
@@ -422,7 +422,10 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('guncelleme')
         ? { version: '0.2.0', notes: 'JMAP ve Google girişi.', date: '2026-10-20' }
         : null,
-    update_install: () => null,
+    update_install: async () => {
+      await new Promise((r) => setTimeout(r, 600));
+      return null;
+    },
     demo_notify: () => {
       const m = state.messages.find((x) => x.subject === 'Cumartesi kahvaltı?') ?? state.messages[0];
       if (m) {

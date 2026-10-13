@@ -8,5 +8,7 @@ pub mod text;
 
 pub use category::classify;
 pub use html::{sanitize_html, Sanitized};
-pub use parse::{attachment, parse, render, AttachmentData, ParsedMessage, Rendered};
+pub use parse::{
+    attachment, parse, render, visible_attachments, AttachmentData, ParsedMessage, Rendered,
+};
 pub use text::{collapse_ws, fold_tr, html_to_text, normalize_subject, snippet};

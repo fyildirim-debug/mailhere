@@ -11,6 +11,8 @@
 //! çözülür: yerel taşıma sunucu onaylayana kadar kaynak yeri (kutu, UID)
 //! saklar, geri alınan taşıma sunucuya hiç gitmez.
 
+mod drafts;
+
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -30,11 +32,12 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
 use tokio::time::{timeout, Instant};
 
-use crate::conn::{connect, ImapSession};
+use crate::conn::ImapSession;
+use crate::credentials::{connect_account, TokenProvider};
 use crate::error::{SyncError, SyncResult};
 use crate::mailbox::{sync_mailbox, uid_set};
 use crate::roles;
-use crate::secrets::{password_for, SecretStore};
+use crate::secrets::SecretStore;
 use crate::EventSink;
 
 const MIN_BACKOFF: Duration = Duration::from_secs(2);
@@ -82,6 +85,7 @@ struct AccountCtx {
     account: Account,
     store: Arc<Store>,
     secrets: Arc<dyn SecretStore>,
+    tokens: Arc<TokenProvider>,
     sink: Arc<dyn EventSink>,
 }
 
@@ -112,8 +116,7 @@ impl AccountCtx {
             .imap
             .clone()
             .ok_or_else(|| AppError::new(ErrorCode::Invalid, "Hesabın IMAP ayarı yok."))?;
-        let password = password_for(&self.secrets, &self.account.id).await?;
-        connect(&cfg, &password).await
+        connect_account(&cfg, &self.secrets, &self.tokens, &self.account).await
     }
 
     fn emit_new(&self, ids: &[MessageId]) {
@@ -145,6 +148,8 @@ struct Handle {
 pub struct SyncManager {
     store: Arc<Store>,
     secrets: Arc<dyn SecretStore>,
+    /// OAuth hesaplarının erişim jetonu önbelleği (giden kutusu da kullanır).
+    tokens: Arc<TokenProvider>,
     sink: Arc<dyn EventSink>,
     rt: tokio::runtime::Handle,
     accounts: Mutex<HashMap<AccountId, Handle>>,
@@ -180,10 +185,22 @@ impl SyncManager {
         Self {
             store,
             secrets,
+            tokens: Arc::new(TokenProvider::default()),
             sink,
             rt,
             accounts: Mutex::default(),
         }
+    }
+
+    /// Jeton sağlayıcısını değiştirir (testlerde sahte OAuth sunucusu).
+    pub fn with_tokens(mut self, tokens: Arc<TokenProvider>) -> Self {
+        self.tokens = tokens;
+        self
+    }
+
+    /// OAuth erişim jetonu önbelleği.
+    pub fn tokens(&self) -> &Arc<TokenProvider> {
+        &self.tokens
     }
 
     fn handles(&self) -> std::sync::MutexGuard<'_, HashMap<AccountId, Handle>> {
@@ -213,6 +230,7 @@ impl SyncManager {
             account: account.clone(),
             store: self.store.clone(),
             secrets: self.secrets.clone(),
+            tokens: self.tokens.clone(),
             sink: self.sink.clone(),
         });
         let tasks = vec![
@@ -269,6 +287,14 @@ impl SyncManager {
         self.store.action_push(account_id, action, raw, now_ms())?;
         self.send(account_id, Command::Wake);
         Ok(())
+    }
+
+    /// Hesap sunucuyla eşitleniyor mu (tanıtım hesabı değil)?
+    fn syncable(&self, account_id: &str) -> AppResult<bool> {
+        Ok(self
+            .store
+            .account(account_id)?
+            .is_some_and(|a| is_syncable(&a)))
     }
 
     fn by_account(&self, ids: &[MessageId]) -> AppResult<ByAccount> {
@@ -409,11 +435,7 @@ impl SyncManager {
     /// Ham postayı hesabın verilen roldeki kutusuna ekler (ör. Gönderilenler).
     /// Kalıcı kuyruğa yazıldıysa `true` (eşitlenmeyen hesapta `false`).
     pub fn append(&self, account_id: &str, role: MailboxRole, raw: Vec<u8>) -> AppResult<bool> {
-        let syncable = self
-            .store
-            .account(account_id)?
-            .is_some_and(|a| is_syncable(&a));
-        if !syncable {
+        if !self.syncable(account_id)? {
             return Ok(false);
         }
         let dest = self.destination(account_id, role)?;
@@ -428,7 +450,7 @@ impl SyncManager {
 
     /// Yalnız başlığı indirilmiş postanın gövdesini ayrı bir bağlantıyla indirir.
     pub async fn fetch_body(&self, id: MessageId) -> AppResult<()> {
-        fetch_body(&self.store, &self.secrets, id).await
+        fetch_body(&self.store, &self.secrets, &self.tokens, id).await
     }
 }
 
@@ -436,6 +458,7 @@ impl SyncManager {
 pub async fn fetch_body(
     store: &Store,
     secrets: &Arc<dyn SecretStore>,
+    tokens: &TokenProvider,
     id: MessageId,
 ) -> AppResult<()> {
     let loc = store.location(id)?.ok_or_else(|| {
@@ -466,9 +489,8 @@ pub async fn fetch_body(
         .imap
         .clone()
         .ok_or_else(|| AppError::new(ErrorCode::Invalid, "Hesabın IMAP ayarı yok."))?;
-    let password = password_for(secrets, &account.id).await?;
     let work = async {
-        let mut session = connect(&cfg, &password).await?;
+        let mut session = connect_account(&cfg, secrets, tokens, &account).await?;
         // Taşıması bekleyen posta sunucuda hâlâ kaynak kutudadır.
         let mb = session.examine(&loc.server_path).await?;
         let uid = match loc.server_uid {
@@ -776,6 +798,9 @@ async fn run_action(
         Action::Delete { items } => {
             apply_delete(conn, items).await?;
             Ok(Vec::new())
+        }
+        Action::Draft { path, remove } => {
+            drafts::apply(conn, path, qa.raw.as_deref(), remove).await
         }
     }
 }
