@@ -4,7 +4,7 @@ on:
   push:
     tags: ['v*']
 
-# Varsayılan: yalnız okuma. Yazma izni yalnız sürüm taslağını oluşturan işte.
+# Varsayılan: yalnız okuma. Yazma izni yalnız sürümü oluşturan işte.
 permissions:
   contents: read
 
@@ -112,10 +112,10 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  # Paketler tek işte toplanır: sürüm taslağı bir kez oluşur, latest.json
+  # Paketler tek işte toplanır: sürüm bir kez oluşur, latest.json
   # iki işletim sisteminin imzalarını birlikte içerir.
   yayin:
-    name: Sürüm taslağı
+    name: Sürümü yayımla
     needs: [paket, imza]
     runs-on: ubuntu-latest
     permissions:
@@ -156,9 +156,14 @@ jobs:
           else
             echo "İmza dosyası yok (TAURI_SIGNING_PRIVATE_KEY tanımlı değil); latest.json üretilmedi."
           fi
+      # Doğrudan yayımlanır: uygulama içi güncelleme "en son sürüm"deki
+      # latest.json'u okur (taslak sürüm görünmez).
       - uses: softprops/action-gh-release@v2
         with:
-          draft: true
+          name: Mailhere ${{ github.ref_name }}
+          body_path: notlar.md
+          draft: false
+          make_latest: true
           files: |
             paketler/**/*.deb
             paketler/**/*.rpm
