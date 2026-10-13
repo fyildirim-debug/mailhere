@@ -1,0 +1,31 @@
+[package]
+name = "mh-jmap"
+description = "Mailhere JMAP (RFC 8620, RFC 8621) keşif, eşitleme ve gönderim"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+mh-core.workspace = true
+mh-store.workspace = true
+mh-mime.workspace = true
+mh-sync.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+futures.workspace = true
+tracing.workspace = true
+chrono.workspace = true
+rustls.workspace = true
+reqwest.workspace = true
+hickory-resolver.workspace = true
+
+[dev-dependencies]
+base64.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+http-body-util.workspace = true
+bytes.workspace = true

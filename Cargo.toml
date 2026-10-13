@@ -7,6 +7,7 @@ members = [
   "crates/mh-sync",
   "crates/mh-send",
   "crates/mh-notify",
+  "crates/mh-jmap",
   "src-tauri",
 ]
 
@@ -26,6 +27,7 @@ mh-mime = { path = "crates/mh-mime" }
 mh-sync = { path = "crates/mh-sync" }
 mh-send = { path = "crates/mh-send" }
 mh-notify = { path = "crates/mh-notify" }
+mh-jmap = { path = "crates/mh-jmap" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
@@ -54,6 +56,12 @@ hickory-resolver = { version = "0.26.3", default-features = false, features = ["
 quick-xml = "0.38.4"
 reqwest = { version = "0.12.28", default-features = false, features = ["rustls-tls-webpki-roots"] }
 lettre = { version = "0.11.23", default-features = false, features = ["builder", "hostname", "smtp-transport", "tokio1", "tokio1-rustls-tls"] }
+
+# Testlerde sahte HTTP sunucusu (JMAP)
+hyper = { version = "1.12.0", features = ["server", "http1"] }
+hyper-util = { version = "0.1.21", features = ["tokio"] }
+http-body-util = "0.1.5"
+bytes = "1.12.1"
 
 # Masaüstü kabuğu (kararlı Tauri 2.x)
 tauri = { version = "2.12.3", features = ["tray-icon", "image-png"] }

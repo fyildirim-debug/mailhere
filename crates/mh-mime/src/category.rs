@@ -31,6 +31,20 @@ const AUTOMATED_HEADERS: &[&str] = &[
     "x-bitbucket-event",
 ];
 
+/// Sınıflandırmanın baktığı tüm başlıklar. Postanın tamamını değil yalnız
+/// seçili başlıklarını getiren kaynaklar (JMAP) bunları ister.
+pub const HEADERS: &[&str] = &[
+    "List-Unsubscribe",
+    "List-Id",
+    "Precedence",
+    "Auto-Submitted",
+    "X-GitHub-Reason",
+    "X-GitLab-NotificationReason",
+    "X-Gitea-Reason",
+    "X-Jenkins-Job",
+    "X-Bitbucket-Event",
+];
+
 fn header<'a>(headers: &'a [(&str, &str)], name: &str) -> Option<&'a str> {
     headers
         .iter()
@@ -123,6 +137,16 @@ mod tests {
         let h = [("Subject", "Merhaba"), ("From", "Ayşe <ayse@eposta.com>")];
         assert_eq!(classify(&h, "ayse@eposta.com"), Category::People);
         assert_eq!(classify(&[], "noreplyalan@ornek.com"), Category::People);
+    }
+
+    #[test]
+    fn baslik_listesi_eksiksiz() {
+        for h in AUTOMATED_HEADERS {
+            assert!(
+                HEADERS.iter().any(|x| x.eq_ignore_ascii_case(h)),
+                "{h} HEADERS listesinde yok"
+            );
+        }
     }
 
     #[test]

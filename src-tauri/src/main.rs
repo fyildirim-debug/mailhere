@@ -3,6 +3,7 @@
 // Windows'ta sürüm derlemesinde konsol penceresi açılmasın.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod cmd_jmap;
 mod commands;
 mod notify;
 mod secrets;
@@ -76,6 +77,8 @@ fn main() {
             commands::notify_pending,
             commands::notify_snooze,
             commands::demo_notify,
+            cmd_jmap::jmap_discover,
+            cmd_jmap::account_add_jmap,
         ])
         .build(tauri::generate_context!())
         .expect("Mailhere başlatılamadı");

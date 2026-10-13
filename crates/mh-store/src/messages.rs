@@ -222,7 +222,7 @@ fn compute_thread_id(tx: &Transaction<'_>, m: &NewMessage) -> rusqlite::Result<S
     })
 }
 
-fn insert(tx: &Transaction<'_>, m: &NewMessage) -> rusqlite::Result<MessageId> {
+pub(crate) fn insert(tx: &Transaction<'_>, m: &NewMessage) -> rusqlite::Result<MessageId> {
     let thread_id = compute_thread_id(tx, m)?;
     tx.prepare_cached(
         "INSERT INTO messages (account_id, mailbox_id, uid, uidvalidity, message_id_header, in_reply_to, refs,

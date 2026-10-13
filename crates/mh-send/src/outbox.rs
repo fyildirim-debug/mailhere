@@ -4,8 +4,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use mh_core::{
-    Account, AppError, AppResult, ErrorCode, MailboxRole, Millis, OutboxEvent, OutboxItem,
-    OutgoingMessage,
+    Account, AccountKind, AppError, AppResult, ErrorCode, MailboxRole, Millis, OutboxEvent,
+    OutboxItem, OutgoingMessage,
 };
 use mh_store::{NewMessage, OutboxRow, Store};
 use mh_sync::{password_for, EventSink, SecretStore, SyncManager};
@@ -166,7 +166,13 @@ impl Outbox {
         let now = now_ms();
         let message = build(&account, &row.msg, reply.as_ref(), now)?;
         let raw = message.formatted();
-        if !is_demo(&account) {
+        if account.kind == AccountKind::Jmap {
+            // JMAP'te SMTP yok: sunucu gönderir ve Gönderilenler'e kendisi taşır.
+            if mh_jmap::is_syncable(&account) {
+                let rcpt = mh_jmap::envelope_recipients(&row.msg);
+                mh_jmap::send_raw(&self.store, &self.secrets, &account, &raw, &rcpt).await?;
+            }
+        } else if !is_demo(&account) {
             let cfg = account.smtp.clone().ok_or_else(|| {
                 AppError::new(ErrorCode::Invalid, "Hesabın giden posta ayarı yok.")
             })?;
@@ -346,5 +352,33 @@ mod tests {
             "yanıt aynı konuşmada"
         );
         assert_eq!(store.outbox_next_due().unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn tanitim_jmap_hesabi_aga_cikmadan_gonderir() {
+        let (store, rec, outbox) = setup();
+        let mut m = msg();
+        m.account_id = "demo-sunucu".into();
+        m.subject = "JMAP tanıtım".into();
+        m.send_at = Some(0);
+        outbox.enqueue(&m, 0).unwrap();
+        for row in store.outbox_claim_due(now_ms()).unwrap() {
+            outbox.process(row).await;
+        }
+        assert!(rec.outbox.lock().unwrap()[0].ok);
+        let sent = store
+            .list(
+                &mh_core::ListQuery {
+                    view: mh_core::View::Sent,
+                    account_id: Some("demo-sunucu".into()),
+                    category: None,
+                    cursor: None,
+                    limit: 10,
+                },
+                now_ms(),
+            )
+            .unwrap()
+            .items;
+        assert!(sent.iter().any(|s| s.subject == "JMAP tanıtım"));
     }
 }

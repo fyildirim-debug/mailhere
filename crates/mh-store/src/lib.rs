@@ -6,6 +6,7 @@
 mod accounts;
 mod codec;
 mod demo;
+mod jmap;
 mod mailboxes;
 mod messages;
 mod outbox;
@@ -20,6 +21,7 @@ use mh_core::{AppError, AppResult, ErrorCode};
 use rusqlite::{Connection, Transaction};
 
 pub use demo::{seed_demo, DEMO_HOST};
+pub use jmap::{JmapAccountState, JmapLocation, JmapUpsert};
 pub use mailboxes::{mailbox_id, MailboxInfo};
 pub use messages::{MessageLocation, NewMessage, UpsertOutcome};
 pub use outbox::OutboxRow;

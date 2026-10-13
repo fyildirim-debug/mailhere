@@ -113,6 +113,29 @@ const MIGRATIONS: &[&str] = &[
     r#"
     ALTER TABLE accounts ADD COLUMN auth TEXT NOT NULL DEFAULT 'password';
     "#,
+    // 3: başka bir dalda tanımlı; birleştirmede gerçek geçişle değiştirilir.
+    "-- yer tutucu",
+    // 4: başka bir dalda tanımlı; birleştirmede gerçek geçişle değiştirilir.
+    "-- yer tutucu",
+    // 5: JMAP — hesap başına kullanıcı adı ve durum dizgeleri, postaların
+    // sunucudaki kimlikleri. Ayrı tablolar: `messages` satırındaki büyük
+    // `raw` sütunu en sonda kalsın.
+    r#"
+    CREATE TABLE jmap_accounts (
+        account_id     TEXT PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+        username       TEXT,
+        email_state    TEXT,
+        mailbox_state  TEXT
+    );
+
+    CREATE TABLE jmap_messages (
+        message_id  INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+        account_id  TEXT NOT NULL,
+        jmap_id     TEXT NOT NULL,
+        blob_id     TEXT,
+        UNIQUE (account_id, jmap_id)
+    );
+    "#,
 ];
 
 /// Bağlantıyı ayarlar ve eksik geçişleri uygular.
