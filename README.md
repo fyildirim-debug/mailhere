@@ -19,9 +19,16 @@ Yeni posta geldiğinde koca bir pencere açılmaz: ekranın köşesinde küçük
 - **Klavye önce** — `J/K` gezin, `E` arşivle, `H` ertele, `R` yanıtla, `Ctrl K` her şeyi bul.
 - **Geri alınabilir her şey** — arşivleme, silme, erteleme ve gönderme birkaç saniye geri alınabilir.
 - **Her hesap** — IMAP/SMTP (ayarlar kendiliğinden bulunur), Gmail ve Outlook / Microsoft 365 için tarayıcıyla giriş (OAuth 2, XOAUTH2), Stalwart gibi JMAP sunucuları (anlık bildirim dahil).
-- **Taslaklar ve iletme** — yazarken taslak kendiliğinden sunucuya kaydedilir; iletilen postanın ekleri de gider; imza hesap başına düzenlenir.
+- **Klasörler** — hesap başına klasör ağacı (alt klasörler, okunmamış sayısı); istemediğin klasörü gizlersin, gizli klasör eşitlenmez. Gönderilenler, Taslaklar, Arşiv, Çöp ve İstenmeyen klasörleri elle seçilebilir.
+- **Kurallar** — gelen postayı göndereninden, konusundan, metninden ya da türünden tanıyıp klasöre taşır, arşivler, siler, okundu sayar, yıldızlar, bildirimsiz bırakır ya da başka bir adrese iletir (döngü korumalı). Göndericiyi tek tıkla engellersin.
+- **Planlama** — "sonra gönder" ile zamanlanan postalar Planlananlar'da durur; hemen gönderilir, düzenlenir ya da iptal edilir.
+- **Yazarken** — hesap başına birden çok imza (yeni posta ve yanıt için ayrı), şablonlar, kendi hızlı yanıtların; taslak kendiliğinden sunucuya kaydedilir, iletilen postanın ekleri de gider.
+- **Arama ve süzgeç** — `from:`, `to:`, `konu:`, `has:ek`, `is:okunmamış`, `in:klasör`, `önce:` / `sonra:` işleçleri; listede okunmamış, yıldızlı, ekli süzgeci.
+- **Bültenler** — abonelikten tek tıkla çıkma (RFC 8058, yalnız genel HTTPS adresine) ya da posta ile.
+- **Otomatik yanıt** — JMAP sunucularında (ör. Stalwart) sunucu tarafında tatil yanıtı; uygulama kapalıyken de çalışır.
+- **Ayrıntılı hesap ayarları** — gönderen adı, renk, hesap başına bildirim, sunucu ve parola değişikliği (önce bağlantı denenir).
 - **Çevrimdışı güvenli** — arşivleme, bayrak, taşıma gibi sunucu işlemleri kalıcı bir kuyrukta bekler, bağlantı gelince sırayla uygulanır; uygulama kapansa da kaybolmaz.
-- **Gizlilik varsayılan** — parolalar ve jetonlar işletim sisteminin anahtar zincirinde; yerel posta veritabanı diskte şifreli (SQLCipher, AES-256; anahtarı anahtar zincirinde); uzak görseller ve izleme pikselleri kapalı; HTML posta betiksiz ve yalıtılmış gösterilir. Kendinden imzalı sertifika ancak parmak izini görüp onayladığında kabul edilir.
+- **Gizlilik varsayılan** — parolalar ve jetonlar işletim sisteminin anahtar zincirinde; yerel posta veritabanı diskte şifreli (SQLCipher, AES-256; anahtarı anahtar zincirinde); uzak görseller ve izleme pikselleri kapalı; HTML posta betiksiz ve yalıtılmış gösterilir. Koyu temada kendi zemini olmayan postalar da koyu zeminde açılır. Kendinden imzalı sertifika ancak parmak izini görüp onayladığında kabul edilir.
 - **Sakin bildirim** — tam ekran uygulama ya da sunum açıkken kart çıkmaz.
 - **İmzalı güncelleme** — yeni sürüm uygulama içinden kurulur; imzası tutmayan paket kurulmaz.
 - **Hafif** — Tauri 2 ile işletim sisteminin kendi web görünümü kullanılır; ayrı bir tarayıcı gömülmez.

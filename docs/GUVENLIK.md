@@ -27,11 +27,12 @@ Son denetim: 2026-10-13 (beş alanda kod denetimi; bulgular doğrulanıp düzelt
 - Aşırı iç içe ya da büyük HTML doğrusal bir ön taramayla yakalanır, düz metne düşer. Ayrıştırma ayrı iş parçacığında yapılır.
 - Görünen ad, konu ve ek adlarından satır sonu, denetim ve yön değiştiren karakterler atılır. Adres gibi görünen ad gerçek adresi gizleyemez.
 - Yanıtın gideceği tüm adresler görünür. Gönderenin alan adı dışına giden yanıtta uyarı çıkar.
+- Koyu temada postanın yalnız yazı renkleri ana pencereden uyarlanır; çerçevede yine betik çalışmaz, içerik eklenmez.
 - Ekler yalnız izin listesindeki türlerde doğrudan açılır, diğerleri klasörde gösterilir. Windows'ta "İnternet'ten geldi" işareti konur. Dosya adı kısaltılırken uzantı korunur.
 - Abonelikten çıkma yalnız kullanıcı isteyince yapılır. Tek tık isteği (RFC 8058) yalnız genel internetteki bir HTTPS adresine gider: sunucu adı önce çözülür, adreslerden biri bile bu bilgisayarı ya da yerel ağı (loopback, özel, link-local, ULA, CGNAT, çoklu yayın, belirtilmemiş) gösteriyorsa istek gönderilmez; bağlantı yalnız denetlenen adreslere, vekil sunucusuz kurulur. Çerez, Referer ve kimlik bilgisi gönderilmez, yönlendirme izlenmez, 10 sn zaman aşımı. `mailto:` ile çıkmada posta tek adrese, postayı alan hesaptan gider; başlık `List-Unsubscribe` değerleri sınırlı ve denetimli ayrıştırılır.
 
 **Uygulama kabuğu**
-- Her pencere yalnız kullandığı komutları çağırabilir (`src-tauri/capabilities/*.json`, `build.rs`). Bildirim kartı ve hızlı okuma ayar, hesap ve sertifika komutlarına erişemez.
+- Her pencere yalnız kullandığı komutları çağırabilir (`src-tauri/capabilities/*.json`, `build.rs`). Bildirim kartı ve hızlı okuma ayar, hesap ve sertifika komutlarına erişemez. Hızlı okuma ayarlardan yalnız hızlı yanıtları yazabilir (`quick_replies_set`; temizlenir, en çok 8 × 120 karakter).
 - Postaya yalnız kullanıcının işletim sisteminin dosya penceresinde seçtiği dosyalar eklenebilir. Arayüz kendi yol yazamaz.
 - Pencereler uygulama dışı adrese yönlendirilemez. Dış bağlantılar yalnız `http`, `https` ve `mailto` ile, varsayılan tarayıcıda açılır.
 - Deneme anahtarları (`MAILHERE_DEMO`, `MAILHERE_SECRETS=memory`) ve OAuth kimliğini çalışırken değiştirme yalnız geliştirme derlemesinde çalışır.

@@ -124,6 +124,12 @@
     gap: 4px;
     border-bottom: 1px solid var(--line);
     overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+
+  .tabs::-webkit-scrollbar {
+    display: none;
   }
 
   .tab {
@@ -152,7 +158,7 @@
     position: absolute;
     left: 10px;
     right: 10px;
-    bottom: -1px;
+    bottom: 0;
     height: 2px;
     border-radius: 2px;
     background: var(--accent);
