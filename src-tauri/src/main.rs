@@ -5,6 +5,7 @@
 
 mod cmd_account;
 mod cmd_drafts;
+mod cmd_jmap;
 mod cmd_oauth;
 mod commands;
 mod notify;
@@ -82,6 +83,8 @@ fn main() {
             commands::notify_pending,
             commands::notify_snooze,
             commands::demo_notify,
+            cmd_jmap::jmap_discover,
+            cmd_jmap::account_add_jmap,
             cmd_account::account_update,
             cmd_drafts::draft_save,
             cmd_drafts::draft_delete,

@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use mh_core::{AppError, ErrorCode, Millis, NotifyEvent};
+use mh_jmap::JmapManager;
 use mh_notify::Mute;
 use mh_send::Outbox;
 use mh_store::Store;
@@ -19,6 +20,8 @@ pub struct AppState {
     pub store: Arc<Store>,
     pub secrets: Arc<dyn SecretStore>,
     pub sync: Arc<SyncManager>,
+    /// JMAP hesaplarının eşitlemesi (IMAP motoru JMAP hesaplarını atlar).
+    pub jmap: Arc<JmapManager>,
     pub outbox: Arc<Outbox>,
     /// "Bildirimleri sessize al" durumu.
     pub mute: Mute,
@@ -91,11 +94,18 @@ pub fn setup(app: &mut App, rt: tokio::runtime::Handle) -> Result<(), Box<dyn st
         sink.clone(),
         rt.clone(),
     ));
+    let jmap = Arc::new(JmapManager::new(
+        store.clone(),
+        secrets.clone(),
+        sink.clone(),
+        rt.clone(),
+    ));
     let outbox = Outbox::new(store.clone(), secrets.clone(), sync.clone(), sink);
     app.manage(AppState {
         store: store.clone(),
         secrets,
         sync: sync.clone(),
+        jmap: jmap.clone(),
         outbox: outbox.clone(),
         mute: Mute::new(),
         notify_queue: Mutex::default(),
@@ -111,6 +121,7 @@ pub fn setup(app: &mut App, rt: tokio::runtime::Handle) -> Result<(), Box<dyn st
     outbox.start(&rt);
     crate::updater::start(&handle, &rt);
     sync.start_all().map_err(|e| e.message)?;
+    jmap.start_all().map_err(|e| e.message)?;
     rt.spawn(crate::sink::snooze_ticker(handle.clone()));
     crate::tray::refresh(&handle);
 

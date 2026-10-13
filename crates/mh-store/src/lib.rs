@@ -7,6 +7,7 @@ mod accounts;
 mod codec;
 mod demo;
 mod drafts;
+mod jmap;
 mod mailboxes;
 mod messages;
 mod outbox;
@@ -22,6 +23,7 @@ use rusqlite::{Connection, Transaction};
 
 pub use demo::{seed_demo, DEMO_HOST};
 pub use drafts::DraftPut;
+pub use jmap::{JmapAccountState, JmapLocation, JmapUpsert};
 pub use mailboxes::{mailbox_id, MailboxInfo};
 pub use messages::{MessageLocation, NewMessage, UpsertOutcome};
 pub use outbox::OutboxRow;

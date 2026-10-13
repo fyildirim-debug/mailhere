@@ -1940,6 +1940,7 @@ dependencies = [
  "http",
  "http-body",
  "httparse",
+ "httpdate",
  "itoa",
  "pin-project-lite",
  "smallvec",
@@ -2629,6 +2630,7 @@ dependencies = [
  "chrono",
  "keyring",
  "mh-core",
+ "mh-jmap",
  "mh-mime",
  "mh-notify",
  "mh-oauth",
@@ -2713,6 +2715,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "mh-jmap"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "bytes",
+ "chrono",
+ "futures",
+ "hickory-resolver",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "mh-core",
+ "mh-mime",
+ "mh-store",
+ "mh-sync",
+ "reqwest 0.12.28",
+ "rustls",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "mh-mime"
 version = "0.1.0"
 dependencies = [
@@ -2752,6 +2779,7 @@ dependencies = [
  "chrono",
  "lettre",
  "mh-core",
+ "mh-jmap",
  "mh-mime",
  "mh-store",
  "mh-sync",
