@@ -9,7 +9,7 @@
   import WindowControls from '../../lib/ui/WindowControls.svelte';
   import MailBody from '../../lib/mail/MailBody.svelte';
   import SnoozeMenu from '../../lib/mail/SnoozeMenu.svelte';
-  import { baseSubject, displayName, fileSize } from '../../lib/util/format';
+  import { baseSubject, displayName, fileSize, foreignReplyDomains, replyTargets } from '../../lib/util/format';
   import { locale } from '../../lib/i18n/index.svelte';
   import { quoteFor } from '../../lib/stores/mail.svelte';
 
@@ -98,7 +98,7 @@
       const item = await call('send', {
         msg: {
           accountId: d.accountId,
-          to: d.replyTo.length ? d.replyTo : [d.from],
+          to: replyTargets(d),
           cc: [],
           bcc: [],
           subject: `Re: ${baseSubject(d.subject)}`,
@@ -225,15 +225,18 @@
             <button class="chip" onclick={() => (reply = t(c))}>{t(c)}</button>
           {/each}
         </div>
+        {#if foreignReplyDomains(d).length}
+          <p class="reply-warn" role="note">{t('read.replyElsewhere', { domains: foreignReplyDomains(d).join(', ') })}</p>
+        {/if}
         <div class="box">
           <textarea
             bind:value={reply}
             rows="2"
-            placeholder={t('quick.replyTo', { name: displayName(d.replyTo[0] ?? d.from) })}
+            placeholder={t('quick.replyTo', { name: displayName(replyTargets(d)[0]) })}
             aria-label={t('act.reply')}
           ></textarea>
           <div class="box-bar">
-            <span class="meta">{t('read.sendHint')}</span>
+            <span class="meta trunc" title={replyTargets(d).map((a) => a.email).join(', ')}>{t('read.replyTo', { list: replyTargets(d).map((a) => a.email).join(', ') })}</span>
             <span class="grow"></span>
             <button class="btn-primary small" disabled={!reply.trim() || sending} onclick={send}><Icon name="send" size={15} />{t('act.send')}</button>
           </div>
@@ -432,6 +435,12 @@
     background: transparent;
     line-height: 1.5;
     field-sizing: content;
+  }
+
+  .reply-warn {
+    margin-bottom: 8px;
+    font-size: var(--fs-meta);
+    color: var(--amber);
   }
 
   .box-bar {

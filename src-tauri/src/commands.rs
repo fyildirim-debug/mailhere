@@ -104,6 +104,8 @@ pub async fn account_remove(app: AppHandle, state: State<'_, AppState>, id: Stri
     state.jmap.stop(&id);
     state.sync.tokens().forget(&id);
     let removed = state.store.remove_account(&id)?;
+    // Açılmış eklerin kopyaları da gider (gerekirse yeniden yazılır).
+    let _ = std::fs::remove_dir_all(state.cache_dir.join("ekler"));
     let secrets = state.secrets.clone();
     let sid = id.clone();
     // Parola ve (OAuth hesabıysa) yenileme jetonu.
@@ -171,7 +173,12 @@ pub(crate) async fn ensure_body(state: &AppState, id: MessageId) -> AppResult<()
 pub async fn message_get(state: State<'_, AppState>, id: MessageId) -> Res<MessageDetail> {
     ensure_body(&state, id).await?;
     let allow = state.store.settings()?.remote_allow;
-    state.store.detail(id, &allow)
+    // HTML temizleme ağır olabilir (kötü niyetli posta): çalışma iş
+    // parçacıklarını tutmasın.
+    let store = state.store.clone();
+    tokio::task::spawn_blocking(move || store.detail(id, &allow))
+        .await
+        .map_err(internal)?
 }
 
 #[tauri::command]
@@ -252,53 +259,84 @@ pub fn remote_allow(
 
 /// Dosya adını tüm işletim sistemlerinde güvenli hale getirir.
 pub fn sanitize_filename(name: &str) -> String {
+    const MAX: usize = 120;
     let cleaned: String = name
         .chars()
+        .filter(|c| !is_invisible(*c))
         .map(|c| match c {
             '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
             c if c.is_control() => '_',
             c => c,
         })
         .collect();
-    let trimmed = cleaned.trim().trim_matches('.').trim();
-    let mut out: String = trimmed.chars().take(120).collect();
-    if out.is_empty() {
-        out = "ek".into();
-    }
-    let stem = out.split('.').next().unwrap_or("").to_ascii_uppercase();
+    let trimmed = trim_edges(&cleaned);
+    // Uzantı korunur, kısaltma gövdeden yapılır: "….exe .pdf" gibi bir ad
+    // kesilince ".exe " ile bitip çalıştırılabilir hale gelemez.
+    let (stem, ext) = match trimmed.rsplit_once('.') {
+        Some((stem, ext))
+            if !stem.is_empty()
+                && !ext.is_empty()
+                && ext.len() <= 16
+                && ext.chars().all(|c| c.is_ascii_alphanumeric()) =>
+        {
+            (stem, Some(ext))
+        }
+        _ => (trimmed, None),
+    };
+    let room = MAX - ext.map_or(0, |e| e.len() + 1);
+    let stem: String = stem.chars().take(room).collect();
+    let stem = trim_edges(&stem);
+    let mut out = match (stem.is_empty(), ext) {
+        (true, Some(ext)) => format!("ek.{ext}"),
+        (true, None) => "ek".to_owned(),
+        (false, Some(ext)) => format!("{stem}.{ext}"),
+        (false, None) => stem.to_owned(),
+    };
+    let first = out.split('.').next().unwrap_or("").to_ascii_uppercase();
     const RESERVED: &[&str] = &["CON", "PRN", "AUX", "NUL"];
-    let numbered = (stem.starts_with("COM") || stem.starts_with("LPT"))
-        && stem.len() == 4
-        && stem.as_bytes()[3].is_ascii_digit();
-    if RESERVED.contains(&stem.as_str()) || numbered {
+    let numbered = (first.starts_with("COM") || first.starts_with("LPT"))
+        && first.len() == 4
+        && first.as_bytes()[3].is_ascii_digit();
+    if RESERVED.contains(&first.as_str()) || numbered {
         out.insert(0, '_');
     }
     out
 }
 
-/// Çalıştırılabilir ve makrolu türler doğrudan açılmaz; klasörde gösterilir.
-pub fn is_risky(name: &str) -> bool {
-    const RISKY: &[&str] = &[
-        "exe", "com", "bat", "cmd", "scr", "pif", "msi", "msix", "msp", "ps1", "psm1", "vbs",
-        "vbe", "js", "jse", "wsf", "wsh", "hta", "cpl", "msc", "jar", "lnk", "reg", "inf", "dll",
-        "sys", "appx", "sh", "bash", "run", "bin", "desktop", "appimage", "deb", "rpm", "py", "pl",
-        "iso", "img", "vhd", "vhdx", "url", "chm", "xll",
-    ];
-    /// Uzun adlı Windows kısayol ve uygulama türleri.
-    const LAUNCHERS: &[&str] = &["appref-ms", "application", "settingcontent-ms"];
-    /// Makro içerebilen Office belgeleri, şablonları ve eklentileri.
-    const MACRO: &[&str] = &[
-        "docm", "dotm", "xlsm", "xltm", "xlam", "pptm", "potm", "ppsm", "ppam",
+/// Baştaki ve sondaki boşluk ve noktalar atılır (Windows sondakileri
+/// sessizce siler; ad başka bir türe dönüşmesin).
+fn trim_edges(s: &str) -> &str {
+    s.trim_matches(|c: char| c == '.' || c.is_whitespace())
+}
+
+/// Görünmez biçim karakterleri: yön değiştirenler (`fatura\u{202E}fdp.exe`
+/// "fatura.pdf" gibi görünür), sıfır genişlikli boşluklar, BOM.
+fn is_invisible(c: char) -> bool {
+    matches!(c,
+        '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2069}' | '\u{FEFF}'
+    )
+}
+
+/// Doğrudan (varsayılan uygulamasıyla) açılabilen ek türleri. İzin listesi:
+/// burada olmayan her tür (çalıştırılabilir, betik, kısayol, makrolu ya da
+/// eski Office biçimi, HTML/SVG, arşiv, disk görüntüsü...) yalnız klasöründe
+/// gösterilir; kullanıcı ne yaptığını bilerek açar.
+pub fn opens_directly(name: &str) -> bool {
+    const SAFE: &[&str] = &[
+        // belgeler (makrosuz Office Open XML ve OpenDocument)
+        "pdf", "txt", "csv", "log", "docx", "xlsx", "pptx", "odt", "ods", "odp",
+        // görseller
+        "png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff", "heic", "avif",
+        // ses ve görüntü
+        "mp3", "m4a", "wav", "ogg", "oga", "flac", "mp4", "m4v", "webm", "mov", "ogv",
+        // takvim ve kişi
+        "ics", "vcf",
     ];
     Path::new(name)
         .extension()
         .and_then(|e| e.to_str())
         .map(str::to_ascii_lowercase)
-        .is_some_and(|e| {
-            [RISKY, LAUNCHERS, MACRO]
-                .iter()
-                .any(|l| l.contains(&e.as_str()))
-        })
+        .is_some_and(|e| SAFE.contains(&e.as_str()))
 }
 
 /// Windows: dosyayı "İnternet'ten geldi" olarak işaretler (Zone.Identifier
@@ -315,6 +353,62 @@ fn mark_from_internet(path: &Path) {
 
 #[cfg(not(windows))]
 fn mark_from_internet(_path: &Path) {}
+
+/// Açılan eklerin önbellekte kalma süresi.
+const ATTACHMENT_TTL: std::time::Duration = std::time::Duration::from_secs(24 * 3600);
+
+/// Yalnız kullanıcının erişebildiği klasör (Unix'te 0700; Windows'ta kullanıcı
+/// profilinin varsayılan izinleri).
+fn private_dir(dir: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(dir)?;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::create_dir_all(dir)
+    }
+}
+
+/// Dosyayı yalnız kullanıcının okuyabileceği biçimde yazar (Unix'te 0600).
+fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        opts.mode(0o600);
+        // Önceden var olan dosyanın izinleri de daraltılır.
+        if path.exists() {
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+        }
+    }
+    opts.open(path)?.write_all(bytes)
+}
+
+/// Süresi geçmiş açılmış ekleri siler (en iyi çaba).
+fn prune_attachments(root: &Path, ttl: std::time::Duration) {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+    for e in entries.flatten() {
+        let old = e
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age > ttl);
+        if old {
+            let _ = std::fs::remove_dir_all(e.path());
+        }
+    }
+}
 
 #[tauri::command]
 pub async fn attachment_open(
@@ -334,11 +428,13 @@ pub async fn attachment_open(
             "Ek bulunamadı; posta değişmiş olabilir.",
         )
     })?;
-    let dir: PathBuf = state.cache_dir.join("ekler").join(id.to_string());
-    std::fs::create_dir_all(&dir).map_err(internal)?;
+    let root = state.cache_dir.join("ekler");
+    prune_attachments(&root, ATTACHMENT_TTL);
+    let dir: PathBuf = root.join(id.to_string());
+    private_dir(&dir).map_err(internal)?;
     let name = sanitize_filename(&att.name);
     let path = dir.join(&name);
-    std::fs::write(&path, &att.bytes).map_err(|e| {
+    write_private(&path, &att.bytes).map_err(|e| {
         tracing::warn!(error = %e, "ek yazılamadı");
         AppError::new(
             ErrorCode::Storage,
@@ -348,10 +444,10 @@ pub async fn attachment_open(
     mark_from_internet(&path);
     let path_str = path.to_string_lossy().into_owned();
     let opener = app.opener();
-    let res = if is_risky(&name) {
-        opener.reveal_item_in_dir(&path)
-    } else {
+    let res = if opens_directly(&name) {
         opener.open_path(path_str.clone(), None::<&str>)
+    } else {
+        opener.reveal_item_in_dir(&path)
     };
     res.map_err(|e| {
         tracing::warn!(error = %e, "ek açılamadı");
@@ -369,7 +465,12 @@ pub async fn attachment_open(
 /// kopyalanacağı için gövdesi önce indirilir; `draft_id` taslağı başarılı
 /// gönderimden sonra silinir.
 #[tauri::command]
-pub async fn send(state: State<'_, AppState>, msg: OutgoingMessage) -> Res<OutboxItem> {
+pub async fn send(
+    state: State<'_, AppState>,
+    picked: State<'_, crate::cmd_files::Picked>,
+    msg: OutgoingMessage,
+) -> Res<OutboxItem> {
+    picked.ensure(&msg.attachments)?;
     if let Some(id) = msg.forward_from {
         ensure_body(&state, id).await?;
     }
@@ -417,14 +518,26 @@ pub fn normalize_settings(mut s: Settings) -> Settings {
     s
 }
 
+/// İstenen onay listesinden yalnız zaten onaylı olanları bırakır.
+pub fn keep_known_certs(
+    wanted: Vec<mh_core::TrustedCert>,
+    known: &[mh_core::TrustedCert],
+) -> Vec<mh_core::TrustedCert> {
+    wanted.into_iter().filter(|c| known.contains(c)).collect()
+}
+
 #[tauri::command]
 pub fn settings_set(
     app: AppHandle,
     state: State<'_, AppState>,
     settings: Settings,
 ) -> Res<Settings> {
-    let settings = normalize_settings(settings);
-    let trust_changed = state.store.settings()?.trusted_certs != settings.trusted_certs;
+    let current = state.store.settings()?;
+    let mut settings = normalize_settings(settings);
+    // Onaylı sertifika buradan yalnız kaldırılabilir; eklemek `cert_trust`
+    // (inceleme + işletim sistemi onayı) ile olur.
+    settings.trusted_certs = keep_known_certs(settings.trusted_certs, &current.trusted_certs);
+    let trust_changed = current.trusted_certs != settings.trusted_certs;
     state.store.set_settings(&settings)?;
     if trust_changed {
         // Onay beklerken duran hesaplar yeni listeyle yeniden denenir.
@@ -544,6 +657,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn ayarlar_onayli_sertifika_ekleyemez_yalniz_kaldirir() {
+        let c = |h: &str| mh_core::TrustedCert {
+            host: h.into(),
+            port: 993,
+            sha256: "AA".into(),
+        };
+        let known = vec![c("a.ornek"), c("b.ornek")];
+        assert_eq!(
+            keep_known_certs(vec![c("a.ornek"), c("imap.gmail.com")], &known),
+            vec![c("a.ornek")]
+        );
+        assert!(keep_known_certs(vec![], &known).is_empty());
+    }
+
+    #[test]
     fn dosya_adi_temizlenir() {
         assert_eq!(sanitize_filename("Sözleşme v3.pdf"), "Sözleşme v3.pdf");
         assert_eq!(sanitize_filename("../../etc/passwd"), "_.._etc_passwd");
@@ -552,35 +680,79 @@ mod tests {
         assert_eq!(sanitize_filename("CON.txt"), "_CON.txt");
         assert_eq!(sanitize_filename("com1"), "_com1");
         assert_eq!(sanitize_filename("COMPUTER.txt"), "COMPUTER.txt");
+        // Kısaltma uzantıyı korur; sonda boşluk/nokta kalmaz.
+        let tricky = format!("Fatura_2026_{}.exe .pdf", "A".repeat(103));
+        let out = sanitize_filename(&tricky);
+        assert!(out.ends_with(".pdf"), "{out}");
+        assert!(out.chars().count() <= 120);
+        assert!(!opens_directly(&sanitize_filename(&format!(
+            "{}.exe .",
+            "B".repeat(130)
+        ))));
+        let dotted = sanitize_filename(&format!("{}.exe . . ", "C".repeat(200)));
+        assert!(!dotted.ends_with(' ') && !dotted.ends_with('.'), "{dotted}");
+        // Yön değiştiren karakter atılır: gerçek uzantı görünür.
+        assert_eq!(sanitize_filename("fatura\u{202E}fdp.exe"), "faturafdp.exe");
+        assert!(!opens_directly(&sanitize_filename("fatura\u{202E}fdp.exe")));
         assert_eq!(sanitize_filename(&"x".repeat(300)).chars().count(), 120);
     }
 
+    #[cfg(unix)]
     #[test]
-    fn riskli_turler() {
-        assert!(is_risky("fatura.PDF.exe"));
-        assert!(is_risky("kur.sh"));
+    fn ekler_yalniz_kullaniciya_acik_yazilir_ve_eskiler_silinir() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!("mh-ek-{}", std::process::id()));
+        let dir = root.join("42");
+        private_dir(&dir).unwrap();
+        let file = dir.join("fatura.pdf");
+        write_private(&file, b"%PDF").unwrap();
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&dir), 0o700);
+        assert_eq!(mode(&file), 0o600);
+        prune_attachments(&root, std::time::Duration::from_secs(3600));
+        assert!(file.exists(), "yeni ek kalır");
+        prune_attachments(&root, std::time::Duration::ZERO);
+        assert!(!dir.exists(), "süresi geçen ek silinir");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn yalniz_guvenli_turler_dogrudan_acilir() {
         for n in [
+            "fatura.PDF",
+            "teklif.docx",
+            "tablo.xlsx",
+            "foto.JPG",
+            "not.txt",
+            "toplanti.ics",
+        ] {
+            assert!(opens_directly(n), "{n}");
+        }
+        for n in [
+            "fatura.PDF.exe",
+            "kur.sh",
             "kisayol.url",
             "yardim.chm",
             "uygulama.appref-ms",
-            "kur.application",
             "eklenti.xll",
-            "ayar.settingcontent-ms",
             "teklif.docm",
             "tablo.XLSM",
-            "sunum.pptm",
-            "sablon.dotm",
-            "sablon.xltm",
-            "sablon.potm",
-            "gosteri.ppsm",
-            "eklenti.xlam",
-            "eklenti.ppam",
+            "eski.xls",
+            "eski.doc",
+            "zengin.rtf",
+            "betik.pyw",
+            "paket.pyz",
+            "sayfa.html",
+            "sayfa.mht",
+            "cizim.svg",
+            "arama.search-ms",
+            "uzak.rdp",
+            "arsiv.zip",
+            "disk.iso",
+            "README",
         ] {
-            assert!(is_risky(n), "{n}");
+            assert!(!opens_directly(n), "{n}");
         }
-        assert!(!is_risky("fatura.pdf"));
-        assert!(!is_risky("teklif.docx"));
-        assert!(!is_risky("README"));
     }
 
     #[test]

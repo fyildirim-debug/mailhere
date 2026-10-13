@@ -25,12 +25,24 @@ pub fn is_gnome_wayland() -> bool {
     wayland && gnome
 }
 
+/// Bildirim sunucuları gövdede basit işaretleme (`<b>`, `<a href>`)
+/// yorumlayabilir; yabancı konu düz metin kalsın.
+pub fn escape_markup(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
 fn native(app: &AppHandle, ev: &NotifyEvent) {
-    let title = format!("{} · {}", ev.message.from.label(), ev.account_name);
+    let title = escape_markup(&format!(
+        "{} · {}",
+        ev.message.from.label(),
+        ev.account_name
+    ));
     let body = if ev.message.subject.trim().is_empty() {
         "(Konu yok)".to_owned()
     } else {
-        ev.message.subject.clone()
+        escape_markup(&ev.message.subject)
     };
     if let Err(e) = app.notification().builder().title(title).body(body).show() {
         tracing::warn!(error = %e, "sistem bildirimi gösterilemedi");
@@ -72,4 +84,17 @@ pub fn take_pending(app: &AppHandle) -> Vec<NotifyEvent> {
         .filter(|(at, _)| at.elapsed() < QUEUE_TTL)
         .map(|(_, e)| e)
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bildirim_metni_isaretleme_tasimaz() {
+        assert_eq!(
+            escape_markup("<a href='x'>Tıkla</a> & <b>"),
+            "&lt;a href='x'&gt;Tıkla&lt;/a&gt; &amp; &lt;b&gt;"
+        );
+    }
 }

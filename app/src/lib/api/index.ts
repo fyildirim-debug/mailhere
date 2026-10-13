@@ -2,6 +2,7 @@
 
 import type { AppError, CommandArgs, CommandName, CommandResult, EventPayloads } from './types';
 import type { MockBackend } from './mock';
+import { sanitizeMailto } from '../util/format';
 
 export * from './types';
 
@@ -100,6 +101,7 @@ export const appWindow = {
 /** Bağlantıyı varsayılan tarayıcıda açar. */
 export async function openExternal(url: string) {
   if (!/^(https?:|mailto:)/i.test(url)) return;
+  if (/^mailto:/i.test(url)) url = sanitizeMailto(url);
   if (isTauri) {
     const { openUrl } = await import('@tauri-apps/plugin-opener');
     await openUrl(url);
@@ -108,11 +110,10 @@ export async function openExternal(url: string) {
   }
 }
 
-/** Dosya seçtirir (ek eklemek için). Tarayıcıda boş döner. */
+/**
+ * Dosya seçtirir (ek eklemek için). Pencereyi arka uç açar ve yalnız burada
+ * seçilen dosyaları ek olarak kabul eder; arayüz kendi yol yazamaz.
+ */
 export async function pickFiles(): Promise<string[]> {
-  if (!isTauri) return [];
-  const { open } = await import('@tauri-apps/plugin-dialog');
-  const picked = await open({ multiple: true, directory: false });
-  if (!picked) return [];
-  return Array.isArray(picked) ? picked : [picked];
+  return call('attachments_pick');
 }

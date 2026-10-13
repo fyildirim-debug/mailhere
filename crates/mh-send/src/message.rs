@@ -27,13 +27,26 @@ fn mailbox(a: &Address) -> AppResult<Mailbox> {
             format!("Adres geçersiz: {}", a.email.trim()),
         )
     })?;
-    let name = a
-        .name
-        .as_deref()
-        .map(str::trim)
-        .filter(|n| !n.is_empty())
-        .map(str::to_owned);
+    let name = a.name.as_deref().map(clean_name).filter(|n| !n.is_empty());
     Ok(Mailbox::new(name, email))
+}
+
+/// Görünen addaki satır sonu, sekme, diğer denetim karakterleri ve yön
+/// değiştiren Unicode karakterleri boşluğa çevrilir. Satır sonu içeren ad
+/// başlık eklemeye kapı açar ve lettre'yi çökertir (yabancı bir göndericinin
+/// adı yanıtta alıcı olur).
+pub fn clean_name(name: &str) -> String {
+    let spaced: String = name
+        .chars()
+        .map(|c| {
+            if c.is_control() || matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}') {
+                ' '
+            } else {
+                c
+            }
+        })
+        .collect();
+    spaced.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn file_name(path: &str) -> String {
@@ -60,21 +73,59 @@ pub fn validate_with(msg: &OutgoingMessage, extra: u64, draft: bool) -> AppResul
     }
     let mut total = extra;
     for path in &msg.attachments {
-        let meta = std::fs::metadata(path).map_err(|_| {
-            AppError::new(
-                ErrorCode::Invalid,
-                format!("Ek bulunamadı: {}. Dosyayı yeniden seç.", file_name(path)),
-            )
-        })?;
-        total += meta.len();
+        total += regular_file(path)?.len();
     }
     if total > MAX_ATTACHMENTS {
-        return Err(AppError::new(
-            ErrorCode::Invalid,
-            "Eklerin toplamı 25 MB'ı geçiyor. Büyük dosyaları bağlantı olarak paylaş.",
-        ));
+        return Err(too_large());
     }
     Ok(())
+}
+
+fn too_large() -> AppError {
+    AppError::new(
+        ErrorCode::Invalid,
+        "Eklerin toplamı 25 MB'ı geçiyor. Büyük dosyaları bağlantı olarak paylaş.",
+    )
+}
+
+/// Ek yalnız düzenli bir dosya olabilir: klasör, aygıt (`/dev/zero`), boru ya
+/// da `/proc` gibi boyutu yanıltan dosyalar reddedilir.
+fn regular_file(path: &str) -> AppResult<std::fs::Metadata> {
+    let missing = || {
+        AppError::new(
+            ErrorCode::Invalid,
+            format!("Ek bulunamadı: {}. Dosyayı yeniden seç.", file_name(path)),
+        )
+    };
+    let meta = std::fs::metadata(path).map_err(|_| missing())?;
+    if !meta.is_file() {
+        return Err(AppError::new(
+            ErrorCode::Invalid,
+            format!("{} bir dosya değil; ek olarak eklenemez.", file_name(path)),
+        ));
+    }
+    Ok(meta)
+}
+
+/// Eki en fazla `limit` bayt okur; dosya bu arada büyümüş olsa da sınırı aşmaz.
+fn read_attachment(path: &str, limit: u64) -> AppResult<Vec<u8>> {
+    use std::io::Read;
+    regular_file(path)?;
+    let unreadable = || {
+        AppError::new(
+            ErrorCode::Invalid,
+            format!("Ek okunamadı: {}", file_name(path)),
+        )
+    };
+    let file = std::fs::File::open(path).map_err(|_| unreadable())?;
+    let mut bytes = Vec::new();
+    file.take(limit.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|_| unreadable())?;
+    if bytes.len() as u64 > limit {
+        return Err(too_large());
+    }
+    Ok(bytes)
 }
 
 fn bracket(id: &str) -> String {
@@ -171,13 +222,11 @@ pub fn build_with(
             });
             mp = mp.singlepart(Attachment::new(a.name.clone()).body(a.bytes.clone(), ct));
         }
+        let mut budget =
+            MAX_ATTACHMENTS.saturating_sub(opts.extra.iter().map(|a| a.bytes.len() as u64).sum());
         for path in &msg.attachments {
-            let bytes = std::fs::read(path).map_err(|_| {
-                AppError::new(
-                    ErrorCode::Invalid,
-                    format!("Ek okunamadı: {}", file_name(path)),
-                )
-            })?;
+            let bytes = read_attachment(path, budget)?;
+            budget -= bytes.len() as u64;
             let ct = ContentType::parse(crate::mime::for_path(path)).unwrap_or_else(|_| {
                 ContentType::parse("application/octet-stream").expect("geçerli tür")
             });
@@ -191,6 +240,17 @@ pub fn build_with(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gorunen_ad_temizlenir_ve_posta_kurulur() {
+        assert_eq!(clean_name("Evil\r\nX-Inject: 1"), "Evil X-Inject: 1");
+        assert_eq!(clean_name("  Ali\t\u{202E}Veli\u{0}  "), "Ali Veli");
+        let mut m = out();
+        m.to = vec![Address::new(Some("Evil\r\nX-Inject: 1"), "x@ornek.com")];
+        let raw =
+            String::from_utf8(build(&account(), &m, None, 1_000).unwrap().formatted()).unwrap();
+        assert!(!raw.contains("\r\nX-Inject"), "başlık eklenemez");
+    }
     use mh_core::AccountKind;
 
     pub fn account() -> Account {

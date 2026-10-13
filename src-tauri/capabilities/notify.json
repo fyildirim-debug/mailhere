@@ -1,0 +1,22 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "notify",
+  "description": "Bildirim kartı: yalnız kart, okundu/arşiv ve pencere açma komutları.",
+  "windows": [
+    "notify"
+  ],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-settings-get",
+    "allow-notify-layout",
+    "allow-notify-hide",
+    "allow-notify-pending",
+    "allow-notify-snooze",
+    "allow-open-main",
+    "allow-open-quick",
+    "allow-messages-flag",
+    "allow-messages-move",
+    "allow-demo-notify"
+  ]
+}

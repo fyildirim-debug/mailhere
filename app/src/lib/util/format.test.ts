@@ -1,5 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import { avatarTone, baseSubject, dateGroup, fullTime, fileBadge, fileKind, fileSize, initials, linkify, listTime, snoozeOptions } from './format';
+import {
+  avatarTone,
+  baseSubject,
+  dateGroup,
+  displayName,
+  foreignReplyDomains,
+  fullTime,
+  fileBadge,
+  fileKind,
+  fileSize,
+  initials,
+  linkify,
+  listTime,
+  replyTargets,
+  sanitizeMailto,
+  snoozeOptions,
+} from './format';
 
 // 13 Ekim 2026 Salı 10:00 (yerel saat)
 const NOW = new Date(2026, 9, 13, 10, 0).getTime();
@@ -84,5 +100,35 @@ describe('erteleme seçenekleri', () => {
   it('cuma akşamı: bu akşam yok, hafta sonu yarın olduğu için tekrarlanmaz', () => {
     const fri = new Date(2026, 9, 16, 19, 0).getTime();
     expect(snoozeOptions(fri).map((x) => x.key)).toEqual(['tomorrow', 'nextWeek']);
+  });
+});
+
+describe('güvenlik', () => {
+  it('adres gibi görünen ad gerçek adresi gizlemez', () => {
+    expect(displayName({ name: 'guvenlik@banka.com', email: 'x@kotu.example' })).toBe('x@kotu.example');
+    expect(displayName({ name: null, email: 'paypal@kotu.example' })).toBe('paypal@kotu.example');
+    expect(displayName({ name: 'Ayşe Demir', email: 'ayse@ornek.com' })).toBe('Ayşe Demir');
+    expect(displayName({ name: 'ayse@ornek.com', email: 'AYSE@ornek.com' })).toBe('ayse@ornek.com');
+  });
+
+  it('gizli Reply-To alıcıları ve yabancı alan adı görünür', () => {
+    const d = {
+      from: { name: 'Ayşe Demir', email: 'ayse@legit.example' },
+      replyTo: [
+        { name: 'Ayşe Demir', email: 'ayse@legit.example' },
+        { name: 'Ayşe Demir', email: 'ayse.demir@evil.example' },
+      ],
+    };
+    expect(replyTargets(d).map((a) => a.email)).toEqual(['ayse@legit.example', 'ayse.demir@evil.example']);
+    expect(foreignReplyDomains(d)).toEqual(['evil.example']);
+    expect(foreignReplyDomains({ ...d, replyTo: [] })).toEqual([]);
+  });
+
+  it('mailto bağlantısından dosya ekleme parametresi atılır', () => {
+    expect(sanitizeMailto('mailto:x@y.com?attach=/home/u/.ssh/id_rsa&subject=Merhaba d%C3%BCnya')).toBe(
+      'mailto:x@y.com?subject=Merhaba%20d%C3%BCnya',
+    );
+    expect(sanitizeMailto('mailto:x@y.com')).toBe('mailto:x@y.com');
+    expect(sanitizeMailto('mailto:x@y.com?Body=a&ATTACHMENT=b&cc=z@y.com')).toBe('mailto:x@y.com?body=a&cc=z%40y.com');
   });
 });

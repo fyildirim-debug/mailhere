@@ -390,7 +390,9 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       emit(EVENTS.changed, { mailboxIds: [] });
       return structuredClone(a);
     },
-    cert_inspect: ({ host, port }) => ({
+    cert_inspect: ({ host, port }) => {
+      const pinned = state.settings.trustedCerts.some((c) => c.host === host && c.port === port);
+      return {
       host,
       port,
       sha256: 'A1:B2:C3:D4:E5:F6:07:18:29:3A:4B:5C:6D:7E:8F:90:01:12:23:34:45:56:67:78:89:9A:AB:BC:CD:DE:EF:F0',
@@ -399,8 +401,9 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       notBefore: now() - 30 * 86_400_000,
       notAfter: now() + 335 * 86_400_000,
       names: [host],
-      problem: 'kendinden imzalı',
-    }),
+      problem: host.includes('kendinden') && !pinned ? 'kendinden imzalı' : '',
+      };
+    },
     cert_trust: ({ host, port, sha256 }) => {
       state.settings.trustedCerts = [...state.settings.trustedCerts.filter((c) => !(c.host === host && c.port === port)), { host, port, sha256 }];
       emit(EVENTS.settings, structuredClone(state.settings));
@@ -413,6 +416,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       emit(EVENTS.changed, { mailboxIds: [] });
       return id;
     },
+    attachments_pick: () => [],
     draft_delete: ({ id }) => {
       state.messages = state.messages.filter((m) => m.id !== id);
       emit(EVENTS.changed, { mailboxIds: [] });

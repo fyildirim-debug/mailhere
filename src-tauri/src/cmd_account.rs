@@ -19,11 +19,13 @@ fn is_hex_color(c: &str) -> bool {
 /// Düzenlemeyi denetler ve sadeleştirir: adlar kırpılır, renk büyük harfe
 /// çevrilir, boş imza kaldırılır.
 pub fn normalize_update(u: AccountUpdate) -> AppResult<AccountUpdate> {
-    let name = u.name.trim();
+    let name = mh_send::clean_name(&u.name);
+    let name = name.as_str();
     if name.is_empty() {
         return Err(invalid("Hesap adı boş olamaz."));
     }
-    let display_name = u.display_name.trim();
+    let display_name = mh_send::clean_name(&u.display_name);
+    let display_name = display_name.as_str();
     if display_name.is_empty() {
         return Err(invalid("Gönderen adı boş olamaz."));
     }

@@ -1,0 +1,26 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "compose",
+  "description": "Yazma: gönderim, taslak, ek seçimi ve alıcı önerisi.",
+  "windows": [
+    "compose-*"
+  ],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-internal-toggle-maximize",
+    "core:window:allow-close",
+    "core:window:allow-start-dragging",
+    "allow-settings-get",
+    "allow-accounts-list",
+    "allow-message-get",
+    "allow-search",
+    "allow-send",
+    "allow-send-cancel",
+    "allow-draft-save",
+    "allow-draft-delete",
+    "allow-attachments-pick"
+  ]
+}

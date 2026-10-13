@@ -7,7 +7,7 @@
   import { showToast } from '../../lib/ui/toast.svelte';
   import MailBody from '../../lib/mail/MailBody.svelte';
   import SnoozeMenu from '../../lib/mail/SnoozeMenu.svelte';
-  import { displayName, fileSize } from '../../lib/util/format';
+  import { displayName, fileSize, foreignReplyDomains, replyTargets } from '../../lib/util/format';
   import { allowRemote, mail, moveTo, select, selectedIds, sendQuickReply, setUnread, snooze, toggleStar } from '../../lib/stores/mail.svelte';
 
   let reply = $state('');
@@ -22,6 +22,9 @@
     const mine = account?.email.toLowerCase();
     return [...d.to, ...d.cc].map((a) => (a.email.toLowerCase() === mine ? t('read.me') : displayName(a))).join(', ');
   });
+  // Yanıt alıcıları adresleriyle gösterilir: gizli bir Reply-To fark edilsin.
+  const replyList = $derived(d ? replyTargets(d).map((a) => a.email).join(', ') : '');
+  const replyForeign = $derived(d ? foreignReplyDomains(d) : []);
   const totalSize = $derived(d ? d.attachments.reduce((s, a) => s + a.size, 0) : 0);
   const isDraft = $derived(d ? mail.mailboxes.find((b) => b.id === d.mailboxId)?.role === 'drafts' : false);
 
@@ -179,6 +182,9 @@
     </div>
 
     {#if !isDraft}<div class="reply-wrap">
+      {#if replyForeign.length}
+        <p class="reply-warn" role="note">{t('read.replyElsewhere', { domains: replyForeign.join(', ') })}</p>
+      {/if}
       <div class="replybox">
         <textarea
           bind:this={replyBox}
@@ -189,7 +195,7 @@
           onkeydown={onKey}
         ></textarea>
         <div class="reply-bar">
-          <span class="meta trunc">{t('read.replyTo', { name: displayName(d.replyTo[0] ?? d.from) })}</span>
+          <span class="meta trunc" title={replyList}>{t('read.replyTo', { list: replyList })}</span>
           <span class="grow"></span>
           <span class="meta">{t('read.sendHint')}</span>
           <button class="btn-primary small" disabled={!reply.trim() || sending} onclick={send}><Icon name="send" size={16} />{t('act.send')}</button>
@@ -214,6 +220,12 @@
 </main>
 
 <style>
+  .reply-warn {
+    margin: 0 0 8px;
+    font-size: var(--fs-meta);
+    color: var(--amber);
+  }
+
   .reader {
     flex: 1;
     min-width: 0;

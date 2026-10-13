@@ -24,11 +24,39 @@ fn url(route: &str) -> WebviewUrl {
     WebviewUrl::App(format!("index.html#/{route}").into())
 }
 
+/// Aynı anda açık olabilecek en çok yazma penceresi.
+const MAX_COMPOSE: usize = 12;
+
+/// Pencere yalnız uygulamanın kendi sayfalarında kalabilir: posta içindeki
+/// ya da bir betiğin açtığı dış adres (oltalama sayfası, `file://`) uygulama
+/// penceresinde açılmaz. Dış bağlantılar varsayılan tarayıcıya gider.
+pub fn is_app_url(url: &tauri::Url) -> bool {
+    match url.scheme() {
+        "tauri" | "about" | "data" | "blob" => true,
+        "http" | "https" => match url.host_str() {
+            Some("tauri.localhost") => true,
+            // Geliştirme sunucusu (`pnpm tauri dev`).
+            Some("localhost") => cfg!(debug_assertions),
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+fn guard(url: &tauri::Url) -> bool {
+    let ok = is_app_url(url);
+    if !ok {
+        tracing::warn!(scheme = url.scheme(), host = ?url.host_str(), "uygulama dışı adrese yönlendirme engellendi");
+    }
+    ok
+}
+
 pub fn create_main(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     if let Some(w) = app.get_webview_window(MAIN) {
         return Ok(w);
     }
     WebviewWindowBuilder::new(app, MAIN, url("main"))
+        .on_navigation(guard)
         .title("Mailhere")
         .inner_size(1280.0, 820.0)
         .min_inner_size(900.0, 600.0)
@@ -82,6 +110,7 @@ pub fn ensure_notify(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         return Ok(w);
     }
     WebviewWindowBuilder::new(app, NOTIFY, url("notify"))
+        .on_navigation(guard)
         .title("Mailhere bildirimi")
         .inner_size(NOTIFY_WIDTH, 160.0)
         .decorations(false)
@@ -204,6 +233,7 @@ pub fn open_quick(app: &AppHandle, id: MessageId) -> tauri::Result<()> {
     }
     let (width, height) = (440.0, 700.0);
     let w = WebviewWindowBuilder::new(app, &label, url(&format!("quick/{id}")))
+        .on_navigation(guard)
         .title("Mailhere")
         .inner_size(width, height)
         .min_inner_size(380.0, 480.0)
@@ -253,7 +283,17 @@ pub fn open_compose(app: &AppHandle, prefill: &ComposePrefill) -> tauri::Result<
         mode_route(prefill.mode),
         prefill.message_id.unwrap_or(0)
     );
+    let open = app
+        .webview_windows()
+        .keys()
+        .filter(|l| l.starts_with("compose-"))
+        .count();
+    if open >= MAX_COMPOSE {
+        tracing::warn!(open, "yazma penceresi sınırına ulaşıldı");
+        return Ok(());
+    }
     let w = WebviewWindowBuilder::new(app, format!("compose-{n}"), url(&route))
+        .on_navigation(guard)
         .title("Yeni posta · Mailhere")
         .inner_size(820.0, 660.0)
         .min_inner_size(600.0, 480.0)
@@ -267,6 +307,17 @@ pub fn open_compose(app: &AppHandle, prefill: &ComposePrefill) -> tauri::Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn yalniz_uygulama_adresleri() {
+        let ok = |u: &str| is_app_url(&tauri::Url::parse(u).unwrap());
+        assert!(ok("tauri://localhost/index.html#/main"));
+        assert!(ok("http://tauri.localhost/index.html#/quick/3"));
+        assert!(ok("about:srcdoc"));
+        assert!(!ok("https://banka-giris.example/"));
+        assert!(!ok("file:///etc/passwd"));
+        assert!(!ok("http://tauri.localhost.evil.example/"));
+    }
 
     #[test]
     fn kart_koseye_yerlesir() {

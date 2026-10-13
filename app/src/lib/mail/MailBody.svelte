@@ -18,7 +18,9 @@
     html == null
       ? ''
       : `<!doctype html><html><head><meta charset="utf-8">` +
-          `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: cid:${remoteAllowed ? ' https: http:' : ''}; style-src 'unsafe-inline'; font-src data:">` +
+          `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: cid:${remoteAllowed ? ' https: http:' : ''}; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'">` +
+          // İzin verilen uzak görsellerde bile uygulamayı ele veren Referer gitmesin.
+          `<meta name="referrer" content="no-referrer">` +
           `<style>html,body{margin:0;background:#fff;color:#15171c}body{padding:20px 22px;font:15px/1.6 'Geist Variable',ui-sans-serif,system-ui,sans-serif;word-wrap:break-word;overflow-wrap:anywhere}` +
           `img{max-width:100%;height:auto}img[data-mh-src]:not([src]){background:#eef0f4;border-radius:6px}table{max-width:100%!important}a{color:#3a47b8}pre{white-space:pre-wrap}blockquote{margin:0 0 0 4px;padding-left:12px;border-left:1px solid #d2d6de;color:#4f5562}</style>` +
           `</head><body>${html}</body></html>`,

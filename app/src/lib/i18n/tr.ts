@@ -98,7 +98,8 @@ export const tr = {
   'read.loadError': 'Posta açılamadı.',
   'read.noBody': 'Bu postanın metni yok.',
   'read.replyPlaceholder': 'Hızlı yanıt yaz…',
-  'read.replyTo': 'Kime: {name}',
+  'read.replyTo': 'Kime: {list}',
+  'read.replyElsewhere': 'Dikkat: yanıt gönderenin alan adı dışına gidiyor ({domains}).',
   'read.sendHint': 'Ctrl Enter',
   'read.editDraft': 'Taslağı düzenle',
 
@@ -319,6 +320,7 @@ export const tr = {
   'update.installing': 'Kuruluyor…',
   'update.later': 'Sonra',
   'cert.title': 'Bu sunucuya güvenilmiyor',
+  'cert.step': '{n}/{total}',
   'cert.lead': '{host} kimliğini kanıtlayamadı: {problem}. Kendi sunucunsa ve parmak izini tanıyorsan güvenebilirsin.',
   'cert.noProblem': 'sorun bulunamadı',
   'cert.subject': 'Konu',

@@ -14,7 +14,12 @@ type Res<T> = Result<T, AppError>;
 /// Taslağı kaydeder (`msg.draft_id` bir taslaksa onun yerine, aynı kimlikle)
 /// ve taslağın kimliğini döner. İletilen postanın ekleri taslağa kopyalanır.
 #[tauri::command]
-pub async fn draft_save(state: State<'_, AppState>, msg: OutgoingMessage) -> Res<MessageId> {
+pub async fn draft_save(
+    state: State<'_, AppState>,
+    picked: State<'_, crate::cmd_files::Picked>,
+    msg: OutgoingMessage,
+) -> Res<MessageId> {
+    picked.ensure(&msg.attachments)?;
     if let Some(id) = msg.forward_from {
         crate::commands::ensure_body(&state, id).await?;
     }

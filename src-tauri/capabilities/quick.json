@@ -1,0 +1,27 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "quick",
+  "description": "Hızlı okuma: tek postayı okuma, işaretleme, taşıma, hızlı yanıt, ek açma.",
+  "windows": [
+    "quick-*"
+  ],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:window:allow-close",
+    "core:window:allow-start-dragging",
+    "core:window:allow-set-always-on-top",
+    "opener:allow-open-url",
+    "opener:allow-default-urls",
+    "allow-settings-get",
+    "allow-accounts-list",
+    "allow-message-get",
+    "allow-messages-flag",
+    "allow-messages-move",
+    "allow-messages-snooze",
+    "allow-send",
+    "allow-send-cancel",
+    "allow-open-main",
+    "allow-attachment-open"
+  ]
+}

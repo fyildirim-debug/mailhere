@@ -123,7 +123,15 @@ pub fn configured_kinds() -> Vec<AuthKind> {
 }
 
 fn setting(name: &str, built_in: Option<&'static str>) -> Option<String> {
-    pick(std::env::var(name).ok().as_deref(), built_in)
+    // Çalışma anında ortam değişkeniyle değiştirme yalnız geliştirme
+    // derlemesinde: yayın sürümünde kullanıcıya başka bir OAuth uygulamasına
+    // izin verdirilemez.
+    let runtime = if cfg!(debug_assertions) {
+        std::env::var(name).ok()
+    } else {
+        None
+    };
+    pick(runtime.as_deref(), built_in)
 }
 
 /// Çalışma anı değeri doluysa o, değilse derleme anı değeri; boşluklar
