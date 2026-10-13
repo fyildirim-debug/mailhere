@@ -1116,6 +1116,7 @@ impl Store {
         };
         let allowed = remote_allowed(remote_allow, &summary.from.email);
         let rendered = raw.as_deref().and_then(|r| mh_mime::render(r, allowed));
+        let unsubscribe = raw.as_deref().and_then(mh_mime::unsubscribe);
         let thread = self.thread(id)?;
         Ok(MessageDetail {
             cc,
@@ -1129,6 +1130,7 @@ impl Store {
             remote_allowed: allowed,
             attachments: rendered.map(|r| r.attachments).unwrap_or_default(),
             thread,
+            unsubscribe,
             summary,
         })
     }

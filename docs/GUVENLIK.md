@@ -28,6 +28,7 @@ Son denetim: 2026-10-13 (beş alanda kod denetimi; bulgular doğrulanıp düzelt
 - Görünen ad, konu ve ek adlarından satır sonu, denetim ve yön değiştiren karakterler atılır. Adres gibi görünen ad gerçek adresi gizleyemez.
 - Yanıtın gideceği tüm adresler görünür. Gönderenin alan adı dışına giden yanıtta uyarı çıkar.
 - Ekler yalnız izin listesindeki türlerde doğrudan açılır, diğerleri klasörde gösterilir. Windows'ta "İnternet'ten geldi" işareti konur. Dosya adı kısaltılırken uzantı korunur.
+- Abonelikten çıkma yalnız kullanıcı isteyince yapılır. Tek tık isteği (RFC 8058) yalnız genel internetteki bir HTTPS adresine gider: sunucu adı önce çözülür, adreslerden biri bile bu bilgisayarı ya da yerel ağı (loopback, özel, link-local, ULA, CGNAT, çoklu yayın, belirtilmemiş) gösteriyorsa istek gönderilmez; bağlantı yalnız denetlenen adreslere, vekil sunucusuz kurulur. Çerez, Referer ve kimlik bilgisi gönderilmez, yönlendirme izlenmez, 10 sn zaman aşımı. `mailto:` ile çıkmada posta tek adrese, postayı alan hesaptan gider; başlık `List-Unsubscribe` değerleri sınırlı ve denetimli ayrıştırılır.
 
 **Uygulama kabuğu**
 - Her pencere yalnız kullandığı komutları çağırabilir (`src-tauri/capabilities/*.json`, `build.rs`). Bildirim kartı ve hızlı okuma ayar, hesap ve sertifika komutlarına erişemez.
@@ -55,5 +56,6 @@ Son denetim: 2026-10-13 (beş alanda kod denetimi; bulgular doğrulanıp düzelt
 - **CI eylemleri** sürüm etiketine bağlı, commit özetine (SHA) değil. Dependabot günceller; daha sıkı isteniyorsa SHA'ya sabitlenebilir.
 - **Uzak görsel izni** gönderen adresine göre veriliyor. Gönderen adresi sahtelenebilir, bu yüzden izinli bir gönderici taklit edilirse izleme pikseli yüklenebilir. DMARC doğrulaması ileride eklenebilir.
 - **Karışık alfabeli alan adları** (Kiril "а" gibi) ayrıca işaretlenmiyor.
+- **Abonelikten çıkma başlığının DKIM imzası** denetlenmiyor (RFC 8058 bunu ister). Sahte bir gönderici, kullanıcı "Abonelikten çık"a basınca genel bir HTTPS adresine tek tık isteği ya da bir adrese çıkma postası gönderilmesini sağlayabilir; bu da adresin kullanıldığını ele verir.
 - **Bellekteki veri:** çözülmüş veritabanı sayfaları ve anahtar zinciri kitaplığının kopyaları süreç belleğinde kalabilir.
 - **Lisans:** bazı bağımlılıklar MPL-2.0 (Tauri üzerinden cssparser/selectors, dirs üzerinden option-ext). GPL değil, ama CLAUDE.md'deki izin listesinde yok; karar sahibin.

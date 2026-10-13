@@ -40,7 +40,7 @@ fn is_hex_color(c: &str) -> bool {
 }
 
 /// Düzenlemeyi denetler ve sadeleştirir: adlar kırpılır, renk büyük harfe
-/// çevrilir, boş imza kaldırılır.
+/// çevrilir, imzalar `signatures::normalize_signatures` ile denetlenir.
 pub fn normalize_update(u: AccountUpdate) -> AppResult<AccountUpdate> {
     let name = mh_send::clean_name(&u.name);
     let name = name.as_str();
@@ -56,15 +56,15 @@ pub fn normalize_update(u: AccountUpdate) -> AppResult<AccountUpdate> {
     if !is_hex_color(color) {
         return Err(invalid("Renk #RRGGBB biçiminde olmalı (ör. #4C6FD8)."));
     }
-    let signature = u
-        .signature
-        .map(|s| s.trim_end().to_owned())
-        .filter(|s| !s.trim().is_empty());
+    let (signatures, signature_new, signature_reply) =
+        crate::signatures::normalize_signatures(u.signatures, u.signature_new, u.signature_reply)?;
     Ok(AccountUpdate {
         name: name.to_owned(),
         display_name: display_name.to_owned(),
         color: color.to_ascii_uppercase(),
-        signature,
+        signatures,
+        signature_new,
+        signature_reply,
         notify: u.notify,
     })
 }
@@ -223,12 +223,22 @@ mod tests {
     use super::*;
     use mh_core::Security;
 
+    /// Tek imzalı (iki varsayılanı da o olan) düzenleme.
     fn update(name: &str, display: &str, color: &str, sig: Option<&str>) -> AccountUpdate {
         AccountUpdate {
             name: name.into(),
             display_name: display.into(),
             color: color.into(),
-            signature: sig.map(str::to_owned),
+            signatures: sig
+                .map(|body| mh_core::Signature {
+                    id: "s".into(),
+                    name: "İmza".into(),
+                    body: body.into(),
+                })
+                .into_iter()
+                .collect(),
+            signature_new: sig.map(|_| "s".into()),
+            signature_reply: sig.map(|_| "s".into()),
             notify: true,
         }
     }
@@ -246,8 +256,10 @@ mod tests {
             u,
             update("İş", "Furkan Yıldırım", "#4C6FD8", Some("-- \nFurkan"))
         );
-        let u = normalize_update(update("İş", "F", "#2E9A61", Some(" \n "))).unwrap();
-        assert_eq!(u.signature, None, "boş imza kaldırılır");
+        let mut u = update("İş", "F", "#2E9A61", None);
+        u.signature_new = Some("silinmis".into());
+        let u = normalize_update(u).unwrap();
+        assert_eq!(u.signature_new, None, "listede olmayan varsayılan kalkar");
         let u = normalize_update(AccountUpdate {
             notify: false,
             ..update("İş", "F", "#2E9A61", None)
@@ -295,7 +307,9 @@ mod tests {
             imap: Some(server("imap.ornek.com", 993, "furkan")),
             smtp: Some(server("smtp.ornek.com", 465, "furkan")),
             jmap_url: None,
-            signature: None,
+            signatures: Vec::new(),
+            signature_new: None,
+            signature_reply: None,
             created_at: 0,
             auth: AuthKind::Password,
             notify: true,

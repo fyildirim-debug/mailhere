@@ -2839,6 +2839,7 @@ dependencies = [
  "mh-store",
  "mh-sync",
  "rcgen",
+ "reqwest 0.12.28",
  "rustls",
  "serde_json",
  "tokio",

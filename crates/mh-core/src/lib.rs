@@ -75,7 +75,15 @@ pub struct Account {
     pub imap: Option<ServerConfig>,
     pub smtp: Option<ServerConfig>,
     pub jmap_url: Option<String>,
-    pub signature: Option<String>,
+    /// Hesabın imzaları (en çok 20).
+    #[serde(default)]
+    pub signatures: Vec<Signature>,
+    /// Yeni postada kullanılan imzanın kimliği; yoksa imza eklenmez.
+    #[serde(default)]
+    pub signature_new: Option<String>,
+    /// Yanıt ve iletmede kullanılan imzanın kimliği; yoksa imza eklenmez.
+    #[serde(default)]
+    pub signature_reply: Option<String>,
     pub created_at: Millis,
     #[serde(default)]
     pub auth: AuthKind,
@@ -86,6 +94,18 @@ pub struct Account {
 
 fn yes() -> bool {
     true
+}
+
+/// Hesaba ait bir imza.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Signature {
+    /// Kararlı kimlik (boş gelirse kaydederken üretilir).
+    pub id: String,
+    /// Listede görünen ad ("İş", "Kısa").
+    pub name: String,
+    /// Düz metin gövde.
+    pub body: String,
 }
 
 /// Hesap ekleme isteği. `password` yalnız bir kez kullanılır ve anahtar
@@ -173,7 +193,13 @@ pub struct AccountUpdate {
     pub name: String,
     pub display_name: String,
     pub color: String,
-    pub signature: Option<String>,
+    /// İmzaların tamamı (yeniden yazılır).
+    #[serde(default)]
+    pub signatures: Vec<Signature>,
+    #[serde(default)]
+    pub signature_new: Option<String>,
+    #[serde(default)]
+    pub signature_reply: Option<String>,
     #[serde(default = "yes")]
     pub notify: bool,
 }
@@ -372,6 +398,35 @@ pub struct MessageDetail {
     pub attachments: Vec<Attachment>,
     /// Aynı konuşmadaki önceki iletiler, eskiden yeniye.
     pub thread: Vec<ThreadEntry>,
+    /// Abonelikten çıkma yolları (`List-Unsubscribe`); ham posta ya da
+    /// başlık yoksa `None`.
+    #[serde(default)]
+    pub unsubscribe: Option<Unsubscribe>,
+}
+
+/// Postanın `List-Unsubscribe` (RFC 2369) ve `List-Unsubscribe-Post`
+/// (RFC 8058) başlıklarından çıkan abonelikten çıkma yolları.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Unsubscribe {
+    /// Tarayıcıda açılabilen adres (https tercih edilir, yoksa http).
+    pub url: Option<String>,
+    /// `mailto:` adresi (ör. `mailto:cik@ornek.com?subject=unsubscribe`).
+    pub mailto: Option<String>,
+    /// Tek tıkla çıkma (RFC 8058): `url` https ve gönderen
+    /// `List-Unsubscribe-Post: List-Unsubscribe=One-Click` bildirmiş.
+    #[serde(default)]
+    pub one_click: bool,
+}
+
+/// `unsubscribe` komutunun sonucu.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum UnsubscribeResult {
+    /// İstek gönderildi (tek tık isteği ya da çıkma postası).
+    Done,
+    /// Arka uç gönderemedi; arayüz `url` adresini tarayıcıda açar.
+    Browser,
 }
 
 /// Listelenecek görünüm.
@@ -585,6 +640,33 @@ pub struct Settings {
     pub quick_replies: Option<Vec<String>>,
     /// Koyu temada kendi zemini olmayan postalar koyu zeminde gösterilir.
     pub dark_mail: bool,
+    /// Yazma penceresinde eklenebilen hazır metinler (en çok 50).
+    pub templates: Vec<Template>,
+}
+
+/// Hazır posta şablonu.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Template {
+    pub id: String,
+    pub name: String,
+    /// Boşsa konu değiştirilmez.
+    pub subject: String,
+    pub body: String,
+}
+
+/// Sunucu tarafı otomatik yanıt (JMAP `VacationResponse`, RFC 8621 §8).
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Vacation {
+    pub enabled: bool,
+    /// Bu andan önce yanıt verilmez; yoksa hemen başlar.
+    pub from_date: Option<Millis>,
+    /// Bu andan sonra yanıt verilmez; yoksa süresiz.
+    pub to_date: Option<Millis>,
+    pub subject: String,
+    /// Düz metin yanıt.
+    pub body: String,
 }
 
 /// Hızlı yanıt sınırları: en çok bu kadar düğme, her biri en çok bu kadar karakter.
@@ -646,6 +728,7 @@ impl Default for Settings {
             trusted_certs: Vec::new(),
             quick_replies: None,
             dark_mail: true,
+            templates: Vec::new(),
         }
     }
 }
@@ -850,11 +933,97 @@ mod tests {
             remote_allowed: false,
             attachments: vec![],
             thread: vec![],
+            unsubscribe: Some(Unsubscribe {
+                url: Some("https://bulten.ornek.com/cik?u=1".into()),
+                mailto: None,
+                one_click: true,
+            }),
         };
         let v = serde_json::to_value(&d).unwrap();
         assert_eq!(v["subject"], "Merhaba");
         assert_eq!(v["hasRemoteContent"], false);
         assert_eq!(v["category"], "people");
+        assert_eq!(
+            v["unsubscribe"],
+            serde_json::json!({"url": "https://bulten.ornek.com/cik?u=1", "mailto": null, "oneClick": true})
+        );
+        // Alanı bilmeyen eski veri `None` okunur.
+        let mut old = v.clone();
+        old.as_object_mut().unwrap().remove("unsubscribe");
+        let back: MessageDetail = serde_json::from_value(old).unwrap();
+        assert_eq!(back.unsubscribe, None);
+        assert_eq!(
+            serde_json::to_value(UnsubscribeResult::Browser).unwrap(),
+            "browser"
+        );
+        assert_eq!(
+            serde_json::to_value(UnsubscribeResult::Done).unwrap(),
+            "done"
+        );
+    }
+
+    #[test]
+    fn imza_ve_sablon_json_bicimi() {
+        let a = Account {
+            id: "a".into(),
+            name: "İş".into(),
+            email: "a@ornek.com".into(),
+            display_name: "A".into(),
+            color: "#4C6FD8".into(),
+            kind: AccountKind::Imap,
+            imap: None,
+            smtp: None,
+            jmap_url: None,
+            signatures: vec![Signature {
+                id: "s1".into(),
+                name: "Kısa".into(),
+                body: "-- \nA".into(),
+            }],
+            signature_new: Some("s1".into()),
+            signature_reply: None,
+            created_at: 0,
+            auth: AuthKind::Password,
+            notify: true,
+        };
+        let v = serde_json::to_value(&a).unwrap();
+        assert_eq!(
+            v["signatures"],
+            serde_json::json!([{"id": "s1", "name": "Kısa", "body": "-- \nA"}])
+        );
+        assert_eq!(v["signatureNew"], "s1");
+        assert_eq!(v["signatureReply"], serde_json::Value::Null);
+        assert!(v.get("signature").is_none());
+        // İmza alanlarını bilmeyen veri boş liste okunur.
+        let mut old = v.clone();
+        for k in ["signatures", "signatureNew", "signatureReply"] {
+            old.as_object_mut().unwrap().remove(k);
+        }
+        let back: Account = serde_json::from_value(old).unwrap();
+        assert!(back.signatures.is_empty());
+        assert_eq!(back.signature_new, None);
+
+        let s: Settings = serde_json::from_str(
+            r#"{"templates":[{"id":"t1","name":"Teşekkür","subject":"","body":"Teşekkürler!"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(s.templates.len(), 1);
+        assert_eq!(s.templates[0].name, "Teşekkür");
+        assert!(Settings::default().templates.is_empty());
+    }
+
+    #[test]
+    fn otomatik_yanit_json_bicimi() {
+        let vac = Vacation {
+            enabled: true,
+            from_date: Some(1_000),
+            to_date: None,
+            subject: "İzindeyim".into(),
+            body: "Pazartesi dönüyorum.".into(),
+        };
+        assert_eq!(
+            serde_json::to_value(&vac).unwrap(),
+            serde_json::json!({"enabled": true, "fromDate": 1000, "toDate": null, "subject": "İzindeyim", "body": "Pazartesi dönüyorum."})
+        );
     }
 
     #[test]

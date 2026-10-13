@@ -49,6 +49,9 @@ fn main() {
         "mailbox_set_role",
         "mailbox_roles_reset",
         "quick_replies_set",
+        "unsubscribe",
+        "vacation_get",
+        "vacation_set",
     ];
     tauri_build::try_build(
         tauri_build::Attributes::new()

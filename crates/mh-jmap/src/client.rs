@@ -562,6 +562,12 @@ impl Client {
         {
             using.push(SUBMISSION);
         }
+        if calls
+            .iter()
+            .any(|(m, _)| m.starts_with("VacationResponse/"))
+        {
+            using.push(crate::vacation::VACATION);
+        }
         let method_calls: Vec<Value> = calls
             .iter()
             .enumerate()

@@ -88,7 +88,9 @@ pub async fn account_add(
         imap: Some(input.imap),
         smtp: Some(input.smtp),
         jmap_url: None,
-        signature: None,
+        signatures: Vec::new(),
+        signature_new: None,
+        signature_reply: None,
         created_at: now_ms(),
         auth: Default::default(),
         notify: true,
@@ -518,6 +520,7 @@ pub fn normalize_settings(mut s: Settings) -> Settings {
     s.trusted_certs = crate::cmd_cert::normalize_trusted(s.trusted_certs);
     // Boş liste geçerlidir (kullanıcı tümünü sildi); `None` dile göre varsayılan.
     s.quick_replies = s.quick_replies.map(clean_quick_replies);
+    s.templates = crate::signatures::normalize_templates(s.templates);
     s
 }
 
