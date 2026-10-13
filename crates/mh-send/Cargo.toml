@@ -1,0 +1,22 @@
+[package]
+name = "mh-send"
+description = "Mailhere SMTP gönderim, giden kutusu ve geri alma"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+mh-core.workspace = true
+mh-store.workspace = true
+mh-sync.workspace = true
+mh-mime.workspace = true
+lettre.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+chrono.workspace = true

@@ -1,0 +1,18 @@
+[package]
+name = "mh-store"
+description = "Mailhere yerel depo (SQLite + FTS5)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+mh-core.workspace = true
+mh-mime.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+mail-builder.workspace = true
+chrono.workspace = true
+tracing.workspace = true

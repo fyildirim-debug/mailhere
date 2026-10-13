@@ -26,14 +26,27 @@ pnpm tauri dev      # masaüstü uygulaması
 Örnek veriyle masaüstü uygulaması (gerçek hesap gerekmez):
 
 ```bash
-MAILHERE_DEMO=1 MAILHERE_SECRETS=memory pnpm tauri dev
+MAILHERE_DEMO=1 MAILHERE_SECRETS=memory MAILHERE_DATA_DIR=$(mktemp -d) pnpm tauri dev
 ```
+
+| Ortam değişkeni | Etkisi |
+| --- | --- |
+| `MAILHERE_DEMO=1` | hesap yoksa örnek hesapları ve postaları yükler |
+| `MAILHERE_DEMO_NOTIFY=<sn>` | açılıştan bu kadar sonra örnek bildirim kartı gösterir |
+| `MAILHERE_SECRETS=memory` | parolaları anahtar zinciri yerine bellekte tutar (yalnız deneme) |
+| `MAILHERE_DATA_DIR=<klasör>` | veritabanı ve önbellek klasörü |
 
 Denetimler:
 
 ```bash
 pnpm check && pnpm test && pnpm e2e
 cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace
+```
+
+Gerçek bir IMAP sunucusuna karşı tümleşik test (kutuları boşaltır, yalnız test sunucusunda çalıştır):
+
+```bash
+MH_TEST_IMAP=127.0.0.1:10143:kullanici:parola:none cargo test -p mh-sync --test imap
 ```
 
 Paketler (`target/release/bundle/`): Linux'ta `.deb`, `.rpm`, `.AppImage`; Windows'ta NSIS `.exe` ve `.msi`.

@@ -1,0 +1,108 @@
+//! Hesaplar.
+
+use mh_core::{Account, AccountId, AppResult, ServerConfig};
+use rusqlite::{params, OptionalExtension, Row};
+
+use crate::codec::{from_json, kind_from, kind_str, to_json};
+use crate::Store;
+
+const COLS: &str =
+    "id, name, email, display_name, color, kind, imap, smtp, jmap_url, signature, created_at";
+
+fn row_to_account(r: &Row<'_>) -> rusqlite::Result<Account> {
+    let server = |idx: usize| -> rusqlite::Result<Option<ServerConfig>> {
+        match r.get::<_, Option<String>>(idx)? {
+            Some(s) => from_json(idx, &s).map(Some),
+            None => Ok(None),
+        }
+    };
+    Ok(Account {
+        id: r.get(0)?,
+        name: r.get(1)?,
+        email: r.get(2)?,
+        display_name: r.get(3)?,
+        color: r.get(4)?,
+        kind: kind_from(&r.get::<_, String>(5)?),
+        imap: server(6)?,
+        smtp: server(7)?,
+        jmap_url: r.get(8)?,
+        signature: r.get(9)?,
+        created_at: r.get(10)?,
+    })
+}
+
+impl Store {
+    /// Hesabı ekler ya da (aynı kimlikle) günceller.
+    pub fn insert_account(&self, a: &Account) -> AppResult<()> {
+        self.with(|c| {
+            c.execute(
+                &format!(
+                    "INSERT INTO accounts ({COLS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                     ON CONFLICT(id) DO UPDATE SET name = excluded.name, email = excluded.email,
+                       display_name = excluded.display_name, color = excluded.color, kind = excluded.kind,
+                       imap = excluded.imap, smtp = excluded.smtp, jmap_url = excluded.jmap_url,
+                       signature = excluded.signature"
+                ),
+                params![
+                    a.id,
+                    a.name,
+                    a.email,
+                    a.display_name,
+                    a.color,
+                    kind_str(a.kind),
+                    a.imap.as_ref().map(to_json),
+                    a.smtp.as_ref().map(to_json),
+                    a.jmap_url,
+                    a.signature,
+                    a.created_at
+                ],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Hesaplar, eklenme sırasıyla.
+    pub fn accounts(&self) -> AppResult<Vec<Account>> {
+        self.with(|c| {
+            let mut st = c.prepare_cached(&format!(
+                "SELECT {COLS} FROM accounts ORDER BY created_at, rowid"
+            ))?;
+            let rows = st.query_map([], row_to_account)?;
+            rows.collect()
+        })
+    }
+
+    pub fn account(&self, id: &str) -> AppResult<Option<Account>> {
+        self.with(|c| {
+            c.query_row(
+                &format!("SELECT {COLS} FROM accounts WHERE id = ?1"),
+                [id],
+                row_to_account,
+            )
+            .optional()
+        })
+    }
+
+    /// Hesabı ve tüm yerel verisini siler. Silindiyse `true`.
+    pub fn remove_account(&self, id: &AccountId) -> AppResult<bool> {
+        self.with(|c| Ok(c.execute("DELETE FROM accounts WHERE id = ?1", [id])? > 0))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::testutil::{account, store_with_account};
+
+    #[test]
+    fn ekle_oku_guncelle_sil() {
+        let s = store_with_account("a");
+        let mut a = s.account("a").unwrap().unwrap();
+        assert_eq!(a, account("a"));
+        a.name = "Kişisel".into();
+        s.insert_account(&a).unwrap();
+        assert_eq!(s.accounts().unwrap()[0].name, "Kişisel");
+        assert!(s.remove_account(&"a".to_string()).unwrap());
+        assert!(s.account("a").unwrap().is_none());
+        assert!(!s.remove_account(&"a".to_string()).unwrap());
+    }
+}
