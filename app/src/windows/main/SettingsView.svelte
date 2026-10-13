@@ -1,9 +1,11 @@
 <script lang="ts">
-  import { call, type CardPosition, type Density, type Language, type NotifyMode, type Theme } from '../../lib/api';
+  import { call, toAppError, type Account, type CardPosition, type Density, type Language, type NotifyMode, type Theme } from '../../lib/api';
   import { t, type MessageKey } from '../../lib/i18n/index.svelte';
   import Icon from '../../lib/ui/Icon.svelte';
+  import { showToast } from '../../lib/ui/toast.svelte';
   import { settings, updateSettings } from '../../lib/stores/settings.svelte';
   import { mail, reloadAccounts } from '../../lib/stores/mail.svelte';
+  import { checkUpdate, installUpdate, update } from '../../lib/stores/update.svelte';
 
   const s = $derived(settings.value);
 
@@ -54,6 +56,49 @@
     await call('account_remove', { id });
     confirmRemove = null;
     await reloadAccounts();
+  }
+
+  // Hesap renkleri kullanıcı verisidir (kenar çubuğu noktası); jeton değildir.
+  const palette = ['#4C6FD8', '#2E9A61', '#D08A1E', '#9A5BD6', '#D0566E', '#2A9BA8'];
+
+  let editing = $state<{ id: string; name: string; displayName: string; color: string; signature: string } | null>(null);
+  let saving = $state(false);
+  let editError = $state<string | null>(null);
+
+  function edit(a: Account) {
+    confirmRemove = null;
+    editError = null;
+    editing = { id: a.id, name: a.name, displayName: a.displayName, color: a.color, signature: a.signature ?? '' };
+  }
+
+  async function saveAccount() {
+    const e = editing;
+    if (!e || saving || !e.name.trim()) return;
+    saving = true;
+    editError = null;
+    try {
+      const signature = e.signature.replace(/\s+$/, '');
+      await call('account_update', {
+        id: e.id,
+        update: { name: e.name.trim(), displayName: e.displayName.trim() || e.name.trim(), color: e.color, signature: signature || null },
+      });
+      editing = null;
+      await reloadAccounts();
+      showToast({ text: t('toast.saved') });
+    } catch (err) {
+      editError = toAppError(err).message;
+    } finally {
+      saving = false;
+    }
+  }
+
+  function authLabel(a: Account): string {
+    return a.kind === 'jmap' ? 'JMAP' : t(`set.auth.${a.auth}` as MessageKey);
+  }
+
+  /** Parmak izinin ilk sekiz baytı; tamamı ipucunda. */
+  function shortFp(sha: string): string {
+    return sha.split(':').slice(0, 8).join(':') + '…';
   }
 </script>
 
@@ -183,27 +228,106 @@
       </div>
     </div>
 
+    <div class="row top">
+      <span class="name">{t('set.trusted')}<span class="hint">{t('set.trustedHint')}</span></span>
+      <div class="list">
+        {#each s.trustedCerts as c (`${c.host}:${c.port}`)}
+          <div class="list-row">
+            <span class="trunc">{c.host}:{c.port}</span>
+            <code class="fp" title={c.sha256}>{shortFp(c.sha256)}</code>
+            <span class="grow"></span>
+            <button class="btn-ghost" onclick={() => updateSettings({ trustedCerts: s.trustedCerts.filter((x) => x !== c) })}>{t('set.remove')}</button>
+          </div>
+        {:else}
+          <span class="meta">{t('set.trustedNone')}</span>
+        {/each}
+      </div>
+    </div>
+
     <h2>{t('set.accounts')}</h2>
     <div class="list wide">
       {#each mail.accounts as a (a.id)}
         <div class="list-row">
           <span class="dot" style:background={a.color}></span>
           <span class="acc-name">{a.name}</span>
-          <span class="trunc meta">{a.email}</span>
+          <span class="trunc meta">{a.email} · {authLabel(a)}</span>
           <span class="grow"></span>
           {#if confirmRemove === a.id}
             <span class="meta confirm">{t('set.removeConfirm')}</span>
             <button class="btn-ghost" onclick={() => (confirmRemove = null)}>{t('act.cancel')}</button>
             <button class="btn-ghost danger" onclick={() => removeAccount(a.id)}>{t('set.removeAccount')}</button>
-          {:else}
-            <button class="btn-ghost" onclick={() => (confirmRemove = a.id)}>{t('set.removeAccount')}</button>
+          {:else if editing?.id !== a.id}
+            <button class="btn-ghost" onclick={() => edit(a)}>{t('set.editAccount')}</button>
+            <button class="btn-ghost" onclick={() => ((confirmRemove = a.id), (editing = null))}>{t('set.removeAccount')}</button>
           {/if}
         </div>
+        {#if editing?.id === a.id}
+          <div class="edit">
+            <label><span class="label">{t('onb.name')}</span><input class="input small" bind:value={editing.name} /></label>
+            <label><span class="label">{t('onb.displayName')}</span><input class="input small" bind:value={editing.displayName} /></label>
+            <div class="span">
+              <span class="label" id="color-{a.id}">{t('set.accountColor')}</span>
+              <div class="swatches" role="radiogroup" aria-labelledby="color-{a.id}">
+                {#each palette as c, i (c)}
+                  <button
+                    class="swatch"
+                    role="radio"
+                    aria-checked={editing.color.toLowerCase() === c.toLowerCase()}
+                    aria-label="{t('set.accountColor')} {i + 1}"
+                    style:background={c}
+                    onclick={() => editing && (editing.color = c)}
+                  ></button>
+                {/each}
+              </div>
+            </div>
+            <label class="span">
+              <span class="label">{t('set.signature')}</span>
+              <textarea class="input area" rows="4" bind:value={editing.signature}></textarea>
+              <span class="hint">{t('set.signatureHint')}</span>
+            </label>
+            {#if editError}<p class="span error" role="alert">{editError}</p>{/if}
+            <div class="span actions">
+              <button class="btn-ghost" onclick={() => (editing = null)}>{t('act.cancel')}</button>
+              <button class="btn-primary small" disabled={saving || !editing.name.trim()} onclick={saveAccount}>{t('set.save')}</button>
+            </div>
+          </div>
+        {/if}
       {/each}
       <button class="btn-soft add" onclick={() => (mail.screen = 'onboarding')}><Icon name="plus" size={16} />{t('act.addAccount')}</button>
     </div>
 
-    <p class="about meta">{t('set.about', { version: '0.1.0' })}</p>
+    <h2>{t('set.updates')}</h2>
+    <div class="row top">
+      <span class="name">{t('set.autoUpdate')}<span class="hint">{t('set.autoUpdateHint')}</span></span>
+      <input
+        type="checkbox"
+        role="switch"
+        class="switch"
+        aria-label={t('set.autoUpdate')}
+        checked={s.autoUpdate}
+        onchange={(e) => updateSettings({ autoUpdate: (e.currentTarget as HTMLInputElement).checked })}
+      />
+    </div>
+    <div class="row top">
+      <span class="name">{t('set.version', { version: '0.1.0' })}<span class="hint">{t('set.license')}</span></span>
+      <div class="upd">
+        {#if update.info}
+          <div class="upd-new">
+            <strong>{t('update.available', { version: update.info.version })}</strong>
+            {#if update.info.notes}<span class="meta">{update.info.notes}</span>{/if}
+          </div>
+          <button class="btn-primary small" disabled={update.installing} onclick={installUpdate}>
+            {update.installing ? t('update.installing') : t('update.install')}
+          </button>
+        {:else}
+          <button class="btn-soft" disabled={update.checking} onclick={() => checkUpdate()}>
+            <Icon name="refresh" size={16} />{update.checking ? t('set.checking') : t('set.checkUpdate')}
+          </button>
+          {#if update.upToDate}<span class="meta ok"><Icon name="check" size={14} />{t('set.upToDate')}</span>{/if}
+        {/if}
+        {#if update.error}<span class="error" role="alert">{update.error}</span>{/if}
+      </div>
+    </div>
   </div>
 </section>
 
@@ -370,7 +494,87 @@
     margin-top: 12px;
   }
 
-  .about {
-    margin-top: 40px;
+  .fp {
+    font-family: var(--font-mono);
+    font-size: var(--fs-meta);
+    color: var(--ink-3);
+  }
+
+  .edit {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    margin: 4px 0 8px;
+    padding: 16px;
+    border-radius: var(--r-card);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    animation: fade-up var(--t-state) ease-out;
+  }
+
+  .edit .span {
+    grid-column: 1 / -1;
+  }
+
+  .edit .hint {
+    display: block;
+    margin-top: 6px;
+  }
+
+  .swatches {
+    display: flex;
+    gap: 10px;
+  }
+
+  .swatch {
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+    transition: transform var(--t-fast) var(--ease);
+  }
+
+  .swatch:hover {
+    transform: scale(1.08);
+  }
+
+  .swatch[aria-checked='true'] {
+    box-shadow:
+      0 0 0 2px var(--surface),
+      0 0 0 4px var(--accent);
+  }
+
+  .actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  .error {
+    font-size: var(--fs-meta);
+    color: var(--danger);
+  }
+
+  .upd {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .upd-new {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex-basis: 100%;
+  }
+
+  .upd .ok {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--ok);
   }
 </style>

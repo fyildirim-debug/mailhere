@@ -16,7 +16,7 @@ use crate::state::{internal, now_ms, AppState};
 type Res<T> = Result<T, AppError>;
 
 /// Yeni hesaplara sırayla verilen renkler.
-const PALETTE: [&str; 6] = [
+pub(crate) const PALETTE: [&str; 6] = [
     "#4C6FD8", "#2E9A61", "#D08A1E", "#B4508C", "#2A8C9A", "#7A5BC8",
 ];
 
@@ -101,10 +101,17 @@ pub async fn account_add(
 #[tauri::command]
 pub async fn account_remove(app: AppHandle, state: State<'_, AppState>, id: String) -> Res<()> {
     state.sync.stop(&id);
+    state.sync.tokens().forget(&id);
     let removed = state.store.remove_account(&id)?;
     let secrets = state.secrets.clone();
     let sid = id.clone();
-    match tokio::task::spawn_blocking(move || secrets.delete(&sid)).await {
+    // Parola ve (OAuth hesabıysa) yenileme jetonu.
+    let delete = move || {
+        let password = secrets.delete(&sid);
+        let oauth = secrets.delete(&mh_sync::oauth_secret_key(&sid));
+        password.and(oauth)
+    };
+    match tokio::task::spawn_blocking(delete).await {
         Ok(Ok(())) => {}
         Ok(Err(e)) => {
             tracing::warn!(error = %e.message, "hesabın parolası anahtar zincirinden silinemedi")

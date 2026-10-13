@@ -7,6 +7,7 @@ members = [
   "crates/mh-sync",
   "crates/mh-send",
   "crates/mh-notify",
+  "crates/mh-oauth",
   "src-tauri",
 ]
 
@@ -26,6 +27,7 @@ mh-mime = { path = "crates/mh-mime" }
 mh-sync = { path = "crates/mh-sync" }
 mh-send = { path = "crates/mh-send" }
 mh-notify = { path = "crates/mh-notify" }
+mh-oauth = { path = "crates/mh-oauth" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
@@ -49,6 +51,8 @@ ammonia = "4.1.7"
 rustls = { version = "0.23.45", default-features = false, features = ["ring", "logging", "std", "tls12"] }
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "logging", "tls12"] }
 webpki-roots = "1.0.9"
+# PKCE özeti ve güvenli rastgele değer (rustls zaten ring kullanır).
+ring = "0.17.14"
 async-imap = { version = "0.12.0", default-features = false, features = ["runtime-tokio"] }
 hickory-resolver = { version = "0.26.3", default-features = false, features = ["tokio", "system-config"] }
 quick-xml = "0.38.4"

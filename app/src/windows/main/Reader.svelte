@@ -23,9 +23,15 @@
     return [...d.to, ...d.cc].map((a) => (a.email.toLowerCase() === mine ? t('read.me') : displayName(a))).join(', ');
   });
   const totalSize = $derived(d ? d.attachments.reduce((s, a) => s + a.size, 0) : 0);
+  const isDraft = $derived(d ? mail.mailboxes.find((b) => b.id === d.mailboxId)?.role === 'drafts' : false);
 
   export function focusReply() {
-    replyBox?.focus();
+    if (isDraft) editDraft();
+    else replyBox?.focus();
+  }
+
+  function editDraft() {
+    if (d) void call('open_compose', { prefill: { mode: 'draft', messageId: d.id } });
   }
 
   export function openSnooze() {
@@ -89,9 +95,13 @@
         <Icon name="mail" />
       </button>
       <span class="grow"></span>
-      <button class="btn-soft" title="{t('act.reply')} · R" onclick={focusReply}><Icon name="reply" size={16} />{t('act.reply')}</button>
-      <button class="btn-soft" title="{t('act.replyAllLong')} · A" onclick={() => compose('replyAll')}><Icon name="replyAll" size={16} />{t('act.replyAll')}</button>
-      <button class="btn-soft" title="{t('act.forward')} · F" onclick={() => compose('forward')}><Icon name="forward" size={16} />{t('act.forward')}</button>
+      {#if isDraft}
+        <button class="btn-primary small" title="{t('read.editDraft')} · R" onclick={editDraft}><Icon name="pen" size={16} />{t('read.editDraft')}</button>
+      {:else}
+        <button class="btn-soft" title="{t('act.reply')} · R" onclick={focusReply}><Icon name="reply" size={16} />{t('act.reply')}</button>
+        <button class="btn-soft" title="{t('act.replyAllLong')} · A" onclick={() => compose('replyAll')}><Icon name="replyAll" size={16} />{t('act.replyAll')}</button>
+        <button class="btn-soft" title="{t('act.forward')} · F" onclick={() => compose('forward')}><Icon name="forward" size={16} />{t('act.forward')}</button>
+      {/if}
       <button class="btn-icon" aria-label={t('act.openInApp')} title={t('quick.title')} onclick={() => call('open_quick', { id: d.id })}>
         <Icon name="external" />
       </button>
@@ -168,7 +178,7 @@
       {/key}
     </div>
 
-    <div class="reply-wrap">
+    {#if !isDraft}<div class="reply-wrap">
       <div class="replybox">
         <textarea
           bind:this={replyBox}
@@ -185,7 +195,7 @@
           <button class="btn-primary small" disabled={!reply.trim() || sending} onclick={send}><Icon name="send" size={16} />{t('act.send')}</button>
         </div>
       </div>
-    </div>
+    </div>{/if}
   {:else if mail.detailError}
     <div class="empty">
       <Icon name="mail" size={28} />

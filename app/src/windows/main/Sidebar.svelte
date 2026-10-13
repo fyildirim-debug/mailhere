@@ -2,9 +2,11 @@
   import type { View } from '../../lib/api';
   import { call } from '../../lib/api';
   import { t, type MessageKey } from '../../lib/i18n/index.svelte';
+  import CertDialog, { type CertTarget } from '../../lib/mail/CertDialog.svelte';
   import Icon from '../../lib/ui/Icon.svelte';
   import type { IconName } from '../../lib/ui/icons';
   import { mail, setView, syncLabel } from '../../lib/stores/mail.svelte';
+  import { installUpdate, update } from '../../lib/stores/update.svelte';
 
   interface NavItem {
     kind: Exclude<View['kind'], 'mailbox'>;
@@ -28,6 +30,21 @@
   }
 
   const sync = $derived(syncLabel());
+  let cert = $state<CertTarget[] | null>(null);
+
+  /** Eşitlemenin takıldığı sunucunun sertifikasını gösterir. */
+  function reviewCert() {
+    const u = sync.untrusted;
+    if (!u) return;
+    const servers = mail.accounts.flatMap((a) => [a.imap, a.smtp]).filter((s) => s != null);
+    const security = servers.find((s) => s.host === u.host && s.port === u.port)?.security ?? 'tls';
+    cert = [{ host: u.host, port: u.port, security }];
+  }
+
+  function certClosed(trusted: boolean) {
+    cert = null;
+    if (trusted) void call('sync_now');
+  }
 </script>
 
 <nav class="side" aria-label={t('nav.label')}>
@@ -65,9 +82,30 @@
     </button>
   {/each}
 
+  {#if update.info && !update.dismissed}
+    <div class="update" role="status">
+      <div class="u-head">
+        <Icon name="arrowDown" size={16} />
+        <strong class="trunc" title={t('update.available', { version: update.info.version })}>{t('update.short', { version: update.info.version })}</strong>
+        <button class="btn-icon small" aria-label={t('update.later')} title={t('update.later')} onclick={() => (update.dismissed = true)}>
+          <Icon name="x" size={14} />
+        </button>
+      </div>
+      {#if update.info.notes}<p class="u-notes">{update.info.notes}</p>{/if}
+      {#if update.error}<p class="u-notes err">{update.error}</p>{/if}
+      <button class="btn-primary small u-install" disabled={update.installing} onclick={installUpdate}>
+        {update.installing ? t('update.installing') : t('update.install')}
+      </button>
+    </div>
+  {/if}
+
   <div class="foot">
     <span class="state {sync.tone}"></span>
-    <span class="trunc foot-text">{sync.text}</span>
+    {#if sync.untrusted}
+      <button class="link trunc foot-text warn" onclick={reviewCert}>{sync.text}</button>
+    {:else}
+      <span class="trunc foot-text">{sync.text}</span>
+    {/if}
     <button
       class="btn-icon"
       class:on={mail.screen === 'settings'}
@@ -79,6 +117,8 @@
     </button>
   </div>
 </nav>
+
+{#if cert}<CertDialog targets={cert} onclose={certClosed} />{/if}
 
 <style>
   .side {
@@ -166,6 +206,52 @@
     color: var(--ink-2);
   }
 
+  .update {
+    margin-top: auto;
+    margin-bottom: 4px;
+    padding: 12px;
+    border-radius: var(--r-card);
+    background: var(--paper);
+    border: 1px solid var(--line);
+    animation: fade-up var(--t-panel) var(--ease);
+  }
+
+  .u-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--accent-text);
+  }
+
+  .u-head strong {
+    flex: 1;
+    font-weight: 600;
+    color: var(--ink);
+  }
+
+  .u-head .btn-icon {
+    margin: -6px -6px -6px 0;
+  }
+
+  .u-notes {
+    margin-top: 4px;
+    font-size: var(--fs-meta);
+    color: var(--ink-2);
+  }
+
+  .u-notes.err {
+    color: var(--danger);
+  }
+
+  .u-install {
+    width: 100%;
+    margin-top: 10px;
+  }
+
+  .update + .foot {
+    margin-top: 0;
+  }
+
   .foot {
     margin-top: auto;
     display: flex;
@@ -178,6 +264,12 @@
     flex: 1;
     font-size: var(--fs-meta);
     color: var(--ink-2);
+  }
+
+  .foot-text.warn {
+    padding: 0;
+    text-align: left;
+    color: var(--amber);
   }
 
   .state {

@@ -93,6 +93,12 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm tauri build
+        env:
+          # OAuth istemci kimlikleri derlemeye gömülür. Tanımsız ya da boşsa
+          # derleme yine geçer; yalnız Google / Microsoft girişi gizlenir.
+          MAILHERE_GOOGLE_CLIENT_ID: ${{ secrets.MAILHERE_GOOGLE_CLIENT_ID }}
+          MAILHERE_GOOGLE_CLIENT_SECRET: ${{ secrets.MAILHERE_GOOGLE_CLIENT_SECRET }}
+          MAILHERE_MICROSOFT_CLIENT_ID: ${{ secrets.MAILHERE_MICROSOFT_CLIENT_ID }}
       - uses: actions/upload-artifact@v4
         with:
           name: mailhere-${{ runner.os }}

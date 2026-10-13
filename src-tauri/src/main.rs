@@ -5,6 +5,7 @@
 
 mod cmd_account;
 mod cmd_drafts;
+mod cmd_oauth;
 mod commands;
 mod notify;
 mod secrets;
@@ -50,6 +51,7 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(cmd_oauth::OAuthState::default())
         .setup(move |app| state::setup(app, rt.clone()))
         .on_window_event(windows::on_window_event)
         .invoke_handler(tauri::generate_handler![
@@ -85,6 +87,9 @@ fn main() {
             cmd_drafts::draft_delete,
             updater::update_check,
             updater::update_install,
+            cmd_oauth::oauth_providers,
+            cmd_oauth::oauth_sign_in,
+            cmd_oauth::account_add_oauth,
         ])
         .build(tauri::generate_context!())
         .expect("Mailhere başlatılamadı");

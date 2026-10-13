@@ -18,6 +18,11 @@ jobs:
     env:
       # İmza anahtarı tanımlıysa uygulama içi güncelleme dosyaları (.sig) da üretilir.
       IMZALI: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+      # OAuth istemci kimlikleri derlemeye gömülür. Tanımsız ya da boşsa
+      # derleme yine geçer; yalnız Google / Microsoft girişi gizlenir.
+      MAILHERE_GOOGLE_CLIENT_ID: ${{ secrets.MAILHERE_GOOGLE_CLIENT_ID }}
+      MAILHERE_GOOGLE_CLIENT_SECRET: ${{ secrets.MAILHERE_GOOGLE_CLIENT_SECRET }}
+      MAILHERE_MICROSOFT_CLIENT_ID: ${{ secrets.MAILHERE_MICROSOFT_CLIENT_ID }}
     steps:
       - uses: actions/checkout@v4
       - name: Linux bağımlılıkları
