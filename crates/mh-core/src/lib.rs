@@ -190,6 +190,12 @@ pub struct DiscoveredConfig {
     pub imap: ServerConfig,
     pub smtp: ServerConfig,
     pub source: DiscoverySource,
+    /// Doğrulanmamış kaynaktan (DNS SRV, tahmin) gelen IMAP ya da SMTP
+    /// sunucusu e-posta alan adının dışında: arayüz parolayı göndermeden önce
+    /// uyarmalı. (HTTPS ile alınan otomatik yapılandırma ve gömülü tablo
+    /// güvenilir sayılır; onlarda hep `false`.)
+    #[serde(default)]
+    pub other_domain: bool,
 }
 
 // ------------------------------------------------------------------- kutular
@@ -733,6 +739,30 @@ mod tests {
         assert_eq!(v, serde_json::json!({"kind": "mailbox", "id": "a:INBOX"}));
         let v = serde_json::to_value(View::Inbox).unwrap();
         assert_eq!(v, serde_json::json!({"kind": "inbox"}));
+    }
+
+    #[test]
+    fn kesif_baska_alan_adi_alani() {
+        let server = |host: &str| ServerConfig {
+            host: host.into(),
+            port: 993,
+            security: Security::Tls,
+            username: "a@ornek.com".into(),
+        };
+        let c = DiscoveredConfig {
+            domain: "ornek.com".into(),
+            imap: server("imap.baska.net"),
+            smtp: server("smtp.baska.net"),
+            source: DiscoverySource::Srv,
+            other_domain: true,
+        };
+        let v = serde_json::to_value(&c).unwrap();
+        assert_eq!(v["otherDomain"], serde_json::json!(true));
+        // Alanı bilmeyen eski veri `false` okunur.
+        let mut old = v.clone();
+        old.as_object_mut().unwrap().remove("otherDomain");
+        let back: DiscoveredConfig = serde_json::from_value(old).unwrap();
+        assert!(!back.other_domain);
     }
 
     #[test]

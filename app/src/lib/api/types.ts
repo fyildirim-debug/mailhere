@@ -83,6 +83,8 @@ export interface DiscoveredConfig {
   imap: ServerConfig;
   smtp: ServerConfig;
   source: DiscoverySource;
+  /** Doğrulanmamış kaynaktan (DNS SRV, tahmin) gelen sunucu e-posta alan adının dışında. */
+  otherDomain?: boolean;
 }
 
 // ------------------------------------------------------------------- kutular

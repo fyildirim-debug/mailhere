@@ -28,6 +28,9 @@ pub enum JmapError {
     },
     #[error("zaman aşımı")]
     Timeout,
+    /// Yanıt gövdesi üst sınırı (bayt) aştı; kalanı okunmadı.
+    #[error("yanıt {0} bayt sınırını aştı")]
+    TooLarge(usize),
 }
 
 pub type JmapResult<T> = Result<T, JmapError>;
@@ -136,6 +139,13 @@ impl JmapError {
                 format!("JMAP sunucusu isteği reddetti (HTTP {s})."),
             ),
             Self::Protocol(_) => protocol_error(),
+            Self::TooLarge(limit) => AppError::new(
+                ErrorCode::Invalid,
+                format!(
+                    "Sunucudan gelen veri çok büyük ({} MB sınırı aşıldı); güvenlik için okunmadı. Postayı sunucunun web arayüzünden açmayı dene.",
+                    limit / (1024 * 1024)
+                ),
+            ),
             Self::Method { kind, description } => AppError::new(
                 ErrorCode::Internal,
                 match description.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
@@ -178,5 +188,8 @@ mod tests {
         assert!(m.cannot_calculate_changes());
         assert!(m.to_app().message.contains("cannotCalculateChanges"));
         assert!(!JmapError::Auth.is_connection());
+        let big = JmapError::TooLarge(64 * 1024 * 1024);
+        assert!(!big.is_connection(), "büyük yanıt yeniden denenmez");
+        assert!(big.to_app().message.contains("64 MB"));
     }
 }

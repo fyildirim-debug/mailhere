@@ -66,13 +66,13 @@ pub fn parse(xml: &str, email: &str) -> Option<(ServerConfig, ServerConfig)> {
     loop {
         match reader.read_event().ok()? {
             Event::Start(e) => {
-                let name = String::from_utf8_lossy(e.local_name().as_ref()).into_owned();
+                let name = e.local_name().as_ref().to_owned();
                 if name == "incomingServer" || name == "outgoingServer" {
                     let kind = e
                         .attributes()
                         .flatten()
-                        .find(|a| a.key.local_name().as_ref() == b"type")
-                        .map(|a| String::from_utf8_lossy(&a.value).to_ascii_lowercase())
+                        .find(|a| a.key.local_name().as_ref() == "type")
+                        .map(|a| a.value.to_ascii_lowercase())
                         .unwrap_or_default();
                     current = Some(Server {
                         incoming: name == "incomingServer",
@@ -82,15 +82,15 @@ pub fn parse(xml: &str, email: &str) -> Option<(ServerConfig, ServerConfig)> {
                 }
                 text.clear();
             }
-            Event::Text(t) => text.push_str(&t.decode().ok()?),
-            Event::CData(t) => text.push_str(&t.decode().ok()?),
+            Event::Text(t) => text.push_str(&t.xml10_content()),
+            Event::CData(t) => text.push_str(&t.xml10_content()),
             Event::GeneralRef(r) => {
-                if let Some(c) = entity(&r.decode().ok()?) {
+                if let Some(c) = entity(&r) {
                     text.push(c);
                 }
             }
             Event::End(e) => {
-                let name = String::from_utf8_lossy(e.local_name().as_ref()).into_owned();
+                let name = e.local_name().as_ref().to_owned();
                 if let Some(cur) = current.as_mut() {
                     let value = text.trim().to_owned();
                     match name.as_str() {
@@ -143,27 +143,41 @@ pub fn parse(xml: &str, email: &str) -> Option<(ServerConfig, ServerConfig)> {
     Some((pick(true, "imap")?, pick(false, "smtp")?))
 }
 
+/// Belgeyi indirir; `MAX_BYTES`'ı aşan yanıtın kalanı okunmadan bırakılır.
 async fn get(client: &reqwest::Client, url: &str) -> Option<String> {
-    let res = client.get(url).send().await.ok()?;
+    let mut res = client.get(url).send().await.ok()?;
     if !res.status().is_success() {
         return None;
     }
-    let body = res.bytes().await.ok()?;
-    if body.len() > MAX_BYTES {
+    if res.content_length().is_some_and(|n| n > MAX_BYTES as u64) {
         return None;
     }
-    String::from_utf8(body.to_vec()).ok()
+    let mut body = Vec::new();
+    while let Some(chunk) = res.chunk().await.ok()? {
+        if body.len() + chunk.len() > MAX_BYTES {
+            return None;
+        }
+        body.extend_from_slice(&chunk);
+    }
+    String::from_utf8(body).ok()
+}
+
+/// Belge yalnız HTTPS ile alınır; yönlendirme de şifresiz adrese inemez.
+/// Böylece belge alan adının TLS sertifikasıyla doğrulanmış olur.
+fn client() -> Option<reqwest::Client> {
+    reqwest::Client::builder()
+        .timeout(TIMEOUT)
+        .connect_timeout(TIMEOUT)
+        .https_only(true)
+        .redirect(reqwest::redirect::Policy::limited(3))
+        .user_agent(concat!("Mailhere/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .ok()
 }
 
 /// İki bilinen adresi sırayla dener.
 pub async fn fetch(domain: &str, email: &str) -> Option<(ServerConfig, ServerConfig)> {
-    let client = reqwest::Client::builder()
-        .timeout(TIMEOUT)
-        .connect_timeout(TIMEOUT)
-        .redirect(reqwest::redirect::Policy::limited(3))
-        .user_agent(concat!("Mailhere/", env!("CARGO_PKG_VERSION")))
-        .build()
-        .ok()?;
+    let client = client()?;
     let encoded: String = email
         .bytes()
         .map(|b| match b {
@@ -251,6 +265,106 @@ mod tests {
         assert!(
             parse(only_plain, "a@b.c").is_none(),
             "şifresiz IMAP kabul edilmez"
+        );
+    }
+
+    /// Her bağlantıya `head` başlığını ve ardından `body` parçalarını yazan,
+    /// sonra bağlantıyı açık tutan düz HTTP sunucusu. Gelen istek sayısını
+    /// sayar.
+    async fn server(
+        head: &'static str,
+        body: Vec<u8>,
+        repeat: usize,
+    ) -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!(
+            "http://127.0.0.1:{}/mail/config-v1.1.xml",
+            listener.local_addr().unwrap().port()
+        );
+        let hits = std::sync::Arc::new(AtomicUsize::new(0));
+        let h = hits.clone();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                h.fetch_add(1, Ordering::SeqCst);
+                let body = body.clone();
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 4096];
+                    let _ = sock.read(&mut buf).await;
+                    let _ = sock.write_all(head.as_bytes()).await;
+                    for _ in 0..repeat {
+                        if sock.write_all(&body).await.is_err() {
+                            return;
+                        }
+                    }
+                    // Bağlantı açık kalır: tüm gövdeyi bekleyen istemci takılır.
+                    tokio::time::sleep(Duration::from_secs(60)).await;
+                });
+            }
+        });
+        (url, hits)
+    }
+
+    fn plain_client() -> reqwest::Client {
+        reqwest::Client::builder().timeout(TIMEOUT).build().unwrap()
+    }
+
+    #[tokio::test]
+    async fn kucuk_belge_okunur() {
+        let body = b"<clientConfig/>".to_vec();
+        let (url, _) = server(
+            "HTTP/1.1 200 OK\r\ncontent-length: 15\r\nconnection: close\r\n\r\n",
+            body,
+            1,
+        )
+        .await;
+        assert_eq!(
+            get(&plain_client(), &url).await.as_deref(),
+            Some("<clientConfig/>")
+        );
+    }
+
+    #[tokio::test]
+    async fn buyuk_belge_akista_kesilir() {
+        // Uzunluk bildirmeyen, bitmeyen gövde: sınır aşılınca hemen bırakılır.
+        let (url, _) = server(
+            "HTTP/1.1 200 OK\r\nconnection: close\r\n\r\n",
+            vec![b'x'; 64 * 1024],
+            MAX_BYTES / (64 * 1024) + 2,
+        )
+        .await;
+        let got = tokio::time::timeout(Duration::from_secs(3), get(&plain_client(), &url))
+            .await
+            .expect("sınır aşılınca beklemeden döner");
+        assert!(got.is_none());
+
+        // Bildirilen uzunluk sınırı aşıyorsa gövde hiç okunmaz.
+        let (url, _) = server(
+            "HTTP/1.1 200 OK\r\ncontent-length: 999999999\r\n\r\n",
+            Vec::new(),
+            0,
+        )
+        .await;
+        let got = tokio::time::timeout(Duration::from_secs(3), get(&plain_client(), &url))
+            .await
+            .expect("gövde beklenmez");
+        assert!(got.is_none());
+    }
+
+    #[tokio::test]
+    async fn sifresiz_adrese_gidilmez() {
+        let (url, hits) = server(
+            "HTTP/1.1 200 OK\r\ncontent-length: 15\r\nconnection: close\r\n\r\n",
+            b"<clientConfig/>".to_vec(),
+            1,
+        )
+        .await;
+        assert!(get(&client().unwrap(), &url).await.is_none());
+        assert_eq!(
+            hits.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "http adresine bağlanılmaz"
         );
     }
 

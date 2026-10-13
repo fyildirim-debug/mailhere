@@ -375,6 +375,9 @@
             <span class="srv-label">{t('onb.incoming')}</span><span class="trunc">{imap.host} · {imap.port}</span><span class="sec">{imap.security.toUpperCase()}</span>
             <span class="srv-label">{t('onb.outgoing')}</span><span class="trunc">{smtp.host} · {smtp.port}</span><span class="sec">{smtp.security.toUpperCase()}</span>
           </div>
+          {#if config?.otherDomain}
+            <p class="note warn" role="note">{t('onb.otherDomain', { domain, host: imap.host })}</p>
+          {/if}
           <button class="link small" onclick={() => (editing = true)}>{t('onb.edit')}</button>
         {:else}
           {#each [{ key: 'onb.incoming', cfg: imap }, { key: 'onb.outgoing', cfg: smtp }] as row (row.key)}
@@ -746,6 +749,11 @@
     margin-bottom: 12px;
     font-size: var(--fs-meta);
     color: var(--ink-2);
+  }
+
+  .note.warn {
+    margin: 10px 0 0;
+    color: var(--amber);
   }
 
   .note.top {

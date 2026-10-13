@@ -215,6 +215,7 @@ export const tr = {
   'onb.foundFrom.srv': '{domain} alan adının DNS kayıtlarından alındı.',
   'onb.foundFrom.guess': '{domain} için yaygın sunucu adları denendi.',
   'onb.foundFrom.builtin': '{domain} bilinen bir sağlayıcı.',
+  'onb.otherDomain': 'Dikkat: sunucu {domain} dışında ({host}). Bu bilgi doğrulanamayan DNS kaydından geldi; sunucuyu tanımıyorsan parolanı yazma, ayarları elle düzenle.',
   'onb.notFound': 'Ayarları bulamadık. Sunucu bilgilerini elle yazabilirsin.',
   'onb.incoming': 'Gelen',
   'onb.outgoing': 'Giden',

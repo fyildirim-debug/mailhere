@@ -7,7 +7,7 @@
 
 use std::fmt;
 use std::io;
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, SocketAddr};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
@@ -25,6 +25,13 @@ const GREETING_TIMEOUT: Duration = Duration::from_secs(30);
 /// STARTTLS sonrası sunucu yeni karşılama göndermez, lettre ise önce
 /// karşılama okur; yükseltilmiş akışın başına bu yerel satır konur.
 const LOCAL_GREETING: &[u8] = b"220 mailhere starttls\r\n";
+
+/// EHLO'da gönderilen istemci kimliği: sabit `[127.0.0.1]` adres kalıbı
+/// (RFC 5321 §4.1.4). Makinenin adı, STARTTLS öncesi düz metin EHLO'da
+/// dahil, hiçbir zaman sunucuya gitmez.
+fn client_id() -> ClientId {
+    ClientId::Ipv4(Ipv4Addr::LOCALHOST)
+}
 
 /// lettre'nin istediği akış: iç akış + karşı adres (+ isteğe bağlı yerel
 /// karşılama satırı).
@@ -116,7 +123,7 @@ pub async fn open(cfg: &ServerConfig) -> AppResult<AsyncSmtpConnection> {
             "Şifresiz gönderime yalnız yerel test sunucularında izin verilir.",
         ));
     }
-    let hello = ClientId::default();
+    let hello = client_id();
     let (mut tcp, peer) = tcp(cfg).await?;
     let stream: Box<dyn AsyncTokioStream> = match cfg.security {
         Security::Tls => Box::new(Stream {
@@ -177,5 +184,10 @@ mod tests {
         assert_eq!(&got[..LOCAL_GREETING.len()], LOCAL_GREETING);
         assert_eq!(&got[LOCAL_GREETING.len()..], b"250 tamam\r\n");
         assert_eq!(send_timeout(0), Duration::from_secs(60));
+    }
+
+    #[test]
+    fn ehlo_kimligi_makine_adi_degil() {
+        assert_eq!(client_id().to_string(), "[127.0.0.1]");
     }
 }

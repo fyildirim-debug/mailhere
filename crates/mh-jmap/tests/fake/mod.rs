@@ -17,6 +17,7 @@ use hyper::service::service_fn;
 use hyper::{Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use serde_json::{json, Map, Value};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
@@ -70,6 +71,8 @@ pub struct State {
     pub reject_submission: bool,
     /// Oturumda eventSourceUrl olmasın (yoklama denemesi).
     pub no_eventsource: bool,
+    /// Oturum nesnesinde değiştirilecek alanlar (ör. başka kökene giden apiUrl).
+    pub session_overrides: Vec<(String, String)>,
     /// Gelen API isteklerinin yöntem adları.
     pub calls: Vec<String>,
 }
@@ -281,6 +284,66 @@ impl FakeServer {
     }
 }
 
+/// Her isteğin başlığını kaydeden ve `reply` ile sabit yanıt veren düz HTTP
+/// sunucusu (yönlendirme ve kimlik sızıntısı testleri).
+pub struct RawServer {
+    pub base: String,
+    pub port: u16,
+    seen: Arc<Mutex<Vec<String>>>,
+}
+
+impl RawServer {
+    pub async fn start(reply: impl Fn(&str) -> String + Send + Sync + 'static) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let s2 = seen.clone();
+        let reply = Arc::new(reply);
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let seen = s2.clone();
+                let reply = reply.clone();
+                tokio::spawn(async move {
+                    let mut head = Vec::new();
+                    let mut buf = [0u8; 1024];
+                    while !head.windows(4).any(|w| w == b"\r\n\r\n") {
+                        match sock.read(&mut buf).await {
+                            Ok(0) | Err(_) => return,
+                            Ok(n) => head.extend_from_slice(&buf[..n]),
+                        }
+                    }
+                    let head = String::from_utf8_lossy(&head).into_owned();
+                    let resp = reply(&head);
+                    seen.lock().unwrap().push(head);
+                    let _ = sock.write_all(resp.as_bytes()).await;
+                    let _ = sock.shutdown().await;
+                });
+            }
+        });
+        Self {
+            base: format!("http://127.0.0.1:{port}"),
+            port,
+            seen,
+        }
+    }
+
+    pub fn url(&self, path: &str) -> String {
+        format!("{}{path}", self.base)
+    }
+
+    /// Gelen isteklerin başlık bölümleri.
+    pub fn requests(&self) -> Vec<String> {
+        self.seen.lock().unwrap().clone()
+    }
+}
+
+/// `location` adresine 302 yönlendirmesi.
+pub fn redirect_to(location: &str) -> String {
+    format!(
+        "HTTP/1.1 302 Found\r\nlocation: {location}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+    )
+}
+
 fn full(status: StatusCode, ct: &str, body: impl Into<Bytes>) -> Response<Body> {
     Response::builder()
         .status(status)
@@ -352,6 +415,9 @@ async fn handle(
         });
         if st.no_eventsource {
             s.as_object_mut().unwrap().remove("eventSourceUrl");
+        }
+        for (k, v) in &st.session_overrides {
+            s[k] = json!(v);
         }
         return Ok(json_resp(s));
     }

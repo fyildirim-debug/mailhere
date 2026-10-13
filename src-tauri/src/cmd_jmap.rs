@@ -46,7 +46,8 @@ pub async fn account_add_jmap(
         "" => email.clone(),
         u => u.to_owned(),
     };
-    mh_jmap::test_login(url.as_str(), &username, &input.password).await?;
+    // Aynı kökendeki yönlendirmelerden sonraki son oturum adresi saklanır.
+    let url = mh_jmap::test_login(url.as_str(), &username, &input.password).await?;
 
     let existing = state.store.accounts()?;
     let id = uuid::Uuid::new_v4().to_string();

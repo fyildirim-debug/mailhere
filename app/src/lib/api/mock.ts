@@ -193,11 +193,15 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     account_discover: ({ email }) => {
       const domain = email.split('@')[1]?.trim();
       if (!domain || !domain.includes('.')) fail('invalid', 'Geçerli bir e-posta adresi yaz.');
+      // "srv-" ile başlayan alan adları DNS'ten başka bir alan adına yönlendirir (testler için).
+      const foreign = domain.startsWith('srv-');
+      const host = (kind: string) => (foreign ? `${kind}.barindirma.example` : `${kind}.${domain}`);
       return {
         domain,
-        imap: { host: `imap.${domain}`, port: 993, security: 'tls', username: email },
-        smtp: { host: `smtp.${domain}`, port: 465, security: 'tls', username: email },
-        source: 'autoconfig',
+        imap: { host: host('imap'), port: 993, security: 'tls', username: email },
+        smtp: { host: host('smtp'), port: 465, security: 'tls', username: email },
+        source: foreign ? 'srv' : 'autoconfig',
+        otherDomain: foreign,
       };
     },
     account_add: ({ input }) => {
