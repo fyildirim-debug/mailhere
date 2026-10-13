@@ -102,7 +102,7 @@ fn parse_hex(s: &str) -> Option<Zeroizing<[u8; KEY_LEN]>> {
         return None;
     }
     let mut out = Zeroizing::new([0u8; KEY_LEN]);
-    for (i, pair) in bytes.chunks_exact(2).enumerate() {
+    for (i, pair) in bytes.as_chunks::<2>().0.iter().enumerate() {
         let hi = (pair[0] as char).to_digit(16)?;
         let lo = (pair[1] as char).to_digit(16)?;
         out[i] = (hi << 4 | lo) as u8;
