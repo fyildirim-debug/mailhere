@@ -22,6 +22,7 @@ mh-mime.workspace = true
 mh-sync.workspace = true
 mh-send.workspace = true
 mh-notify.workspace = true
+mh-oauth.workspace = true
 mh-jmap.workspace = true
 serde.workspace = true
 serde_json.workspace = true

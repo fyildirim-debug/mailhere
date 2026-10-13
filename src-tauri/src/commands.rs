@@ -102,10 +102,17 @@ pub async fn account_add(
 pub async fn account_remove(app: AppHandle, state: State<'_, AppState>, id: String) -> Res<()> {
     state.sync.stop(&id);
     state.jmap.stop(&id);
+    state.sync.tokens().forget(&id);
     let removed = state.store.remove_account(&id)?;
     let secrets = state.secrets.clone();
     let sid = id.clone();
-    match tokio::task::spawn_blocking(move || secrets.delete(&sid)).await {
+    // Parola ve (OAuth hesabıysa) yenileme jetonu.
+    let delete = move || {
+        let password = secrets.delete(&sid);
+        let oauth = secrets.delete(&mh_sync::oauth_secret_key(&sid));
+        password.and(oauth)
+    };
+    match tokio::task::spawn_blocking(delete).await {
         Ok(Ok(())) => {}
         Ok(Err(e)) => {
             tracing::warn!(error = %e.message, "hesabın parolası anahtar zincirinden silinemedi")

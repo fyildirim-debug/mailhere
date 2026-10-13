@@ -4,6 +4,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod cmd_jmap;
+mod cmd_oauth;
 mod commands;
 mod notify;
 mod secrets;
@@ -47,6 +48,7 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .manage(cmd_oauth::OAuthState::default())
         .setup(move |app| state::setup(app, rt.clone()))
         .on_window_event(windows::on_window_event)
         .invoke_handler(tauri::generate_handler![
@@ -79,6 +81,9 @@ fn main() {
             commands::demo_notify,
             cmd_jmap::jmap_discover,
             cmd_jmap::account_add_jmap,
+            cmd_oauth::oauth_providers,
+            cmd_oauth::oauth_sign_in,
+            cmd_oauth::account_add_oauth,
         ])
         .build(tauri::generate_context!())
         .expect("Mailhere başlatılamadı");

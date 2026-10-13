@@ -2,12 +2,21 @@
 
 use std::time::Duration;
 
-use lettre::transport::smtp::authentication::Credentials;
+use lettre::transport::smtp::authentication::{Credentials as SmtpCredentials, Mechanism};
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 use mh_core::{AppError, AppResult, ErrorCode, Security, ServerConfig};
+use mh_sync::Credentials;
 
-fn map_err(e: &lettre::transport::smtp::Error, cfg: &ServerConfig) -> AppError {
+fn map_err(e: &lettre::transport::smtp::Error, cfg: &ServerConfig, oauth: bool) -> AppError {
     let code = e.status().map(|c| c.to_string()).unwrap_or_default();
+    // XOAUTH2 reddinde sunucu 334 + hata ayrıntısı döner; lettre bunu
+    // istemci hatası olarak bildirir.
+    if oauth && (matches!(code.as_str(), "530" | "534" | "535" | "454") || e.is_client()) {
+        return AppError::new(
+            ErrorCode::Auth,
+            "Giden posta sunucusu oturum jetonunu kabul etmedi. Yeniden giriş yap; Microsoft 365 kullanıyorsan posta kutusunda SMTP AUTH açık olmalı.",
+        );
+    }
     if matches!(code.as_str(), "530" | "534" | "535" | "454") {
         return AppError::new(
             ErrorCode::Auth,
@@ -35,10 +44,17 @@ fn map_err(e: &lettre::transport::smtp::Error, cfg: &ServerConfig) -> AppError {
     )
 }
 
-/// Postayı gönderir. Şifresiz bağlantıya yalnız yerel test sunucusunda izin
-/// verilir.
+/// Postayı parolayla gönderir. Şifresiz bağlantıya yalnız yerel test
+/// sunucusunda izin verilir.
 pub async fn send(cfg: &ServerConfig, password: &str, message: Message) -> AppResult<()> {
+    send_with(cfg, &Credentials::Password(password.to_owned()), message).await
+}
+
+/// Postayı gönderir: parolayla (PLAIN/LOGIN) ya da OAuth 2 erişim jetonuyla
+/// (XOAUTH2).
+pub async fn send_with(cfg: &ServerConfig, creds: &Credentials, message: Message) -> AppResult<()> {
     let host = cfg.host.trim();
+    let oauth = creds.is_oauth();
     let builder = match cfg.security {
         Security::Tls => AsyncSmtpTransport::<Tokio1Executor>::relay(host),
         Security::Starttls => AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(host),
@@ -52,22 +68,28 @@ pub async fn send(cfg: &ServerConfig, password: &str, message: Message) -> AppRe
             ))
         }
     }
-    .map_err(|e| map_err(&e, cfg))?;
+    .map_err(|e| map_err(&e, cfg, false))?;
     let mut builder = builder
         .port(cfg.port)
         .timeout(Some(Duration::from_secs(60)));
-    if !cfg.username.trim().is_empty() {
-        builder = builder.credentials(Credentials::new(
-            cfg.username.trim().to_owned(),
-            password.to_owned(),
-        ));
+    let user = cfg.username.trim().to_owned();
+    match creds {
+        Credentials::Password(p) if !user.is_empty() => {
+            builder = builder.credentials(SmtpCredentials::new(user, p.clone()));
+        }
+        Credentials::Password(_) => {}
+        Credentials::OAuth2(token) => {
+            builder = builder
+                .credentials(SmtpCredentials::new(user, token.clone()))
+                .authentication(vec![Mechanism::Xoauth2]);
+        }
     }
     let transport = builder.build();
     match transport.send(message).await {
         Ok(_) => Ok(()),
         Err(e) => {
             tracing::warn!(host, error = %e, "SMTP gönderimi başarısız");
-            Err(map_err(&e, cfg))
+            Err(map_err(&e, cfg, oauth))
         }
     }
 }
@@ -198,5 +220,99 @@ mod tests {
         assert!(server_saves_sent(&cfg));
         cfg.host = "smtp.ornek.com".into();
         assert!(!server_saves_sent(&cfg));
+    }
+
+    /// AUTH XOAUTH2 bilen sahte SMTP; çözülmüş ilk yanıtı döner. `accept`
+    /// değilse Google/Microsoft gibi 334 + JSON ayrıntıyla reddeder.
+    async fn fake_smtp_xoauth2(listener: tokio::net::TcpListener, accept: bool) -> Option<String> {
+        use base64::engine::general_purpose::STANDARD;
+        use base64::Engine;
+        let (sock, _) = listener.accept().await.unwrap();
+        let (r, mut w) = sock.into_split();
+        let mut lines = BufReader::new(r).lines();
+        w.write_all(b"220 sahte ESMTP\r\n").await.unwrap();
+        let mut payload = None;
+        let mut in_data = false;
+        while let Ok(Some(line)) = lines.next_line().await {
+            if in_data {
+                if line == "." {
+                    in_data = false;
+                    w.write_all(b"250 kabul\r\n").await.unwrap();
+                }
+                continue;
+            }
+            let cmd = line.to_ascii_uppercase();
+            if cmd.starts_with("EHLO") {
+                w.write_all(b"250-sahte\r\n250-AUTH PLAIN LOGIN XOAUTH2\r\n250 8BITMIME\r\n")
+                    .await
+                    .unwrap();
+            } else if let Some(b64) = line.strip_prefix("AUTH XOAUTH2 ") {
+                payload = Some(String::from_utf8(STANDARD.decode(b64.trim()).unwrap()).unwrap());
+                let reply = if accept {
+                    "235 2.7.0 Accepted\r\n".to_owned()
+                } else {
+                    format!("334 {}\r\n", STANDARD.encode(r#"{"status":"400"}"#))
+                };
+                w.write_all(reply.as_bytes()).await.unwrap();
+            } else if cmd.starts_with("AUTH") {
+                w.write_all(b"504 beklenmeyen yontem\r\n").await.unwrap();
+            } else if cmd.starts_with("DATA") {
+                in_data = true;
+                w.write_all(b"354 devam\r\n").await.unwrap();
+            } else if cmd.starts_with("QUIT") {
+                let _ = w.write_all(b"221 hosca kal\r\n").await;
+                break;
+            } else {
+                w.write_all(b"250 tamam\r\n").await.unwrap();
+            }
+        }
+        payload
+    }
+
+    fn small_message() -> lettre::Message {
+        lettre::Message::builder()
+            .from("furkan@gmail.com".parse().unwrap())
+            .to("ayse@ornek.com".parse().unwrap())
+            .subject("Deneme")
+            .body(String::from("Merhaba"))
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn xoauth2_ile_gonderim() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(fake_smtp_xoauth2(listener, true));
+        let cfg = ServerConfig {
+            host: "127.0.0.1".into(),
+            port,
+            security: Security::None,
+            username: "furkan@gmail.com".into(),
+        };
+        let creds = Credentials::OAuth2("ya29.erisim".into());
+        send_with(&cfg, &creds, small_message()).await.unwrap();
+        assert_eq!(
+            server.await.unwrap().as_deref(),
+            Some("user=furkan@gmail.com\x01auth=Bearer ya29.erisim\x01\x01")
+        );
+    }
+
+    #[tokio::test]
+    async fn xoauth2_reddi_yetki_hatasi() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(fake_smtp_xoauth2(listener, false));
+        let cfg = ServerConfig {
+            host: "127.0.0.1".into(),
+            port,
+            security: Security::None,
+            username: "furkan@gmail.com".into(),
+        };
+        let creds = Credentials::OAuth2("ya29.suresi-dolmus".into());
+        let err = send_with(&cfg, &creds, small_message()).await.unwrap_err();
+        assert_eq!(err.code, ErrorCode::Auth);
+        assert!(err.message.contains("oturum jetonunu"), "{}", err.message);
+        assert!(!err.message.contains("suresi-dolmus"));
+        assert!(server.await.unwrap().is_some());
     }
 }

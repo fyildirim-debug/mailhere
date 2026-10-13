@@ -71,3 +71,26 @@ test('yazma: kişi önerisi geçmiş postalardan gelir', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Elif Şahin alıcısını kaldır' })).toBeVisible();
   await expect(to).toHaveValue('');
 });
+
+test('yazma: taslak kendiliğinden kaydedilir, silince kaldırılır', async ({ page }) => {
+  await page.goto('/#/compose/new/0');
+  await page.locator('#compose-subject').fill('Taslak deneme');
+  await page.getByRole('textbox', { name: 'Posta metni' }).fill('Yarın devam ederim.');
+  await expect(page.getByText('Taslak kaydedildi')).toBeVisible();
+  const count = () => page.evaluate(() => (window as unknown as { __mh: { state: { messages: { subject: string }[] } } }).__mh.state.messages.filter((m) => m.subject === 'Taslak deneme').length);
+  expect(await count()).toBe(1);
+  // İkinci düzenleme aynı taslağın üzerine yazar.
+  await page.getByRole('textbox', { name: 'Posta metni' }).fill('Yarın sabah devam ederim.');
+  await expect(page.getByText('Taslak kaydedildi')).toBeVisible();
+  await page.waitForTimeout(1800);
+  expect(await count()).toBe(1);
+  await page.getByRole('button', { name: 'Taslağı sil' }).click();
+  await expect.poll(count).toBe(0);
+});
+
+test('iletme: özgün postanın ekleri gösterilir', async ({ page }) => {
+  await page.goto('/#/compose/forward/3');
+  await expect(page.getByText('İletme · Q4 bütçe taslağı')).toBeVisible();
+  await expect(page.getByText('Butce_Q4_taslak.xlsx')).toBeVisible();
+  await expect(page.getByText('Sunum_ozeti.pdf')).toBeVisible();
+});

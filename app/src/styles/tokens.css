@@ -101,6 +101,7 @@
   --r-palette: 16px;
 
   --font: 'Geist Variable', 'Geist', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, 'Cascadia Mono', 'DejaVu Sans Mono', monospace;
 }
 
 /* Avatar paleti: zemin + aynı tonda koyu metin (gri değil). */

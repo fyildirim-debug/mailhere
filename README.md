@@ -43,6 +43,10 @@ MAILHERE_DEMO=1 MAILHERE_SECRETS=memory MAILHERE_DATA_DIR=$(mktemp -d) pnpm taur
 | `MAILHERE_DEMO_NOTIFY=<sn>` | açılıştan bu kadar sonra örnek bildirim kartı gösterir |
 | `MAILHERE_SECRETS=memory` | parolaları anahtar zinciri yerine bellekte tutar (yalnız deneme) |
 | `MAILHERE_DATA_DIR=<klasör>` | veritabanı ve önbellek klasörü |
+| `MAILHERE_GOOGLE_CLIENT_ID`, `MAILHERE_GOOGLE_CLIENT_SECRET` | Google ile giriş (Gmail, XOAUTH2); masaüstü uygulaması OAuth istemcisi |
+| `MAILHERE_MICROSOFT_CLIENT_ID` | Microsoft ile giriş (Outlook / Microsoft 365, XOAUTH2); genel istemci |
+
+OAuth istemci kimlikleri koda yazılmaz: derlemede (`pnpm tauri build`) bu ortam değişkenlerinden gömülür, çalışırken aynı adlı değişkenler bunları ezer. Boş ya da tanımsızsa o sağlayıcının düğmesi uygulama parolasıyla IMAP yoluna yönlendirir. CI'da depo gizli değerlerinden (`secrets`) gelir. Dönüş adresi `http://127.0.0.1:<rastgele kapı>/`: Google'da istemci türü "Masaüstü uygulaması" seçilir (ek kayıt gerekmez); Microsoft'ta "Mobil ve masaüstü uygulamaları" platformuna `http://127.0.0.1` dönüş adresi eklenir (kapı eşleşmede yok sayılır).
 
 Denetimler:
 
@@ -55,6 +59,12 @@ Gerçek bir IMAP sunucusuna karşı tümleşik test (kutuları boşaltır, yaln�
 
 ```bash
 MH_TEST_IMAP=127.0.0.1:10143:kullanici:parola:none cargo test -p mh-sync --test imap
+```
+
+XOAUTH2 girişi için Dovecot `oauth2` passdb'sine karşı test (sahte sağlayıcıyı test kendisi `127.0.0.1:<introspection kapısı>` üzerinde açar; Dovecot ayarında `introspection_url = http://127.0.0.1:<kapı>/introspect`, `introspection_mode = post`, `username_attribute = username`):
+
+```bash
+MH_TEST_XOAUTH2_IMAP=127.0.0.1:10443:kullanici:18443 cargo test -p mh-sync --test xoauth2
 ```
 
 Paketler (`target/release/bundle/`): Linux'ta `.deb`, `.rpm`, `.AppImage`; Windows'ta NSIS `.exe` ve `.msi`.

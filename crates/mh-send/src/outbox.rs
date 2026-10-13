@@ -8,7 +8,7 @@ use mh_core::{
     OutboxItem, OutgoingMessage,
 };
 use mh_store::{NewMessage, OutboxRow, Store};
-use mh_sync::{password_for, EventSink, SecretStore, SyncManager};
+use mh_sync::{credentials_for, EventSink, SecretStore, SyncManager};
 use tokio::sync::Notify;
 
 use crate::message::{build, validate, ReplyRef};
@@ -176,8 +176,8 @@ impl Outbox {
             let cfg = account.smtp.clone().ok_or_else(|| {
                 AppError::new(ErrorCode::Invalid, "Hesabın giden posta ayarı yok.")
             })?;
-            let password = password_for(&self.secrets, &account.id).await?;
-            crate::transport::send(&cfg, &password, message).await?;
+            let creds = credentials_for(&self.secrets, self.sync.tokens(), &account).await?;
+            crate::transport::send_with(&cfg, &creds, message).await?;
             if !crate::transport::server_saves_sent(&cfg) {
                 if let Err(e) = self
                     .sync
