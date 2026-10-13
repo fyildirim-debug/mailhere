@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use fake::{raw_mail, FakeServer};
+use fake::{raw_mail, redirect_to, FakeServer, RawServer};
 use mh_core::{
     Account, AccountKind, Category, ErrorCode, ListQuery, MailboxRole, MessageSummary, MoveTarget,
     SyncState, SyncStatus, View,
@@ -134,6 +134,162 @@ async fn kesif_ve_giris() {
     assert_eq!(c.account_id(), "A");
     assert!(c.can_submit());
     assert_eq!(c.max_get(), 2);
+}
+
+#[tokio::test]
+async fn baska_kokene_yonlendirmede_parola_gonderilmez() {
+    // Saldırganın sunucusu: gelen her isteği kaydeder.
+    let trap = RawServer::start(|_| {
+        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{}"
+            .into()
+    })
+    .await;
+    // Başka sunucu adı (PoC: 127.0.0.1 → localhost) ve yalnız başka kapı.
+    for target in [
+        format!("http://localhost:{}/jmap/session", trap.port),
+        format!("http://127.0.0.1:{}/jmap/session", trap.port),
+    ] {
+        let t = target.clone();
+        let entry = RawServer::start(move |_| redirect_to(&t)).await;
+        let err = mh_jmap::test_login(&entry.url("/.well-known/jmap"), "furkan", "gizli")
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, ErrorCode::Invalid, "{}", err.message);
+        assert!(
+            err.message.contains(&target),
+            "kullanıcıya son adres gösterilir: {}",
+            err.message
+        );
+        assert!(!err.message.contains("gizli"));
+        let err = Client::connect(
+            &entry.url("/.well-known/jmap"),
+            Credentials::new("furkan", "gizli"),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.to_app().code, ErrorCode::Invalid);
+        // Kullanıcının yazdığı sunucu kimliği alır; yönlendirme izlenmez.
+        let seen = entry.requests();
+        assert_eq!(seen.len(), 2);
+        assert!(seen[0]
+            .to_ascii_lowercase()
+            .contains("authorization: basic"));
+    }
+    assert!(
+        trap.requests().is_empty(),
+        "başka kökene hiç istek gitmez: {:?}",
+        trap.requests()
+    );
+}
+
+#[tokio::test]
+async fn kesifte_baska_kokene_kimliksiz_yonlendirme_izlenir() {
+    let server = FakeServer::start("furkan", "gizli").await;
+    let target = server.session_url();
+    let entry = RawServer::start(move |_| redirect_to(&target)).await;
+    // Kimliksiz yoklama başka kökene geçer (son adres kullanıcıya gösterilir).
+    assert!(mh_jmap::probe(&entry.url("/.well-known/jmap")).await);
+    // Kullanıcı son adresi yazınca giriş olur.
+    mh_jmap::test_login(&server.session_url(), "furkan", "gizli")
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn oturum_adresleri_baska_kokende_olamaz() {
+    let trap = RawServer::start(|_| {
+        "HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{}".into()
+    })
+    .await;
+    let cases = [
+        ("apiUrl", trap.url("/jmap/api"), "apiUrl"),
+        (
+            "downloadUrl",
+            trap.url("/d/{accountId}/{blobId}/{name}?accept={type}"),
+            "downloadUrl",
+        ),
+        ("uploadUrl", trap.url("/u/{accountId}/"), "uploadUrl"),
+        // Aynı sunucu, başka şema/kapı da başka kökendir.
+        (
+            "apiUrl",
+            "http://localhost:1/jmap/api".to_owned(),
+            "localhost:1",
+        ),
+    ];
+    for (field, value, needle) in cases {
+        let server = FakeServer::start("furkan", "gizli").await;
+        server.with(|s| s.session_overrides.push((field.into(), value.clone())));
+        let err = Client::connect(&server.session_url(), Credentials::new("furkan", "gizli"))
+            .await
+            .unwrap_err()
+            .to_app();
+        assert_eq!(err.code, ErrorCode::Invalid, "{field}: {}", err.message);
+        assert!(err.message.contains(needle), "{}", err.message);
+        assert!(!err.message.contains("gizli"));
+    }
+
+    // Durum akışı isteğe bağlıdır: başka kökendeyse hesap açılır, akış
+    // kullanılmaz.
+    let server = FakeServer::start("furkan", "gizli").await;
+    server.with(|s| {
+        s.session_overrides.push((
+            "eventSourceUrl".into(),
+            trap.url("/es?types={types}&closeafter={closeafter}&ping={ping}"),
+        ))
+    });
+    let c = Client::connect(&server.session_url(), Credentials::new("furkan", "gizli"))
+        .await
+        .unwrap();
+    assert!(c.event_source_url("Email,Mailbox", 5).is_none());
+    // Göreli adresler oturumun kökenine çözülür.
+    let server = FakeServer::start("furkan", "gizli").await;
+    server.with(|s| {
+        s.session_overrides
+            .push(("apiUrl".into(), "/jmap/api".into()))
+    });
+    let c = Client::connect(&server.session_url(), Credentials::new("furkan", "gizli"))
+        .await
+        .unwrap();
+    c.call("Mailbox/get", serde_json::json!({ "accountId": "A" }))
+        .await
+        .unwrap();
+
+    assert!(trap.requests().is_empty(), "{:?}", trap.requests());
+}
+
+#[tokio::test]
+async fn cok_buyuk_yanitlar_okunmaz() {
+    // Oturum yanıtı 16 MB'tan büyük olduğunu bildiriyor: gövde beklenmez.
+    let big = RawServer::start(|_| {
+        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 20000000\r\n\r\n{"
+            .into()
+    })
+    .await;
+    let err = tokio::time::timeout(
+        Duration::from_secs(5),
+        mh_jmap::test_login(&big.url("/jmap/session"), "furkan", "gizli"),
+    )
+    .await
+    .expect("gövde beklenmeden döner")
+    .unwrap_err();
+    assert_eq!(err.code, ErrorCode::Invalid);
+    assert!(err.message.contains("16 MB"), "{}", err.message);
+
+    // 64 MB'ı aşan blob indirilmez.
+    let server = FakeServer::start("furkan", "gizli").await;
+    server.with(|s| {
+        s.blobs
+            .insert("BUYUK".into(), vec![b'x'; 64 * 1024 * 1024 + 1])
+    });
+    let c = Client::connect(&server.session_url(), Credentials::new("furkan", "gizli"))
+        .await
+        .unwrap();
+    let err = c
+        .download("BUYUK", "posta.eml", "message/rfc822")
+        .await
+        .unwrap_err();
+    assert!(!err.is_connection(), "yeniden denenmez");
+    assert!(err.to_app().message.contains("64 MB"), "{err}");
 }
 
 #[tokio::test]

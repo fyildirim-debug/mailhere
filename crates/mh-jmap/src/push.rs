@@ -9,8 +9,10 @@ use serde_json::Value;
 use crate::client::{http_for, Client};
 use crate::error::{JmapError, JmapResult};
 
-/// Tamponun üst sınırı: bozuk ya da kötü niyetli akış belleği şişirmesin.
-const MAX_BUFFER: usize = 1024 * 1024;
+/// Tek satırın üst sınırı: bozuk ya da kötü niyetli akış belleği şişirmesin.
+const MAX_LINE: usize = 1024 * 1024;
+/// Bir olayın biriken verisinin üst sınırı. Aşan olayın verisi atılır.
+const MAX_EVENT_DATA: usize = 1024 * 1024;
 
 /// Sunucudan gelen bir olay.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,12 +22,21 @@ pub struct SseEvent {
 }
 
 /// Satır satır gelen `text/event-stream` ayrıştırıcısı.
+///
+/// Bellek sınırlıdır: satır `MAX_LINE`, olay verisi `MAX_EVENT_DATA` baytı
+/// aşamaz. Sınırı aşan olay boş veriyle iletilir; `state` olayıysa
+/// `touches_account` boş veriyi anlayamadığından emin olmak için eşitletir.
 #[derive(Debug, Default)]
 pub struct SseParser {
+    /// Henüz bitmemiş satır.
     buf: Vec<u8>,
+    /// Bu satır sınırı aştı; satır sonuna kadar gelen baytlar atılır.
+    skip_line: bool,
     event: String,
     data: String,
     has_data: bool,
+    /// Bu olayın bir kısmı sınır yüzünden atıldı.
+    overflow: bool,
 }
 
 impl SseParser {
@@ -35,54 +46,88 @@ impl SseParser {
 
     /// Yeni baytları ekler; tamamlanan olayları döner.
     pub fn feed(&mut self, chunk: &[u8]) -> Vec<SseEvent> {
-        self.buf.extend_from_slice(chunk);
         let mut out = Vec::new();
-        while let Some(pos) = self.buf.iter().position(|&b| b == b'\n') {
-            let mut line: Vec<u8> = self.buf.drain(..=pos).collect();
-            line.pop();
-            if line.last() == Some(&b'\r') {
-                line.pop();
-            }
-            let line = String::from_utf8_lossy(&line);
-            if line.is_empty() {
-                if self.has_data {
-                    out.push(SseEvent {
-                        event: if self.event.is_empty() {
-                            "message".into()
-                        } else {
-                            std::mem::take(&mut self.event)
-                        },
-                        data: std::mem::take(&mut self.data),
-                    });
+        let mut rest = chunk;
+        while !rest.is_empty() {
+            let (part, ends_line) = match rest.iter().position(|&b| b == b'\n') {
+                Some(pos) => {
+                    let part = &rest[..pos];
+                    rest = &rest[pos + 1..];
+                    (part, true)
                 }
-                self.event.clear();
-                self.data.clear();
-                self.has_data = false;
-                continue;
-            }
-            if line.starts_with(':') {
-                continue;
-            }
-            let (field, value) = match line.split_once(':') {
-                Some((f, v)) => (f, v.strip_prefix(' ').unwrap_or(v)),
-                None => (line.as_ref(), ""),
+                None => (std::mem::take(&mut rest), false),
             };
-            match field {
-                "event" => self.event = value.to_owned(),
-                "data" => {
-                    if self.has_data {
-                        self.data.push('\n');
-                    }
-                    self.data.push_str(value);
-                    self.has_data = true;
+            if !self.skip_line {
+                if self.buf.len() + part.len() > MAX_LINE {
+                    self.buf = Vec::new();
+                    self.skip_line = true;
+                    self.overflow = true;
+                } else {
+                    self.buf.extend_from_slice(part);
                 }
-                _ => {}
             }
-        }
-        if self.buf.len() > MAX_BUFFER {
-            self.buf.clear();
+            if ends_line {
+                if std::mem::take(&mut self.skip_line) {
+                    continue;
+                }
+                let line = std::mem::take(&mut self.buf);
+                self.line(&line, &mut out);
+            }
         }
         out
+    }
+
+    fn line(&mut self, line: &[u8], out: &mut Vec<SseEvent>) {
+        let line = line.strip_suffix(b"\r").unwrap_or(line);
+        if line.is_empty() {
+            self.dispatch(out);
+            return;
+        }
+        if line.starts_with(b":") {
+            return;
+        }
+        let line = String::from_utf8_lossy(line);
+        let (field, value) = match line.split_once(':') {
+            Some((f, v)) => (f, v.strip_prefix(' ').unwrap_or(v)),
+            None => (line.as_ref(), ""),
+        };
+        match field {
+            "event" => self.event = value.to_owned(),
+            "data" if self.overflow => {}
+            "data" => {
+                let extra = value.len() + usize::from(self.has_data);
+                if self.data.len() + extra > MAX_EVENT_DATA {
+                    self.data = String::new();
+                    self.overflow = true;
+                    return;
+                }
+                if self.has_data {
+                    self.data.push('\n');
+                }
+                self.data.push_str(value);
+                self.has_data = true;
+            }
+            _ => {}
+        }
+    }
+
+    /// Boş satır: biriken olayı iletir ve durumu sıfırlar.
+    fn dispatch(&mut self, out: &mut Vec<SseEvent>) {
+        let event = std::mem::take(&mut self.event);
+        let data = std::mem::take(&mut self.data);
+        if self.has_data || self.overflow {
+            out.push(SseEvent {
+                event: if event.is_empty() {
+                    "message".into()
+                } else {
+                    event
+                },
+                // Sınırı aşan olayın verisi güvenilmez; boş iletilir.
+                data: if self.overflow { String::new() } else { data },
+            });
+        }
+        self.has_data = false;
+        self.overflow = false;
     }
 }
 
@@ -114,6 +159,8 @@ pub async fn listen(
     let url = client
         .event_source_url("Email,Mailbox", ping_secs)
         .ok_or_else(|| JmapError::Protocol("sunucu durum akışı sunmuyor".into()))?;
+    // Adres oturumla aynı kökendedir (`Client::resolve`); yönlendirme
+    // izlenmez, parola başka sunucuya gitmez.
     let rb = http_for(&url)
         .get(url)
         .header(ACCEPT, "text/event-stream")
@@ -170,6 +217,57 @@ mod tests {
         );
         // Veri olmayan olay yok sayılır; olay adı sonrakine taşınmaz.
         assert!(p.feed(b"event: bos\n\ndata: x\n\n")[0].event == "message");
+    }
+
+    #[test]
+    fn buyuk_olay_verisi_sinirlanir_ve_esitletir() {
+        let mut p = SseParser::new();
+        // Her satır kısa ama toplam veri sınırı aşar: biriken veri atılır.
+        let line = format!("data: {}\n", "x".repeat(64 * 1024));
+        assert!(p.feed(b"event: state\n").is_empty());
+        for _ in 0..(MAX_EVENT_DATA / (64 * 1024) + 4) {
+            assert!(p.feed(line.as_bytes()).is_empty());
+            assert!(p.data.len() <= MAX_EVENT_DATA, "veri sınırı aşılmaz");
+        }
+        let ev = p.feed(b"\n");
+        assert_eq!(
+            ev,
+            vec![SseEvent {
+                event: "state".into(),
+                data: String::new()
+            }],
+            "aşan olay boş veriyle iletilir"
+        );
+        assert!(
+            touches_account(&ev[0].data, "A"),
+            "boş veri emin olmak için eşitletir"
+        );
+        // Sonraki olay normal işlenir.
+        let ev = p.feed(b"event: state\ndata: {\"changed\":{}}\n\n");
+        assert_eq!(ev[0].data, "{\"changed\":{}}");
+    }
+
+    #[test]
+    fn cok_uzun_satir_atilir() {
+        let mut p = SseParser::new();
+        assert!(p.feed(b"event: state\ndata: ").is_empty());
+        let chunk = vec![b'y'; 256 * 1024];
+        for _ in 0..(MAX_LINE / chunk.len() + 4) {
+            assert!(p.feed(&chunk).is_empty());
+            assert!(p.buf.len() <= MAX_LINE, "satır tamponu sınırı aşılmaz");
+        }
+        // Satırın kalanı yeni bir alan diye okunmaz.
+        let ev = p.feed(b"data: sahte\n\n");
+        assert_eq!(
+            ev,
+            vec![SseEvent {
+                event: "state".into(),
+                data: String::new()
+            }]
+        );
+        let ev = p.feed(b"data: {\"a\":1}\n\n");
+        assert_eq!(ev[0].data, "{\"a\":1}");
+        assert_eq!(ev[0].event, "message");
     }
 
     #[test]
