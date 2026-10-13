@@ -136,6 +136,41 @@ pub fn trust(cert: TrustedCert) {
     t.push(cert);
 }
 
+/// Herkese açık büyük posta sağlayıcıları. Bunların sertifikası her zaman
+/// tanınmış bir kuruluşça imzalıdır; doğrulama başarısızsa araya biri
+/// girmiştir. Bu sunuculara sertifika onayı verilmez.
+const PUBLIC_PROVIDERS: &[&str] = &[
+    "gmail.com",
+    "googlemail.com",
+    "google.com",
+    "outlook.com",
+    "office365.com",
+    "hotmail.com",
+    "live.com",
+    "msn.com",
+    "yahoo.com",
+    "icloud.com",
+    "me.com",
+    "aol.com",
+    "gmx.net",
+    "gmx.com",
+    "yandex.com",
+    "yandex.ru",
+    "zoho.com",
+    "fastmail.com",
+    "proton.me",
+    "protonmail.ch",
+    "mail.ru",
+];
+
+/// Sunucu büyük bir sağlayıcıya mı ait (ör. `imap.gmail.com`)?
+pub fn is_public_provider(host: &str) -> bool {
+    let host = host_key(host);
+    PUBLIC_PROVIDERS
+        .iter()
+        .any(|d| host == *d || host.ends_with(&format!(".{d}")))
+}
+
 /// Bu sunucu + kapı için bu parmak izi onaylanmış mı?
 pub fn is_trusted(host: &str, port: u16, sha256: &str) -> bool {
     let Some(fp) = normalize_fingerprint(sha256) else {
@@ -194,7 +229,10 @@ impl ServerCertVerifier for PinVerifier {
         ) {
             Ok(ok) => Ok(ok),
             Err(e @ rustls::Error::InvalidCertificate(_)) => {
-                if is_trusted(&self.host, self.port, &fingerprint(end_entity)) {
+                // Büyük sağlayıcılarda sabitleme hiç geçerli değildir.
+                if !is_public_provider(&self.host)
+                    && is_trusted(&self.host, self.port, &fingerprint(end_entity))
+                {
                     tracing::info!(host = %self.host, port = self.port, "onaylanmış sertifika kabul edildi");
                     return Ok(ServerCertVerified::assertion());
                 }
@@ -335,6 +373,15 @@ pub fn untrusted_error(host: &str, port: u16, problem: &str) -> AppError {
     } else {
         problem.to_owned()
     };
+    if is_public_provider(host) {
+        // Onay seçeneği sunulmaz: bu sağlayıcıda geçersiz sertifika saldırı demektir.
+        return AppError::new(
+            ErrorCode::Tls,
+            format!(
+                "{host}:{port} sunucusunun sertifikası doğrulanamadı ({why}). Bu sağlayıcıda bu olmamalı: ağda biri araya girmiş olabilir. Başka bir ağda yeniden dene."
+            ),
+        );
+    }
     AppError::new(
         ErrorCode::Untrusted,
         format!(
@@ -377,6 +424,27 @@ pub async fn handshake<S: AsyncRead + AsyncWrite + Unpin>(
             ErrorCode::Network,
             "Güvenli bağlantı zaman aşımına uğradı.",
         )),
+    }
+}
+
+#[cfg(test)]
+mod provider_tests {
+    use super::*;
+
+    #[test]
+    fn buyuk_saglayicilar_taninir_ve_onaylanamaz() {
+        assert!(is_public_provider("imap.gmail.com"));
+        assert!(is_public_provider("Outlook.Office365.com."));
+        assert!(!is_public_provider("posta.ornek.com"));
+        assert!(!is_public_provider("evilgmail.com"));
+        assert_eq!(
+            untrusted_error("imap.gmail.com", 993, "").code,
+            ErrorCode::Tls
+        );
+        assert_eq!(
+            untrusted_error("posta.ornek.com", 993, "").code,
+            ErrorCode::Untrusted
+        );
     }
 }
 

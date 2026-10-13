@@ -412,6 +412,8 @@ export interface Commands {
   /** Taslağı kaydeder (msg.draftId varsa yerine yazar); taslağın kimliğini döner. */
   draft_save: [{ msg: OutgoingMessage }, MessageId];
   draft_delete: [{ id: MessageId }, null];
+  /** İşletim sisteminin dosya penceresini açar; seçilen dosyaların yolları. */
+  attachments_pick: [Record<string, never>, string[]];
 
   // Güncelleme
   update_check: [Record<string, never>, UpdateInfo | null];

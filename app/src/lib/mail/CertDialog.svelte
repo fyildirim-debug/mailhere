@@ -17,14 +17,17 @@
   import Icon from '../ui/Icon.svelte';
 
   interface Props {
-    /** Sırayla denenir; sorunu olan ilk sertifika gösterilir. */
+    /** Hepsi incelenir; sorunu olanlar (ör. IMAP ve SMTP) sırayla onaya sunulur. */
     targets: CertTarget[];
     onclose: (trusted: boolean) => void;
   }
 
   let { targets, onclose }: Props = $props();
 
-  let info = $state<CertInfo | null>(null);
+  let queue = $state<CertInfo[]>([]);
+  let index = $state(0);
+  const info = $derived(queue[index] ?? null);
+  let loadError = $state<string | null>(null);
   let error = $state<string | null>(null);
   let busy = $state(false);
   let dialogEl = $state<HTMLDivElement>();
@@ -32,16 +35,21 @@
   $effect(() => {
     let alive = true;
     (async () => {
-      let last: CertInfo | null = null;
-      try {
-        for (const target of targets) {
-          last = await call('cert_inspect', target);
-          if (last.problem) break;
+      const found: CertInfo[] = [];
+      let failure: string | null = null;
+      for (const target of targets) {
+        try {
+          const c = await call('cert_inspect', target);
+          if (c.problem) found.push(c);
+        } catch (e) {
+          failure ??= toAppError(e).message;
         }
-        if (alive) info = last;
-      } catch (e) {
-        if (alive) error = toAppError(e).message;
       }
+      if (!alive) return;
+      if (found.length) queue = found;
+      else if (failure) loadError = failure;
+      // Sorunlu sertifika kalmadı (ör. az önce onaylandı): yeniden denensin.
+      else onclose(true);
     })();
     return () => {
       alive = false;
@@ -59,11 +67,15 @@
   async function trust() {
     if (!info || busy) return;
     busy = true;
+    error = null;
     try {
+      // Son onayı işletim sisteminin kendi penceresi ister.
       await call('cert_trust', { host: info.host, port: info.port, sha256: info.sha256 });
-      onclose(true);
+      if (index + 1 < queue.length) index += 1;
+      else onclose(true);
     } catch (e) {
       error = toAppError(e).message;
+    } finally {
       busy = false;
     }
   }
@@ -81,15 +93,15 @@
     <div class="head">
       <span class="badge"><Icon name="shield" size={20} /></span>
       <div class="grow">
-        <h2 id="cert-title">{t('cert.title')}</h2>
+        <h2 id="cert-title">{t('cert.title')}{#if queue.length > 1}<span class="step num">{t('cert.step', { n: index + 1, total: queue.length })}</span>{/if}</h2>
         {#if info}
           <p class="lead">{t('cert.lead', { host: `${info.host}:${info.port}`, problem: info.problem || t('cert.noProblem') })}</p>
         {/if}
       </div>
     </div>
 
-    {#if error}
-      <p class="error" role="alert">{t('cert.failed', { message: error })}</p>
+    {#if loadError}
+      <p class="error" role="alert">{t('cert.failed', { message: loadError })}</p>
     {:else if !info}
       <p class="meta loading">{t('cert.loading')}</p>
     {:else}
@@ -105,11 +117,12 @@
         <code>{#each info.sha256.split(':') as part, i (i)}{#if i}:<wbr />{/if}{part}{/each}</code>
       </div>
       <p class="hint">{t('cert.compare')}</p>
+      {#if error}<p class="error" role="alert">{error}</p>{/if}
     {/if}
 
     <div class="actions">
       <button class="btn-soft" onclick={() => onclose(false)}>{t('act.cancel')}</button>
-      <button class="btn-primary" disabled={!info || busy || !!error} onclick={trust}>{t('cert.trust')}</button>
+      <button class="btn-primary" disabled={!info || busy} onclick={trust}>{t('cert.trust')}</button>
     </div>
   </div>
 </div>
@@ -165,6 +178,13 @@
     border-radius: var(--r-row);
     background: color-mix(in srgb, var(--amber) 16%, transparent);
     color: var(--amber);
+  }
+
+  .step {
+    margin-left: 10px;
+    font-size: var(--fs-meta);
+    font-weight: 500;
+    color: var(--ink-3);
   }
 
   h2 {

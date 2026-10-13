@@ -52,7 +52,13 @@ test('güvenilmeyen sertifika: parmak izi gösterilir, onayla hesap eklenir', as
   await expect(dialog).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Ayarlar bulundu' })).toBeVisible();
 
+  // Gelen ve giden sunucunun sertifikası sırayla onaylanır.
   await page.getByRole('button', { name: 'Hesabı ekle' }).click();
+  await expect(dialog).toContainText('1/2');
+  await expect(dialog).toContainText('imap.kendinden.dev:993');
+  await dialog.getByRole('button', { name: 'Bu sertifikaya güven' }).click();
+  await expect(dialog).toContainText('2/2');
+  await expect(dialog).toContainText('smtp.kendinden.dev:465');
   await dialog.getByRole('button', { name: 'Bu sertifikaya güven' }).click();
   await expect(page.getByRole('heading', { name: 'Hazırsın' })).toBeVisible();
 });

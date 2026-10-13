@@ -94,7 +94,8 @@ export const en: Record<MessageKey, string> = {
   'read.loadError': 'Could not open this message.',
   'read.noBody': 'This message has no text.',
   'read.replyPlaceholder': 'Write a quick reply…',
-  'read.replyTo': 'To: {name}',
+  'read.replyTo': 'To: {list}',
+  'read.replyElsewhere': 'Heads up: this reply goes outside the sender\'s domain ({domains}).',
   'read.sendHint': 'Ctrl Enter',
   'read.editDraft': 'Edit draft',
 
@@ -307,6 +308,7 @@ export const en: Record<MessageKey, string> = {
   'update.installing': 'Installing…',
   'update.later': 'Later',
   'cert.title': 'This server isn\'t trusted',
+  'cert.step': '{n}/{total}',
   'cert.lead': '{host} couldn\'t prove its identity: {problem}. If it\'s your own server and you recognise the fingerprint, you can trust it.',
   'cert.noProblem': 'no problem found',
   'cert.subject': 'Subject',

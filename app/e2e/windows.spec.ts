@@ -45,7 +45,7 @@ test('yazma: alıcı çipi, alıcısız uyarı, gönder ve geri al', async ({ pa
   const to = page.locator('#compose-to');
   await to.fill('kerem.aydin@ornek.com.tr');
   await to.press('Enter');
-  await expect(page.getByRole('button', { name: 'kerem.aydin alıcısını kaldır' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'kerem.aydin@ornek.com.tr alıcısını kaldır' })).toBeVisible();
   await page.locator('#compose-subject').fill('Plan');
   await page.getByRole('textbox', { name: 'Posta metni' }).fill('Merhaba');
   await page.keyboard.press('Control+Enter');

@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
 
+# İşler yalnız okur; gizli değerler PR'lara verilmez.
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -18,6 +22,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -46,6 +52,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Linux bağımlılıkları
         if: runner.os == 'Linux'
         run: |
@@ -74,8 +82,8 @@ jobs:
       - name: Biçim
         if: runner.os == 'Linux'
         run: cargo fmt --all -- --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test --workspace
+      - run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - run: cargo test --locked --workspace
 
   paket:
     name: Paket (${{ matrix.os }})
@@ -88,6 +96,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Linux bağımlılıkları
         if: runner.os == 'Linux'
         run: |
@@ -108,7 +118,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm tauri build
+      - run: pnpm tauri build -- --locked
         env:
           # OAuth istemci kimlikleri derlemeye gömülür. Tanımsız ya da boşsa
           # derleme yine geçer; yalnız Google / Microsoft girişi gizlenir.

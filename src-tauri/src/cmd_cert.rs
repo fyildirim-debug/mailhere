@@ -1,12 +1,42 @@
 //! Sertifika onayı: güvenilmeyen sunucu sertifikasını inceleme ve kullanıcının
 //! açık onayıyla parmak izini sabitleme.
 
-use mh_core::{events, AppError, CertInfo, ErrorCode, Security, Settings, TrustedCert};
-use tauri::{AppHandle, Emitter, State};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
-use crate::state::AppState;
+use mh_core::{events, AppError, CertInfo, ErrorCode, Security, Settings, TrustedCert};
+use tauri::{AppHandle, Emitter, State, WebviewWindow};
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+
+use crate::state::{internal, AppState};
 
 type Res<T> = Result<T, AppError>;
+
+/// İncelenen sertifikaların geçerlilik süresi: onay bu süre içinde verilmeli.
+const INSPECT_TTL: Duration = Duration::from_secs(30 * 60);
+
+/// Bu oturumda incelenen (sunucunun gerçekten sunduğu) sertifikalar. Onay
+/// yalnız bunlardan birine verilebilir: arayüzden uydurma bir parmak izi
+/// sabitlenemez.
+static INSPECTED: Mutex<Vec<(String, u16, String, Instant)>> = Mutex::new(Vec::new());
+
+fn remember_inspected(host: &str, port: u16, sha256: &str) {
+    let mut list = INSPECTED.lock().unwrap_or_else(|p| p.into_inner());
+    list.retain(|(_, _, _, at)| at.elapsed() < INSPECT_TTL);
+    if list.len() >= 64 {
+        list.remove(0);
+    }
+    list.push((host_key(host), port, sha256.to_owned(), Instant::now()));
+}
+
+fn was_inspected(host: &str, port: u16, sha256: &str) -> bool {
+    let host = host_key(host);
+    INSPECTED
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .iter()
+        .any(|(h, p, f, at)| *h == host && *p == port && f == sha256 && at.elapsed() < INSPECT_TTL)
+}
 
 fn host_key(host: &str) -> String {
     host.trim().trim_end_matches('.').to_ascii_lowercase()
@@ -59,21 +89,76 @@ pub fn with_trust(mut settings: Settings, host: &str, port: u16, sha256: &str) -
 /// Sunucunun sertifikasını doğrulamadan alıp inceler.
 #[tauri::command]
 pub async fn cert_inspect(host: String, port: u16, security: Security) -> Res<CertInfo> {
-    mh_sync::tls::inspect(&host, port, security).await
+    let info = mh_sync::tls::inspect(&host, port, security).await?;
+    if let Some(fp) = mh_sync::tls::normalize_fingerprint(&info.sha256) {
+        remember_inspected(&host, port, &fp);
+    }
+    Ok(info)
+}
+
+/// Onay öncesi denetimler: büyük sağlayıcıya onay verilmez, parmak izi bu
+/// oturumda sunucudan gerçekten alınmış olmalı.
+pub fn check_trust_request(host: &str, port: u16, sha256: &str) -> Res<String> {
+    if mh_sync::tls::is_public_provider(host) {
+        return Err(AppError::new(
+            ErrorCode::Invalid,
+            "Bu sağlayıcının sertifikası onaylanamaz; geçersiz görünmesi ağda bir saldırı belirtisidir.",
+        ));
+    }
+    let fp = mh_sync::tls::normalize_fingerprint(sha256).ok_or_else(|| {
+        AppError::new(
+            ErrorCode::Invalid,
+            "Sertifika parmak izi geçersiz; sertifikayı yeniden incele.",
+        )
+    })?;
+    if !was_inspected(host, port, &fp) {
+        return Err(AppError::new(
+            ErrorCode::Invalid,
+            "Bu sertifika incelenmedi ya da inceleme süresi doldu; sertifikayı yeniden incele.",
+        ));
+    }
+    Ok(fp)
+}
+
+/// Son onayı işletim sisteminin kendi penceresinde ister: arayüzde çalışan
+/// bir betik bu adımı atlayamaz.
+async fn native_confirm(window: &WebviewWindow, host: &str, port: u16, fp: &str) -> Res<bool> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    window
+        .dialog()
+        .message(format!(
+            "{host}:{port} sunucusunun sertifikasına güvenilsin mi?\n\nSHA-256 parmak izi:\n{fp}\n\nParmak izi sunucu yöneticinin verdiğiyle aynı değilse Vazgeç'i seç."
+        ))
+        .title("Sertifika onayı")
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            "Güven".into(),
+            "Vazgeç".into(),
+        ))
+        .parent(window)
+        .show(move |ok| {
+            let _ = tx.send(ok);
+        });
+    rx.await.map_err(internal)
 }
 
 /// Kullanıcı sertifikaya güvendi: parmak izi bu sunucu + kapı için kalıcı
 /// sabitlenir, ayar olayı yayınlanır ve bu sunucuyu kullanan hesaplar
 /// yeniden bağlanır.
 #[tauri::command]
-pub fn cert_trust(
+pub async fn cert_trust(
     app: AppHandle,
+    window: WebviewWindow,
     state: State<'_, AppState>,
     host: String,
     port: u16,
     sha256: String,
 ) -> Res<()> {
-    let settings = with_trust(state.store.settings()?, &host, port, &sha256)?;
+    let fp = check_trust_request(&host, port, &sha256)?;
+    if !native_confirm(&window, &host_key(&host), port, &fp).await? {
+        return Err(AppError::new(ErrorCode::Invalid, "Sertifika onaylanmadı."));
+    }
+    let settings = with_trust(state.store.settings()?, &host, port, &fp)?;
     state.store.set_settings(&settings)?;
     mh_sync::tls::set_trusted(&settings.trusted_certs);
     tracing::info!(host = %host_key(&host), port, "sertifika kullanıcı onayıyla sabitlendi");
@@ -121,6 +206,24 @@ mod tests {
                 ErrorCode::Invalid
             );
         }
+    }
+
+    #[test]
+    fn onay_yalniz_incelenen_sertifikaya_ve_buyuk_saglayici_disina() {
+        let fp = FP.to_owned();
+        // İncelenmemiş parmak izi reddedilir.
+        assert!(check_trust_request("posta.ornek.dev", 993, &fp).is_err());
+        remember_inspected("Posta.Ornek.dev", 993, &fp);
+        assert_eq!(
+            check_trust_request("posta.ornek.dev", 993, &fp).unwrap(),
+            fp
+        );
+        // Başka kapı ya da başka parmak izi geçmez.
+        assert!(check_trust_request("posta.ornek.dev", 465, &fp).is_err());
+        assert!(check_trust_request("posta.ornek.dev", 993, &FP.replace("A1", "00")).is_err());
+        // Büyük sağlayıcıya hiç onay verilmez.
+        remember_inspected("imap.gmail.com", 993, &fp);
+        assert!(check_trust_request("imap.gmail.com", 993, &fp).is_err());
     }
 
     #[test]

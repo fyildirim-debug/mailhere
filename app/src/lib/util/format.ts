@@ -79,7 +79,47 @@ export function initials(addr: Address): string {
 
 export function displayName(addr: Address): string {
   const n = addr.name?.trim();
-  return n ? n : addr.email.split('@')[0];
+  // Ad yoksa adresin tamamı; ad kendisi bir adres gibiyse ("guvenlik@banka.com"
+  // <x@kotu.example>) gerçek adres gösterilir.
+  if (!n || (n.includes('@') && n.toLowerCase() !== addr.email.toLowerCase())) return addr.email;
+  return n;
+}
+
+/**
+ * `mailto:` bağlantısından yalnız alıcı, konu, gövde ve bilgi alanı kalır.
+ * `attach` gibi parametrelerle dış e-posta programına dosya ekletilemez.
+ */
+export function sanitizeMailto(url: string): string {
+  const rest = url.slice('mailto:'.length);
+  const q = rest.indexOf('?');
+  const to = q < 0 ? rest : rest.slice(0, q);
+  if (q < 0) return `mailto:${to}`;
+  const kept: string[] = [];
+  for (const [k, v] of new URLSearchParams(rest.slice(q + 1))) {
+    const key = k.toLowerCase();
+    if (key === 'subject' || key === 'body' || key === 'cc') kept.push(`${key}=${encodeURIComponent(v)}`);
+  }
+  return `mailto:${to}${kept.length ? `?${kept.join('&')}` : ''}`;
+}
+
+/** Yanıtın gideceği adresler: Reply-To varsa onlar, yoksa gönderen. */
+export function replyTargets(d: { replyTo: Address[]; from: Address }): Address[] {
+  return d.replyTo.length ? d.replyTo : [d.from];
+}
+
+function domainOf(email: string): string {
+  return email.split('@')[1]?.trim().toLowerCase() ?? '';
+}
+
+/** Yanıt, gönderenin alan adı dışındaki adreslere gidiyorsa o alan adları. */
+export function foreignReplyDomains(d: { replyTo: Address[]; from: Address }): string[] {
+  const own = domainOf(d.from.email);
+  const out = new Set<string>();
+  for (const a of d.replyTo) {
+    const dom = domainOf(a.email);
+    if (dom && dom !== own) out.add(dom);
+  }
+  return [...out];
 }
 
 /** Adresten deterministik avatar tonu (0–8). */

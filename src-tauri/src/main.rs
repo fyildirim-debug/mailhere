@@ -6,6 +6,7 @@
 mod cmd_account;
 mod cmd_cert;
 mod cmd_drafts;
+mod cmd_files;
 mod cmd_jmap;
 mod cmd_oauth;
 mod commands;
@@ -87,6 +88,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(cmd_oauth::OAuthState::default())
+        .manage(cmd_files::Picked::default())
         .setup(move |app| state::setup(app, rt.clone()))
         .on_window_event(windows::on_window_event)
         .invoke_handler(tauri::generate_handler![
@@ -122,6 +124,7 @@ fn main() {
             cmd_account::account_update,
             cmd_drafts::draft_save,
             cmd_drafts::draft_delete,
+            cmd_files::attachments_pick,
             updater::update_check,
             updater::update_install,
             cmd_oauth::oauth_providers,

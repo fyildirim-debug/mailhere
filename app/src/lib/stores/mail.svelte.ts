@@ -19,7 +19,7 @@ import {
 } from '../api';
 import { t, when } from '../i18n/index.svelte';
 import { showToast } from '../ui/toast.svelte';
-import { baseSubject, displayName } from '../util/format';
+import { baseSubject, displayName, replyTargets } from '../util/format';
 import { settings } from './settings.svelte';
 
 export type Screen = 'mail' | 'settings' | 'onboarding';
@@ -386,7 +386,7 @@ export function quoteFor(d: MessageDetail, text: string): string {
 /** Hızlı yanıtı giden kutusuna koyar; geri alınırsa metni geri verir. */
 export async function sendQuickReply(d: MessageDetail, text: string, restore: (text: string) => void): Promise<boolean> {
   const account = mail.accounts.find((a) => a.id === d.accountId);
-  const to = d.replyTo.length ? d.replyTo : [d.from];
+  const to = replyTargets(d);
   try {
     const item = await call('send', {
       msg: {
