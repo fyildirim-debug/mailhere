@@ -115,3 +115,11 @@ test('taslak: okuma panelinde düzenle düğmesi çıkar, hızlı yanıt gizleni
   await expect(page.getByRole('button', { name: 'Taslağı düzenle' })).toBeVisible();
   await expect(page.getByPlaceholder('Hızlı yanıt yaz…')).toHaveCount(0);
 });
+
+test('DNS başka alan adındaki sunucuyu gösterirse uyarı çıkar', async ({ page }) => {
+  await page.goto('/?bos#/main');
+  await page.getByLabel('E-posta adresi').fill('furkan@srv-ornek.dev');
+  await page.getByRole('button', { name: 'Devam' }).click();
+  await expect(page.getByRole('note')).toContainText('imap.barindirma.example');
+  await expect(page.getByRole('note')).toContainText('parolanı yazma');
+});

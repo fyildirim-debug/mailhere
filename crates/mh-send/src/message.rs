@@ -36,17 +36,7 @@ fn mailbox(a: &Address) -> AppResult<Mailbox> {
 /// başlık eklemeye kapı açar ve lettre'yi çökertir (yabancı bir göndericinin
 /// adı yanıtta alıcı olur).
 pub fn clean_name(name: &str) -> String {
-    let spaced: String = name
-        .chars()
-        .map(|c| {
-            if c.is_control() || matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}') {
-                ' '
-            } else {
-                c
-            }
-        })
-        .collect();
-    spaced.split_whitespace().collect::<Vec<_>>().join(" ")
+    mh_mime::clean_display_name(name)
 }
 
 fn file_name(path: &str) -> String {

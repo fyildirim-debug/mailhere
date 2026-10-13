@@ -204,6 +204,7 @@ export const en: Record<MessageKey, string> = {
   'onb.foundFrom.srv': 'Taken from {domain}\'s DNS records.',
   'onb.foundFrom.guess': 'Tried the common server names for {domain}.',
   'onb.foundFrom.builtin': '{domain} is a known provider.',
+  'onb.otherDomain': 'Heads up: the server is outside {domain} ({host}). This came from an unverified DNS record; if you don\'t recognise the server, don\'t enter your password — edit the settings manually.',
   'onb.notFound': 'We couldn\'t find the settings. You can enter the server details yourself.',
   'onb.incoming': 'Incoming',
   'onb.outgoing': 'Outgoing',
