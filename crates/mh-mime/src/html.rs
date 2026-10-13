@@ -65,7 +65,9 @@ pub fn normalize_cid(cid: &str) -> String {
         .to_ascii_lowercase()
 }
 
-/// Satır içi `style` değerinden tehlikeli bildirimleri atar.
+/// Satır içi `style` değerinden tehlikeli bildirimleri atar. Ters bölü içeren
+/// bildirim her zaman atılır: CSS onaltılık kaçışları (`u\72 l(`) yasaklı
+/// sözcükleri gizleyebilir; postada meşru kullanımı yok denecek kadar azdır.
 pub fn sanitize_style(value: &str) -> Option<String> {
     const BANNED: &[&str] = &[
         "url(",
@@ -79,7 +81,7 @@ pub fn sanitize_style(value: &str) -> Option<String> {
     let kept: Vec<&str> = value
         .split(';')
         .map(str::trim)
-        .filter(|decl| !decl.is_empty())
+        .filter(|decl| !decl.is_empty() && !decl.contains('\\'))
         .filter(|decl| {
             let norm = normalize_css(decl);
             !BANNED.iter().any(|b| norm.contains(b))
@@ -321,6 +323,19 @@ mod tests {
         assert_eq!(sanitize_style("width: expression(alert(1))"), None);
         assert_eq!(sanitize_style("background:u\\rl(x)"), None);
         assert_eq!(sanitize_style("background:ur/**/l(x)"), None);
+        // CSS onaltılık kaçışı: `u\72 l(` = `url(`.
+        assert_eq!(
+            sanitize_style("color:red; background:u\\72 l(https://iz.example/t.gif)").as_deref(),
+            Some("color:red")
+        );
+        assert_eq!(sanitize_style("background:\\75 rl(x)"), None);
+        assert_eq!(sanitize_style("font-family:\"A\\\"B\""), None);
+        let s = clean(
+            r##"<p style="color:#333;background-image:u\72 l('https://iz.example/t.gif')">x</p>"##,
+            false,
+        );
+        assert!(!s.html.contains("72"), "{}", s.html);
+        assert!(s.html.contains("color:#333"), "{}", s.html);
         let s = clean(
             r##"<td style="color:#333;background-image:url('https://iz.example/t.gif')">x</td>"##,
             false,

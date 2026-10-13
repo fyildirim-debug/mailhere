@@ -229,12 +229,19 @@ pub fn remote_allow(
         .summary(id)?
         .ok_or_else(|| AppError::new(ErrorCode::NotFound, "Posta bulunamadı."))?;
     let email = summary.from.email.trim().to_ascii_lowercase();
+    // Yalnız tam adres yazılır: `From: <com>` "com" olarak çözülür ve alan adı
+    // sanılırsa tüm .com göndericilerine izin verirdi.
+    if !mh_store::is_full_address(&email) {
+        return Err(AppError::new(
+            ErrorCode::Invalid,
+            "Gönderenin adresi eksik ya da bozuk; bu postada uzak görsellere izin verilemez.",
+        ));
+    }
     let mut settings = state.store.settings()?;
-    if !email.is_empty()
-        && !settings
-            .remote_allow
-            .iter()
-            .any(|e| e.eq_ignore_ascii_case(&email))
+    if !settings
+        .remote_allow
+        .iter()
+        .any(|e| e.eq_ignore_ascii_case(&email))
     {
         settings.remote_allow.push(email);
         state.store.set_settings(&settings)?;
@@ -269,19 +276,45 @@ pub fn sanitize_filename(name: &str) -> String {
     out
 }
 
-/// Çalıştırılabilir türler doğrudan açılmaz; klasörde gösterilir.
+/// Çalıştırılabilir ve makrolu türler doğrudan açılmaz; klasörde gösterilir.
 pub fn is_risky(name: &str) -> bool {
     const RISKY: &[&str] = &[
         "exe", "com", "bat", "cmd", "scr", "pif", "msi", "msix", "msp", "ps1", "psm1", "vbs",
         "vbe", "js", "jse", "wsf", "wsh", "hta", "cpl", "msc", "jar", "lnk", "reg", "inf", "dll",
         "sys", "appx", "sh", "bash", "run", "bin", "desktop", "appimage", "deb", "rpm", "py", "pl",
-        "iso", "img", "vhd", "vhdx",
+        "iso", "img", "vhd", "vhdx", "url", "chm", "xll",
+    ];
+    /// Uzun adlı Windows kısayol ve uygulama türleri.
+    const LAUNCHERS: &[&str] = &["appref-ms", "application", "settingcontent-ms"];
+    /// Makro içerebilen Office belgeleri, şablonları ve eklentileri.
+    const MACRO: &[&str] = &[
+        "docm", "dotm", "xlsm", "xltm", "xlam", "pptm", "potm", "ppsm", "ppam",
     ];
     Path::new(name)
         .extension()
         .and_then(|e| e.to_str())
-        .is_some_and(|e| RISKY.contains(&e.to_ascii_lowercase().as_str()))
+        .map(str::to_ascii_lowercase)
+        .is_some_and(|e| {
+            [RISKY, LAUNCHERS, MACRO]
+                .iter()
+                .any(|l| l.contains(&e.as_str()))
+        })
 }
+
+/// Windows: dosyayı "İnternet'ten geldi" olarak işaretler (Zone.Identifier
+/// akışı, ZoneId=3). Böylece Office korumalı görünümde açar, SmartScreen ve
+/// Mark-of-the-Web denetimleri çalışır. Başarısızlık açmayı engellemez.
+#[cfg(windows)]
+fn mark_from_internet(path: &Path) {
+    let mut ads = path.as_os_str().to_owned();
+    ads.push(":Zone.Identifier");
+    if let Err(e) = std::fs::write(&ads, b"[ZoneTransfer]\r\nZoneId=3\r\n") {
+        tracing::debug!(error = %e, "Zone.Identifier yazılamadı");
+    }
+}
+
+#[cfg(not(windows))]
+fn mark_from_internet(_path: &Path) {}
 
 #[tauri::command]
 pub async fn attachment_open(
@@ -312,6 +345,7 @@ pub async fn attachment_open(
             "Ek diske yazılamadı. Boş alanı denetle.",
         )
     })?;
+    mark_from_internet(&path);
     let path_str = path.to_string_lossy().into_owned();
     let opener = app.opener();
     let res = if is_risky(&name) {
@@ -374,7 +408,12 @@ pub fn normalize_settings(mut s: Settings) -> Settings {
         out
     };
     s.vip = clean(s.vip);
-    s.remote_allow = clean(s.remote_allow);
+    // Tek parçalı alan adı ("com") gibi her şeye izin veren öğeler atılır.
+    s.remote_allow = clean(s.remote_allow)
+        .into_iter()
+        .filter(|e| mh_store::is_remote_entry(e))
+        .collect();
+    s.trusted_certs = crate::cmd_cert::normalize_trusted(s.trusted_certs);
     s
 }
 
@@ -385,7 +424,13 @@ pub fn settings_set(
     settings: Settings,
 ) -> Res<Settings> {
     let settings = normalize_settings(settings);
+    let trust_changed = state.store.settings()?.trusted_certs != settings.trusted_certs;
     state.store.set_settings(&settings)?;
+    if trust_changed {
+        // Onay beklerken duran hesaplar yeni listeyle yeniden denenir.
+        mh_sync::tls::set_trusted(&settings.trusted_certs);
+        state.sync.sync_now();
+    }
     if let Err(e) = app.emit(events::SETTINGS, &settings) {
         tracing::warn!(error = %e, "ayar olayı gönderilemedi");
     }
@@ -514,8 +559,46 @@ mod tests {
     fn riskli_turler() {
         assert!(is_risky("fatura.PDF.exe"));
         assert!(is_risky("kur.sh"));
+        for n in [
+            "kisayol.url",
+            "yardim.chm",
+            "uygulama.appref-ms",
+            "kur.application",
+            "eklenti.xll",
+            "ayar.settingcontent-ms",
+            "teklif.docm",
+            "tablo.XLSM",
+            "sunum.pptm",
+            "sablon.dotm",
+            "sablon.xltm",
+            "sablon.potm",
+            "gosteri.ppsm",
+            "eklenti.xlam",
+            "eklenti.ppam",
+        ] {
+            assert!(is_risky(n), "{n}");
+        }
         assert!(!is_risky("fatura.pdf"));
+        assert!(!is_risky("teklif.docx"));
         assert!(!is_risky("README"));
+    }
+
+    #[test]
+    fn uzak_icerik_listesinde_tek_parcali_alan_adi_olmaz() {
+        let s = normalize_settings(Settings {
+            remote_allow: vec![
+                "com".into(),
+                "@com".into(),
+                " Ayse@Eposta.com ".into(),
+                "bulten.co".into(),
+                "x@com".into(),
+            ],
+            ..Settings::default()
+        });
+        assert_eq!(
+            s.remote_allow,
+            vec!["ayse@eposta.com".to_string(), "bulten.co".into()]
+        );
     }
 
     #[test]

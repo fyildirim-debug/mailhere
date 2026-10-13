@@ -105,6 +105,15 @@ fn to_message(
     Some(m)
 }
 
+/// İndirilecek UID'ler: yerelde olmayanlar, en yeniler önce (liste hızla
+/// dolsun).
+fn to_fetch(mut server: Vec<u32>, have: &HashSet<u32>) -> Vec<u32> {
+    server.retain(|u| !have.contains(u));
+    server.sort_unstable_by(|a, b| b.cmp(a));
+    server.dedup();
+    server
+}
+
 async fn fetch_uids(session: &mut ImapSession, seq: bool, set: &str) -> SyncResult<Vec<u32>> {
     let fetches: Vec<Fetch> = if seq {
         session.fetch(set, "(UID)").await?.try_collect().await?
@@ -134,9 +143,14 @@ pub async fn sync_mailbox(
         initial = true;
         out.changed = true;
     }
+    // UIDVALIDITY hemen yazılır (filigran değişmeden): yarıda kalan ilk
+    // eşitlemeden sonra da kutunun değiştiği fark edilsin.
+    if info.uidvalidity != mb.uid_validity {
+        store.set_mailbox_sync_state(id, mb.uid_validity, info.uidnext, highest)?;
+    }
 
     // 1) Yeni UID'ler
-    let mut new_uids = if mb.exists == 0 {
+    let server_uids = if mb.exists == 0 {
         Vec::new()
     } else if highest == 0 {
         let start = mb.exists.saturating_sub(INITIAL_FETCH - 1).max(1);
@@ -146,9 +160,17 @@ pub async fn sync_mailbox(
         v.retain(|u| *u > highest);
         v
     };
-    // En yeniler önce gelsin ki liste hızla dolsun.
-    new_uids.sort_unstable_by(|a, b| b.cmp(a));
-    new_uids.dedup();
+    // Filigran (görülen en büyük UID) yalnız aralığın tamamı indirildikten
+    // sonra ilerler: yarıda kalan eşitleme (kapanış, kopan bağlantı, zaman
+    // aşımı) eksik postaları bir sonrakinde yeniden ister. Önceki denemede
+    // inenler yeniden indirilmez.
+    let watermark = server_uids.iter().copied().fold(highest, u32::max);
+    let have: HashSet<u32> = store
+        .local_uids(id)?
+        .into_iter()
+        .map(|(_, uid, ..)| uid)
+        .collect();
+    let new_uids = to_fetch(server_uids, &have);
 
     let now = now_ms();
     for chunk in new_uids.chunks(CHUNK) {
@@ -197,10 +219,8 @@ pub async fn sync_mailbox(
                 }
             }
         }
-        highest = highest.max(chunk.iter().copied().max().unwrap_or(0));
-        store.set_mailbox_sync_state(id, mb.uid_validity, mb.uid_next, highest)?;
     }
-    store.set_mailbox_sync_state(id, mb.uid_validity, mb.uid_next, highest)?;
+    store.set_mailbox_sync_state(id, mb.uid_validity, mb.uid_next, watermark)?;
 
     // 2) Sunucuda silinenler ve bayrak değişiklikleri
     let local = store.local_uids(id)?;
@@ -255,6 +275,13 @@ pub async fn sync_mailbox(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn indirilecekler_yeniden_eskiye_yereldekiler_haric() {
+        let have: HashSet<u32> = [9, 4].into_iter().collect();
+        assert_eq!(to_fetch(vec![3, 9, 5, 3, 4, 12], &have), vec![12, 5, 3]);
+        assert!(to_fetch(vec![], &have).is_empty());
+    }
 
     #[test]
     fn uid_kumesi() {

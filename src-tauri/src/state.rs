@@ -73,6 +73,8 @@ pub fn setup(app: &mut App, rt: tokio::runtime::Handle) -> Result<(), Box<dyn st
     tracing::info!(dir = %data.display(), "veri klasörü");
 
     let store = Arc::new(Store::open(&data.join("mailhere.db")).map_err(|e| e.message)?);
+    // Kullanıcının onayladığı sertifikalar ilk bağlantıdan önce yüklenir.
+    mh_sync::tls::set_trusted(&store.settings().map_err(|e| e.message)?.trusted_certs);
     let demo = env_flag("MAILHERE_DEMO", "1");
     let secrets: Arc<dyn SecretStore> = if demo || env_flag("MAILHERE_SECRETS", "memory") {
         tracing::info!("parolalar bellekte tutuluyor (tanıtım ya da test kipi)");

@@ -60,8 +60,14 @@ impl EventSink for TauriSink {
             let t = chrono::Local::now();
             t.hour() * 60 + t.minute()
         };
+        // Tam ekran (oyun, sunum, video) sırasında kart yok; bir kez sorulur.
+        let fullscreen = !messages.is_empty() && mh_notify::is_fullscreen();
         for message in messages {
-            if state.mute.decide(&settings, &message, now, minutes, false) == Decision::Card {
+            if state
+                .mute
+                .decide(&settings, &message, now, minutes, fullscreen)
+                == Decision::Card
+            {
                 crate::notify::show_card(
                     &self.app,
                     NotifyEvent {

@@ -3,6 +3,13 @@
 //! Her IMAP hesabı için iki görev çalışır: komut bağlantısı (eşitleme ve
 //! sunucu işlemleri, sırayla) ve INBOX üzerinde IDLE bekleyen ayrı bir
 //! bağlantı. Bağlantı koparsa üstel bekleme ile yeniden denenir.
+//!
+//! Sunucu işlemleri (bayrak, taşıma, ekleme, silme) depodaki kalıcı kuyrukta
+//! (`mh_store::Action`) bekler; uygulama kapanıp açılsa da kaybolmaz. Bağlanınca
+//! önce kutular listelenir (LIST), sonra kuyruk baştan sona sırayla uygulanır,
+//! ardından eşitleme çalışır. Bir postanın sunucudaki yeri işlem çalışırken
+//! çözülür: yerel taşıma sunucu onaylayana kadar kaynak yeri (kutu, UID)
+//! saklar, geri alınan taşıma sunucuya hiç gitmez.
 
 mod drafts;
 
@@ -17,7 +24,10 @@ use mh_core::{
     Account, AccountId, AccountKind, AppError, AppResult, ErrorCode, MailboxRole, MessageId,
     MoveTarget, SyncState, SyncStatus,
 };
-use mh_store::{MailboxInfo, Store};
+use mh_store::{
+    Action, MailboxInfo, MessageLocation, Namespace, PendingMove, QueuedAction, ServerFlag,
+    ServerRef, Store,
+};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
 use tokio::time::{timeout, Instant};
@@ -40,6 +50,9 @@ const IDLE_RENEW: Duration = Duration::from_secs(25 * 60);
 const POLL: Duration = Duration::from_secs(120);
 const FULL_SYNC_TIMEOUT: Duration = Duration::from_secs(20 * 60);
 const ACTION_TIMEOUT: Duration = Duration::from_secs(120);
+/// Bağlantı kopması yüzünden bu kadar kez yarıda kalan işlemden vazgeçilir
+/// (kuyruğu sonsuza dek tıkamasın).
+const ACTION_MAX_ATTEMPTS: u32 = 5;
 
 /// Eşitlenen kutu rolleri.
 const SYNC_ROLES: [MailboxRole; 5] = [
@@ -50,47 +63,21 @@ const SYNC_ROLES: [MailboxRole; 5] = [
     MailboxRole::Trash,
 ];
 
-/// Sunucudaki bir postanın yeri.
+/// Bellekteki komutlar. Sunucu işlemleri kalıcı kuyruktadır; `Wake` yalnız
+/// kuyruğa yeni işlem yazıldığını haber verir.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Target {
-    path: String,
-    uid: u32,
-    uidvalidity: Option<u32>,
-}
-
 enum Command {
     SyncAll,
     SyncInbox,
-    Flags {
-        /// Yerel kimlikler: sunucu onayından sonra yerel değer yeniden yazılır
-        /// (arada çalışan bayrak yenilemesi eski değeri geri getirmesin).
-        ids: Vec<MessageId>,
-        items: Vec<Target>,
-        unread: Option<bool>,
-        starred: Option<bool>,
-    },
-    Move {
-        items: Vec<Target>,
-        dest: String,
-    },
-    Append {
-        dest: String,
-        raw: Vec<u8>,
-    },
-    /// Taslağın yeni sürümünü ekler (`raw`) ve eski kopyalarını siler.
-    Draft {
-        dest: String,
-        raw: Option<Vec<u8>>,
-        remove: Vec<drafts::OldDraft>,
-    },
+    /// Tek kutunun eşitlenmesi (taşıma ya da ekleme sonrası).
+    SyncPath(String),
+    Wake,
 }
 
-impl Command {
-    fn is_action(&self) -> bool {
-        matches!(
-            self,
-            Self::Flags { .. } | Self::Move { .. } | Self::Append { .. } | Self::Draft { .. }
-        )
+/// Komutu bekleyenlere ekler (`Wake` yalnız uyandırır).
+fn enqueue(pending: &mut VecDeque<Command>, c: Command) {
+    if c != Command::Wake {
+        pending.push_back(c);
     }
 }
 
@@ -108,6 +95,19 @@ impl AccountCtx {
             account_id: self.account.id.clone(),
             state,
         });
+    }
+
+    fn id(&self) -> &str {
+        &self.account.id
+    }
+
+    /// Gelen posta sunucusu (sertifika onayı için).
+    fn imap_endpoint(&self) -> (String, u16) {
+        self.account
+            .imap
+            .as_ref()
+            .map(|c| (c.host.trim().to_owned(), c.port))
+            .unwrap_or_default()
     }
 
     async fn connect(&self) -> SyncResult<ImapSession> {
@@ -129,10 +129,15 @@ impl AccountCtx {
             Err(e) => tracing::warn!(error = %e, "yeni posta özetleri okunamadı"),
         }
     }
-}
 
-/// Hesaba göre gruplanmış (posta, sunucudaki yeri).
-type AccountTargets = HashMap<String, Vec<(MessageId, Option<Target>)>>;
+    fn changed(&self, mut ids: Vec<String>) {
+        ids.sort();
+        ids.dedup();
+        if !ids.is_empty() {
+            self.sink.changed(ids);
+        }
+    }
+}
 
 struct Handle {
     tx: UnboundedSender<Command>,
@@ -159,6 +164,16 @@ pub fn is_syncable(account: &Account) -> bool {
             .as_ref()
             .is_some_and(|c| !c.host.trim().to_ascii_lowercase().ends_with(".invalid"))
 }
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// Hesaba göre gruplanmış postalar: (hesap, eşitleniyor mu, yerler).
+type ByAccount = Vec<(String, bool, Vec<MessageLocation>)>;
 
 impl SyncManager {
     pub fn new(
@@ -225,7 +240,8 @@ impl SyncManager {
         self.handles().insert(account.id, Handle { tx, tasks });
     }
 
-    /// Hesabın görevlerini durdurur.
+    /// Hesabın görevlerini durdurur. Kuyruktaki sunucu işlemleri kalır;
+    /// hesap yeniden başlayınca uygulanır.
     pub fn stop(&self, account_id: &str) {
         if let Some(h) = self.handles().remove(account_id) {
             for t in h.tasks {
@@ -234,63 +250,111 @@ impl SyncManager {
         }
     }
 
+    /// Gelen posta sunucusu `host` olan hesapları yeniden başlatır (sertifika
+    /// onaylandıktan sonra). Yeniden başlatılan hesap sayısını döner.
+    pub fn restart_host(&self, host: &str) -> AppResult<usize> {
+        let host = host.trim();
+        let mut n = 0;
+        for a in self.store.accounts()? {
+            let uses = a
+                .imap
+                .as_ref()
+                .is_some_and(|c| c.host.trim().eq_ignore_ascii_case(host));
+            if uses {
+                self.start(a);
+                n += 1;
+            }
+        }
+        Ok(n)
+    }
+
     fn send(&self, account_id: &str, cmd: Command) -> bool {
         self.handles()
             .get(account_id)
             .is_some_and(|h| h.tx.send(cmd).is_ok())
     }
 
-    /// Tüm hesapları hemen eşitler (bekleyen yeniden bağlanmayı da hızlandırır).
+    /// Tüm hesapları hemen eşitler (bekleyen yeniden bağlanmayı ve onay
+    /// bekleyen sertifika durumunu da yeniden dener).
     pub fn sync_now(&self) {
         for h in self.handles().values() {
             let _ = h.tx.send(Command::SyncAll);
         }
     }
 
-    fn targets_by_account(&self, ids: &[MessageId]) -> AppResult<AccountTargets> {
-        let mut out = AccountTargets::new();
+    /// İşlemi kalıcı kuyruğa yazar ve hesabın motorunu uyandırır.
+    fn queue(&self, account_id: &str, action: &Action, raw: Option<&[u8]>) -> AppResult<()> {
+        self.store.action_push(account_id, action, raw, now_ms())?;
+        self.send(account_id, Command::Wake);
+        Ok(())
+    }
+
+    /// Hesap sunucuyla eşitleniyor mu (tanıtım hesabı değil)?
+    fn syncable(&self, account_id: &str) -> AppResult<bool> {
+        Ok(self
+            .store
+            .account(account_id)?
+            .is_some_and(|a| is_syncable(&a)))
+    }
+
+    fn by_account(&self, ids: &[MessageId]) -> AppResult<ByAccount> {
+        let mut out: ByAccount = Vec::new();
+        let mut syncable: HashMap<String, bool> = HashMap::new();
         for loc in self.store.locations(ids)? {
-            let target = loc.uid.map(|uid| Target {
-                path: loc.mailbox_path.clone(),
-                uid,
-                uidvalidity: loc.uidvalidity,
-            });
-            out.entry(loc.account_id)
-                .or_default()
-                .push((loc.id, target));
+            let s = match syncable.get(&loc.account_id) {
+                Some(s) => *s,
+                None => {
+                    let s = self
+                        .store
+                        .account(&loc.account_id)?
+                        .is_some_and(|a| is_syncable(&a));
+                    syncable.insert(loc.account_id.clone(), s);
+                    s
+                }
+            };
+            match out.iter_mut().find(|(a, ..)| *a == loc.account_id) {
+                Some((_, _, list)) => list.push(loc),
+                None => out.push((loc.account_id.clone(), s, vec![loc])),
+            }
         }
         Ok(out)
     }
 
-    /// Bayrakları önce yerelde değiştirir, sonra sunucuya iletir. Etkilenen
-    /// kutuları döner.
+    /// Bayrakları önce yerelde değiştirir, sonra sunucu kuyruğuna yazar.
+    /// Etkilenen kutuları döner.
     pub fn set_flags(
         &self,
         ids: &[MessageId],
         unread: Option<bool>,
         starred: Option<bool>,
     ) -> AppResult<Vec<String>> {
-        let groups = self.targets_by_account(ids)?;
+        let groups = self.by_account(ids)?;
         let touched = self.store.set_flags(ids, unread, starred)?;
-        for (account, list) in groups {
-            let ids: Vec<MessageId> = list.iter().map(|(id, _)| *id).collect();
-            let items: Vec<Target> = list.into_iter().filter_map(|(_, t)| t).collect();
-            if !items.is_empty() {
-                self.send(
-                    &account,
-                    Command::Flags {
-                        ids,
-                        items,
-                        unread,
-                        starred,
-                    },
-                );
+        for (account, syncable, list) in groups {
+            if !syncable {
+                continue;
+            }
+            let ids: Vec<MessageId> = list.iter().map(|l| l.id).collect();
+            for (flag, value) in [
+                (ServerFlag::Seen, unread.map(|u| !u)),
+                (ServerFlag::Flagged, starred),
+            ] {
+                if let Some(value) = value {
+                    let action = Action::SetFlag {
+                        ids: ids.clone(),
+                        flag,
+                        value,
+                    };
+                    self.queue(&account, &action, None)?;
+                }
             }
         }
         Ok(touched)
     }
 
-    /// Postaları önce yerelde taşır, sonra sunucuya iletir.
+    /// Postaları önce yerelde taşır, sonra sunucu kuyruğuna yazar. Zaten
+    /// hedefte olan postalara dokunulmaz; geri alma sunucuya gitmemiş taşımayı
+    /// iptal eder.
     pub fn move_messages(&self, ids: &[MessageId], target: MoveTarget) -> AppResult<Vec<String>> {
         let role = match target {
             MoveTarget::Inbox => MailboxRole::Inbox,
@@ -298,23 +362,14 @@ impl SyncManager {
             MoveTarget::Trash => MailboxRole::Trash,
         };
         let mut touched = Vec::new();
-        for (account, list) in self.targets_by_account(ids)? {
+        for (account, syncable, list) in self.by_account(ids)? {
             let dest = self.destination(&account, role)?;
-            let ids: Vec<MessageId> = list.iter().map(|(id, _)| *id).collect();
-            let items: Vec<Target> = list
-                .into_iter()
-                .filter_map(|(_, t)| t)
-                .filter(|t| t.path != dest.mailbox.path)
-                .collect();
-            touched.extend(self.store.move_local(&ids, &dest.mailbox.id)?);
-            if !items.is_empty() {
-                self.send(
-                    &account,
-                    Command::Move {
-                        items,
-                        dest: dest.mailbox.path.clone(),
-                    },
-                );
+            let ids: Vec<MessageId> = list.iter().map(|l| l.id).collect();
+            if syncable {
+                touched.extend(self.store.move_local(&ids, &dest.mailbox.id)?);
+                self.queue(&account, &Action::Moves, None)?;
+            } else {
+                touched.extend(self.store.move_local_untracked(&ids, &dest.mailbox.id)?);
             }
         }
         touched.sort();
@@ -322,12 +377,40 @@ impl SyncManager {
         Ok(touched)
     }
 
-    /// Roldeki kutu; yoksa yerelde oluşturulur (sunucuda ilk kullanımda açılır).
-    fn destination(&self, account: &str, role: MailboxRole) -> AppResult<MailboxInfo> {
+    /// Postaları yerelden siler ve sunucudan kalıcı silmeyi kuyruğa yazar.
+    /// Etkilenen kutuları döner.
+    pub fn delete_messages(&self, ids: &[MessageId]) -> AppResult<Vec<String>> {
+        let mut touched = Vec::new();
+        for (account, syncable, list) in self.by_account(ids)? {
+            if syncable {
+                let items: Vec<ServerRef> = list
+                    .iter()
+                    .filter(|l| l.server_uid.is_some() || l.message_id_header.is_some())
+                    .map(|l| ServerRef {
+                        path: l.server_path.clone(),
+                        uid: l.server_uid,
+                        uidvalidity: l.server_uidvalidity,
+                        message_id: l.message_id_header.clone(),
+                    })
+                    .collect();
+                self.queue(&account, &Action::Delete { items }, None)?;
+            }
+            let ids: Vec<MessageId> = list.iter().map(|l| l.id).collect();
+            self.store.delete_messages(&ids)?;
+            touched.extend(list.into_iter().map(|l| l.mailbox_id));
+        }
+        touched.sort();
+        touched.dedup();
+        Ok(touched)
+    }
+
+    /// Roldeki kutu; yoksa yerelde oluşturulur (sunucuda ilk kullanımda
+    /// açılır). Yeni kutu sunucunun kişisel ad alanına konur ("INBOX.Archive").
+    pub fn destination(&self, account: &str, role: MailboxRole) -> AppResult<MailboxInfo> {
         if let Some(mb) = self.store.mailbox_by_role(account, role)? {
             return Ok(mb);
         }
-        let path = match role {
+        let name = match role {
             MailboxRole::Inbox => "INBOX",
             MailboxRole::Archive => "Archive",
             MailboxRole::Trash => "Trash",
@@ -336,23 +419,33 @@ impl SyncManager {
             MailboxRole::Junk => "Junk",
             MailboxRole::Other => "Mailhere",
         };
-        let id = self.store.upsert_mailbox(account, path, path, role)?;
+        let path = match role {
+            MailboxRole::Inbox => name.to_owned(),
+            _ => {
+                let ns = self.store.namespace(account)?.unwrap_or_default();
+                format!("{}{name}", ns.prefix)
+            }
+        };
+        let id = self.store.upsert_mailbox(account, &path, name, role)?;
         self.store
             .mailbox(&id)?
             .ok_or_else(|| AppError::new(ErrorCode::Internal, "Kutu oluşturulamadı."))
     }
 
     /// Ham postayı hesabın verilen roldeki kutusuna ekler (ör. Gönderilenler).
-    /// Komut kuyruğa alındıysa `true`.
+    /// Kalıcı kuyruğa yazıldıysa `true` (eşitlenmeyen hesapta `false`).
     pub fn append(&self, account_id: &str, role: MailboxRole, raw: Vec<u8>) -> AppResult<bool> {
+        if !self.syncable(account_id)? {
+            return Ok(false);
+        }
         let dest = self.destination(account_id, role)?;
-        Ok(self.send(
-            account_id,
-            Command::Append {
-                dest: dest.mailbox.path,
-                raw,
-            },
-        ))
+        let message_id = mh_mime::parse(&raw, true).and_then(|p| p.message_id);
+        let action = Action::Append {
+            path: dest.mailbox.path,
+            message_id,
+        };
+        self.queue(account_id, &action, Some(&raw))?;
+        Ok(true)
     }
 
     /// Yalnız başlığı indirilmiş postanın gövdesini ayrı bir bağlantıyla indirir.
@@ -386,22 +479,35 @@ pub async fn fetch_body(
             "Bu postanın içeriği yerelde yok.",
         ));
     }
-    let uid = loc.uid.ok_or_else(|| {
-        AppError::new(
+    if loc.server_uid.is_none() && loc.message_id_header.is_none() {
+        return Err(AppError::new(
             ErrorCode::Network,
             "Posta henüz sunucuyla eşitlenmedi. Birazdan yeniden dene.",
-        )
-    })?;
+        ));
+    }
     let cfg = account
         .imap
         .clone()
         .ok_or_else(|| AppError::new(ErrorCode::Invalid, "Hesabın IMAP ayarı yok."))?;
     let work = async {
         let mut session = connect_account(&cfg, secrets, tokens, &account).await?;
-        let mb = session.examine(&loc.mailbox_path).await?;
-        if loc.uidvalidity.is_some() && mb.uid_validity != loc.uidvalidity {
+        // Taşıması bekleyen posta sunucuda hâlâ kaynak kutudadır.
+        let mb = session.examine(&loc.server_path).await?;
+        let uid = match loc.server_uid {
+            Some(uid)
+                if loc.server_uidvalidity.is_none()
+                    || mb.uid_validity == loc.server_uidvalidity =>
+            {
+                Some(uid)
+            }
+            _ => match loc.message_id_header.as_deref() {
+                Some(mid) => search_message_id(&mut session, mid).await?,
+                None => None,
+            },
+        };
+        let Some(uid) = uid else {
             return Ok(None);
-        }
+        };
         let fetches: Vec<Fetch> = session
             .uid_fetch(uid.to_string(), "(UID BODY.PEEK[])")
             .await?
@@ -429,6 +535,30 @@ pub async fn fetch_body(
     store.store_body(id, &raw)
 }
 
+/// IMAP SEARCH için tırnaklı dize; yalnız yazdırılabilir ASCII kabul edilir.
+fn imap_quote(s: &str) -> Option<String> {
+    if s.is_empty() || s.len() > 900 || !s.chars().all(|c| c.is_ascii_graphic() || c == ' ') {
+        return None;
+    }
+    Some(format!(
+        "\"{}\"",
+        s.replace('\\', "\\\\").replace('"', "\\\"")
+    ))
+}
+
+/// Seçili kutuda Message-ID başlığıyla arar.
+async fn search_message_id(session: &mut ImapSession, message_id: &str) -> SyncResult<Option<u32>> {
+    let mid = message_id
+        .trim()
+        .trim_start_matches('<')
+        .trim_end_matches('>');
+    let Some(q) = imap_quote(&format!("<{mid}>")) else {
+        return Ok(None);
+    };
+    let found = session.uid_search(format!("HEADER Message-ID {q}")).await?;
+    Ok(found.into_iter().min())
+}
+
 // ------------------------------------------------------------ komut bağlantısı
 
 struct Conn {
@@ -437,8 +567,8 @@ struct Conn {
     has_uidplus: bool,
     /// Son LIST yanıtındaki kutular.
     server_paths: HashSet<String>,
-    /// Eşitlenmeyen kutular (Gmail "Tüm Postalar" gibi).
-    skip: HashSet<String>,
+    /// Bağlantı açılırken LIST yapıldı; ilk tam eşitleme yeniden listelemez.
+    listed: bool,
 }
 
 async fn account_loop(ctx: Arc<AccountCtx>, mut rx: UnboundedReceiver<Command>) {
@@ -451,8 +581,15 @@ async fn account_loop(ctx: Arc<AccountCtx>, mut rx: UnboundedReceiver<Command>) 
         };
         let app = err.to_app();
         tracing::warn!(account = %ctx.account.id, error = %err, "eşitleme bağlantısı kesildi");
+        // Güvenilmeyen sertifika: kullanıcı onaylayana ya da elle
+        // eşitleyene kadar yeniden denenmez.
+        let wait_user = app.code == ErrorCode::Untrusted;
         ctx.status(match app.code {
             ErrorCode::Network => SyncState::Offline,
+            ErrorCode::Untrusted => {
+                let (host, port) = ctx.imap_endpoint();
+                SyncState::Untrusted { host, port }
+            }
             _ => SyncState::Error {
                 message: app.message,
             },
@@ -461,36 +598,49 @@ async fn account_loop(ctx: Arc<AccountCtx>, mut rx: UnboundedReceiver<Command>) 
         tokio::pin!(sleep);
         loop {
             tokio::select! {
-                _ = &mut sleep => break,
+                _ = &mut sleep, if !wait_user => break,
                 cmd = rx.recv() => match cmd {
                     None => return,
                     Some(Command::SyncAll) => break,
-                    Some(c) => pending.push_back(c),
+                    Some(c) => enqueue(&mut pending, c),
                 },
             }
         }
-        if !pending.iter().any(|c| matches!(c, Command::SyncAll)) {
+        if !pending.iter().any(|c| *c == Command::SyncAll) {
             pending.push_front(Command::SyncAll);
         }
         backoff = (backoff * 2).min(MAX_BACKOFF);
     }
 }
 
-/// Sıradaki komut: önce sunucu işlemleri (yerel değişiklik eşitlemeyle ezilmesin),
-/// yinelenen eşitleme istekleri birleştirilir.
-fn next_command(pending: &mut VecDeque<Command>) -> Option<Command> {
-    let idx = pending.iter().position(Command::is_action).unwrap_or(0);
-    let cmd = pending.remove(idx)?;
-    match cmd {
-        Command::SyncAll | Command::SyncInbox
-            if pending.iter().any(|c| matches!(c, Command::SyncAll)) =>
-        {
-            next_command(pending)
+/// Sıradaki eşitleme: önce işlem sonrası tek kutular, sonra tam eşitleme
+/// (gelen kutusu isteklerini de kapsar), sonra gelen kutusu. Yinelenenler
+/// birleştirilir.
+fn next_sync(pending: &mut VecDeque<Command>) -> Option<Command> {
+    if let Some(i) = pending
+        .iter()
+        .position(|c| matches!(c, Command::SyncPath(_)))
+    {
+        let cmd = pending.remove(i)?;
+        pending.retain(|c| *c != cmd);
+        return Some(cmd);
+    }
+    let pick = [Command::SyncAll, Command::SyncInbox]
+        .into_iter()
+        .find(|c| pending.contains(c));
+    match pick {
+        Some(Command::SyncAll) => {
+            pending.retain(|c| !matches!(c, Command::SyncAll | Command::SyncInbox));
+            Some(Command::SyncAll)
         }
-        Command::SyncInbox if pending.iter().any(|c| matches!(c, Command::SyncInbox)) => {
-            next_command(pending)
+        Some(c) => {
+            pending.retain(|x| *x != c);
+            Some(c)
         }
-        c => Some(c),
+        None => {
+            pending.clear();
+            None
+        }
     }
 }
 
@@ -500,7 +650,7 @@ async fn run_session(
     pending: &mut VecDeque<Command>,
     backoff: &mut Duration,
 ) -> SyncResult<()> {
-    if pending.iter().any(|c| matches!(c, Command::SyncAll)) {
+    if pending.contains(&Command::SyncAll) {
         ctx.status(SyncState::Syncing { done: 0, total: 0 });
     }
     let mut session = ctx.connect().await?;
@@ -510,22 +660,26 @@ async fn run_session(
         has_uidplus: caps.has_str("UIDPLUS"),
         session,
         server_paths: HashSet::new(),
-        skip: HashSet::new(),
+        listed: false,
     };
     *backoff = MIN_BACKOFF;
+    // Kutular işlemlerden önce: hedef kutular, roller ve eşitlenmeyen kutular
+    // (Gmail "Tüm Postalar") bilinsin.
+    timeout(ACTION_TIMEOUT, refresh_mailboxes(ctx, &mut conn)).await??;
+    // Kuyruğu düşmüş ama sunucuya gitmemiş taşımalar (güvenlik ağı).
+    if ctx.store.has_pending_moves(ctx.id())? {
+        ctx.store
+            .action_push(ctx.id(), &Action::Moves, None, now_ms())?;
+    }
     let mut periodic = tokio::time::interval_at(Instant::now() + PERIODIC, PERIODIC);
     periodic.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         while let Ok(c) = rx.try_recv() {
-            pending.push_back(c);
+            enqueue(pending, c);
         }
-        while let Some(cmd) = next_command(pending) {
-            let limit = if cmd.is_action() {
-                ACTION_TIMEOUT
-            } else {
-                FULL_SYNC_TIMEOUT
-            };
-            let res = match timeout(limit, execute(ctx, &mut conn, &cmd)).await {
+        run_actions(ctx, &mut conn, rx, pending).await?;
+        if let Some(cmd) = next_sync(pending) {
+            let res = match timeout(FULL_SYNC_TIMEOUT, execute_sync(ctx, &mut conn, &cmd)).await {
                 Ok(r) => r,
                 Err(_) => Err(SyncError::Timeout),
             };
@@ -534,14 +688,12 @@ async fn run_session(
                     pending.push_front(cmd);
                     return Err(e);
                 }
-                tracing::warn!(account = %ctx.account.id, error = %e, "sunucu işlemi başarısız");
+                tracing::warn!(account = %ctx.account.id, error = %e, "eşitleme başarısız");
                 ctx.status(SyncState::Error {
                     message: e.to_app().message,
                 });
             }
-            while let Ok(c) = rx.try_recv() {
-                pending.push_back(c);
-            }
+            continue;
         }
         tokio::select! {
             cmd = rx.recv() => match cmd {
@@ -549,55 +701,121 @@ async fn run_session(
                     let _ = timeout(Duration::from_secs(5), conn.session.logout()).await;
                     return Ok(());
                 }
-                Some(c) => pending.push_back(c),
+                Some(c) => enqueue(pending, c),
             },
             _ = periodic.tick() => pending.push_back(Command::SyncAll),
         }
     }
 }
 
-async fn execute(ctx: &AccountCtx, conn: &mut Conn, cmd: &Command) -> SyncResult<()> {
+/// İşlemin süre sınırı: ekleme boyutla uzar (yavaş bağlantıda büyük ek).
+fn action_timeout(a: &QueuedAction) -> Duration {
+    let size = a.raw.as_ref().map_or(0, Vec::len) as u64;
+    ACTION_TIMEOUT + Duration::from_secs(size / 20_000)
+}
+
+/// Kalıcı kuyruğu baştan sona uygular. Her işlem sunucu onayından sonra
+/// silinir; bağlantı koparsa kalır ve yeniden bağlanınca tekrar denenir.
+async fn run_actions(
+    ctx: &AccountCtx,
+    conn: &mut Conn,
+    rx: &mut UnboundedReceiver<Command>,
+    pending: &mut VecDeque<Command>,
+) -> SyncResult<()> {
+    while let Some(qa) = ctx.store.action_head(ctx.id())? {
+        let res = match timeout(action_timeout(&qa), run_action(ctx, conn, &qa)).await {
+            Ok(r) => r,
+            Err(_) => Err(SyncError::Timeout),
+        };
+        match res {
+            Ok(follow) => {
+                ctx.store.action_done(qa.id)?;
+                // Kutu eşitlemesi ayrı bir adımdır: zaman aşımı işlemi
+                // (ör. eklemeyi) yinelemez.
+                for path in follow {
+                    let cmd = Command::SyncPath(path);
+                    if !pending.contains(&cmd) {
+                        pending.push_front(cmd);
+                    }
+                }
+            }
+            Err(e) if e.is_connection() => {
+                let attempts = ctx.store.action_attempt(qa.id)?;
+                if attempts >= ACTION_MAX_ATTEMPTS {
+                    tracing::warn!(account = %ctx.account.id, action = ?qa.action, "sunucu işleminden vazgeçildi");
+                    ctx.store.action_done(qa.id)?;
+                }
+                return Err(e);
+            }
+            Err(e) => {
+                tracing::warn!(account = %ctx.account.id, error = %e, "sunucu işlemi başarısız");
+                ctx.store.action_done(qa.id)?;
+                ctx.status(SyncState::Error {
+                    message: e.to_app().message,
+                });
+            }
+        }
+        while let Ok(c) = rx.try_recv() {
+            enqueue(pending, c);
+        }
+    }
+    Ok(())
+}
+
+/// Tek işlemi uygular; ardından eşitlenecek kutuları döner.
+async fn run_action(
+    ctx: &AccountCtx,
+    conn: &mut Conn,
+    qa: &QueuedAction,
+) -> SyncResult<Vec<String>> {
+    match &qa.action {
+        Action::SetFlag { ids, flag, value } => {
+            apply_flag(ctx, conn, qa.id, ids, *flag, *value).await?;
+            Ok(Vec::new())
+        }
+        Action::Moves => apply_moves(ctx, conn).await,
+        Action::Append { path, message_id } => {
+            let Some(raw) = qa.raw.as_deref() else {
+                tracing::warn!("eklenecek postanın içeriği yok, atlandı");
+                return Ok(Vec::new());
+            };
+            // Yarıda kalan denemeden sonra: sunucu postayı almışsa yinelenmez.
+            if qa.attempts > 0 && conn.server_paths.contains(path) {
+                if let Some(mid) = message_id {
+                    if try_select(conn, path).await?.is_some()
+                        && search_message_id(&mut conn.session, mid).await?.is_some()
+                    {
+                        return Ok(vec![path.clone()]);
+                    }
+                }
+            }
+            ensure_mailbox(conn, path).await?;
+            conn.session
+                .append(path, Some("(\\Seen)"), None, raw)
+                .await?;
+            Ok(vec![path.clone()])
+        }
+        Action::Delete { items } => {
+            apply_delete(conn, items).await?;
+            Ok(Vec::new())
+        }
+        Action::Draft { path, remove } => {
+            drafts::apply(conn, path, qa.raw.as_deref(), remove).await
+        }
+    }
+}
+
+async fn execute_sync(ctx: &AccountCtx, conn: &mut Conn, cmd: &Command) -> SyncResult<()> {
     match cmd {
         Command::SyncAll => full_sync(ctx, conn).await,
         Command::SyncInbox => {
-            if let Some(info) = ctx
-                .store
-                .mailbox_by_role(&ctx.account.id, MailboxRole::Inbox)?
-            {
+            if let Some(info) = ctx.store.mailbox_by_role(ctx.id(), MailboxRole::Inbox)? {
                 sync_one(ctx, conn, &info).await?;
             }
             Ok(())
         }
-        Command::Flags {
-            ids,
-            items,
-            unread,
-            starred,
-        } => {
-            apply_flags(conn, items, *unread, *starred).await?;
-            let touched = ctx.store.set_flags(ids, *unread, *starred)?;
-            if !touched.is_empty() {
-                ctx.sink.changed(touched);
-            }
-            Ok(())
-        }
-        Command::Move { items, dest } => {
-            apply_move(conn, items, dest).await?;
-            sync_path(ctx, conn, dest).await
-        }
-        Command::Append { dest, raw } => {
-            ensure_mailbox(conn, dest).await?;
-            conn.session
-                .append(dest, Some("(\\Seen)"), None, raw)
-                .await?;
-            sync_path(ctx, conn, dest).await
-        }
-        Command::Draft { dest, raw, remove } => {
-            for path in drafts::apply(conn, dest, raw.as_deref(), remove).await? {
-                sync_path(ctx, conn, &path).await?;
-            }
-            Ok(())
-        }
+        Command::SyncPath(path) => sync_path(ctx, conn, path).await,
+        Command::Wake => Ok(()),
     }
 }
 
@@ -679,8 +897,44 @@ pub fn assign_roles(listed: &[Listed]) -> Vec<(String, String, MailboxRole, bool
         .collect()
 }
 
-async fn full_sync(ctx: &AccountCtx, conn: &mut Conn) -> SyncResult<()> {
-    let account = &ctx.account.id;
+/// Yeni kutuların açılacağı kişisel ad alanı. INBOX dışındaki tüm kutular
+/// "INBOX<ayraç>" altındaysa (Courier, Cyrus, "INBOX." önekli Dovecot) önek
+/// odur; değilse kök. (`async-imap` NAMESPACE komutunu bilmez; LIST yeterli.)
+pub fn personal_namespace(listed: &[Listed]) -> Namespace {
+    let delimiter = listed
+        .iter()
+        .find(|l| l.path.eq_ignore_ascii_case("INBOX"))
+        .and_then(|l| l.delimiter.clone())
+        .or_else(|| listed.iter().find_map(|l| l.delimiter.clone()))
+        .filter(|d| !d.is_empty());
+    let prefix = match delimiter.as_deref() {
+        Some(d) => {
+            let under = format!("INBOX{d}");
+            let mut others = listed
+                .iter()
+                .filter(|l| !l.path.eq_ignore_ascii_case("INBOX"))
+                .peekable();
+            let nested = others.peek().is_some()
+                && others.all(|l| {
+                    l.path.len() > under.len()
+                        && l.path
+                            .get(..under.len())
+                            .is_some_and(|p| p.eq_ignore_ascii_case(&under))
+                });
+            if nested {
+                under
+            } else {
+                String::new()
+            }
+        }
+        None => String::new(),
+    };
+    Namespace { prefix, delimiter }
+}
+
+/// LIST: kutuları, rolleri, eşitlenmeyen kutuları ve ad alanını depoya yazar.
+async fn refresh_mailboxes(ctx: &AccountCtx, conn: &mut Conn) -> SyncResult<()> {
+    let account = ctx.id();
     let names: Vec<Name> = conn
         .session
         .list(Some(""), Some("*"))
@@ -690,15 +944,11 @@ async fn full_sync(ctx: &AccountCtx, conn: &mut Conn) -> SyncResult<()> {
     let listed: Vec<Listed> = names.iter().map(Listed::from_name).collect();
     let assigned = assign_roles(&listed);
     conn.server_paths = listed.iter().map(|l| l.path.clone()).collect();
-    conn.skip.clear();
-    let mut changed: Vec<String> = Vec::new();
     let mut keep = Vec::new();
     for (path, name, role, skip) in &assigned {
-        ctx.store.upsert_mailbox(account, path, name, *role)?;
+        let id = ctx.store.upsert_mailbox(account, path, name, *role)?;
+        ctx.store.set_mailbox_nosync(&id, *skip)?;
         keep.push(path.clone());
-        if *skip {
-            conn.skip.insert(path.clone());
-        }
     }
     // Yerelde oluşturulup sunucuda henüz açılmamış rol kutularını koru.
     for info in ctx.store.mailboxes_for(account)? {
@@ -709,18 +959,28 @@ async fn full_sync(ctx: &AccountCtx, conn: &mut Conn) -> SyncResult<()> {
             keep.push(info.mailbox.path);
         }
     }
-    changed.extend(ctx.store.remove_mailboxes_except(account, &keep)?);
+    let removed = ctx.store.remove_mailboxes_except(account, &keep)?;
+    ctx.store
+        .set_namespace(account, &personal_namespace(&listed))?;
+    ctx.changed(removed);
+    conn.listed = true;
+    Ok(())
+}
 
+async fn full_sync(ctx: &AccountCtx, conn: &mut Conn) -> SyncResult<()> {
+    if !std::mem::take(&mut conn.listed) {
+        refresh_mailboxes(ctx, conn).await?;
+        conn.listed = false;
+    }
     let targets: Vec<MailboxInfo> = ctx
         .store
-        .mailboxes_for(account)?
+        .mailboxes_for(ctx.id())?
         .into_iter()
-        .filter(|m| SYNC_ROLES.contains(&m.mailbox.role))
-        .filter(|m| {
-            conn.server_paths.contains(&m.mailbox.path) && !conn.skip.contains(&m.mailbox.path)
-        })
+        .filter(|m| SYNC_ROLES.contains(&m.mailbox.role) && !m.nosync)
+        .filter(|m| conn.server_paths.contains(&m.mailbox.path))
         .collect();
     let total = targets.len() as u32;
+    let mut changed: Vec<String> = Vec::new();
     let mut new_unread = Vec::new();
     for (i, info) in targets.iter().enumerate() {
         ctx.status(SyncState::Syncing {
@@ -743,28 +1003,29 @@ async fn full_sync(ctx: &AccountCtx, conn: &mut Conn) -> SyncResult<()> {
         new_unread.extend(out.new_unread);
     }
     ctx.status(SyncState::Online);
-    if !changed.is_empty() {
-        ctx.sink.changed(changed);
-    }
+    ctx.changed(changed);
     ctx.emit_new(&new_unread);
     Ok(())
 }
 
 async fn sync_one(ctx: &AccountCtx, conn: &mut Conn, info: &MailboxInfo) -> SyncResult<()> {
-    if conn.skip.contains(&info.mailbox.path) || !SYNC_ROLES.contains(&info.mailbox.role) {
+    if info.nosync
+        || !SYNC_ROLES.contains(&info.mailbox.role)
+        || !conn.server_paths.contains(&info.mailbox.path)
+    {
         return Ok(());
     }
     let notify = info.mailbox.role == MailboxRole::Inbox;
     let out = sync_mailbox(&mut conn.session, &ctx.store, info, notify).await?;
     if out.changed {
-        ctx.sink.changed(vec![info.mailbox.id.clone()]);
+        ctx.changed(vec![info.mailbox.id.clone()]);
     }
     ctx.emit_new(&out.new_unread);
     Ok(())
 }
 
 async fn sync_path(ctx: &AccountCtx, conn: &mut Conn, path: &str) -> SyncResult<()> {
-    let id = mh_store::mailbox_id(&ctx.account.id, path);
+    let id = mh_store::mailbox_id(ctx.id(), path);
     if let Some(info) = ctx.store.mailbox(&id)? {
         sync_one(ctx, conn, &info).await?;
     }
@@ -777,7 +1038,8 @@ async fn ensure_mailbox(conn: &mut Conn, path: &str) -> SyncResult<()> {
     }
     match conn.session.create(path).await {
         Ok(()) => {}
-        // Zaten varsa sunucu NO döner; sorun değil.
+        // Zaten varsa sunucu NO döner; sorun değil. Açılamadıysa taşıma
+        // TRYCREATE ile reddedilir ve geri alınır.
         Err(async_imap::error::Error::No(m)) => {
             tracing::debug!(path, reply = %m, "kutu oluşturulamadı ya da zaten var")
         }
@@ -787,24 +1049,22 @@ async fn ensure_mailbox(conn: &mut Conn, path: &str) -> SyncResult<()> {
     Ok(())
 }
 
-fn group_by_path(items: &[Target]) -> Vec<(String, Option<u32>, Vec<u32>)> {
-    let mut groups: Vec<(String, Option<u32>, Vec<u32>)> = Vec::new();
-    for t in items {
-        match groups
-            .iter_mut()
-            .find(|(p, v, _)| *p == t.path && *v == t.uidvalidity)
-        {
-            Some((_, _, uids)) => uids.push(t.uid),
-            None => groups.push((t.path.clone(), t.uidvalidity, vec![t.uid])),
-        }
-    }
-    groups
+/// Kutuyu yazılabilir seçer; UIDVALIDITY değerini döner.
+async fn select(conn: &mut Conn, path: &str) -> SyncResult<Option<u32>> {
+    Ok(conn.session.select(path).await?.uid_validity)
 }
 
-/// Kutuyu yazılabilir seçer; UIDVALIDITY değiştiyse `false` (UID'ler geçersiz).
-async fn select(conn: &mut Conn, path: &str, uidvalidity: Option<u32>) -> SyncResult<bool> {
-    let mb = conn.session.select(path).await?;
-    Ok(uidvalidity.is_none() || mb.uid_validity == uidvalidity)
+/// Seçimi dener; sunucu reddederse (kutu yok, izin) `None`, bağlantı
+/// koptuysa hata.
+async fn try_select(conn: &mut Conn, path: &str) -> SyncResult<Option<Option<u32>>> {
+    match select(conn, path).await {
+        Ok(v) => Ok(Some(v)),
+        Err(e) if e.is_connection() => Err(e),
+        Err(e) => {
+            tracing::warn!(path, error = %e, "kutu seçilemedi");
+            Ok(None)
+        }
+    }
 }
 
 async fn store_flags(conn: &mut Conn, set: &str, query: &str) -> SyncResult<()> {
@@ -817,63 +1077,285 @@ async fn store_flags(conn: &mut Conn, set: &str, query: &str) -> SyncResult<()> 
     Ok(())
 }
 
-async fn apply_flags(
+/// Seçili kutuda aranan posta.
+struct Want {
+    uid: Option<u32>,
+    uidvalidity: Option<u32>,
+    message_id: Option<String>,
+}
+
+/// Seçili kutuda postaların UID'lerini çözer (sıra korunur; bulunamayan
+/// `None`). UID biliniyor ve UIDVALIDITY tutuyorsa kullanılır (`verify` ise
+/// varlığı da denetlenir); yoksa Message-ID ile aranır.
+async fn resolve(
     conn: &mut Conn,
-    items: &[Target],
-    unread: Option<bool>,
-    starred: Option<bool>,
+    validity: Option<u32>,
+    wants: &[Want],
+    verify: bool,
+) -> SyncResult<Vec<Option<u32>>> {
+    let usable = |w: &Want| {
+        w.uid
+            .filter(|_| w.uidvalidity.is_none() || validity.is_none() || w.uidvalidity == validity)
+    };
+    let known: Vec<u32> = wants.iter().filter_map(usable).collect();
+    let existing: HashSet<u32> = if verify && !known.is_empty() {
+        conn.session
+            .uid_search(format!("UID {}", uid_set(&known)))
+            .await?
+    } else {
+        known.iter().copied().collect()
+    };
+    let mut out = Vec::with_capacity(wants.len());
+    for w in wants {
+        let uid = match usable(w).filter(|u| existing.contains(u)) {
+            Some(u) => Some(u),
+            None => match w.message_id.as_deref() {
+                Some(mid) => search_message_id(&mut conn.session, mid).await?,
+                None => None,
+            },
+        };
+        out.push(uid);
+    }
+    Ok(out)
+}
+
+/// Konumları sunucudaki kutuya göre gruplar.
+fn group_by<T, K: PartialEq + Clone>(items: Vec<T>, key: impl Fn(&T) -> K) -> Vec<(K, Vec<T>)> {
+    let mut groups: Vec<(K, Vec<T>)> = Vec::new();
+    for item in items {
+        let k = key(&item);
+        match groups.iter_mut().find(|(g, _)| *g == k) {
+            Some((_, list)) => list.push(item),
+            None => groups.push((k, vec![item])),
+        }
+    }
+    groups
+}
+
+/// Bayrağı sunucuya yazar, sonra yerel değeri yeniden yazar (arada çalışan
+/// bayrak yenilemesi eski değeri geri getirmiş olabilir). Kuyrukta aynı
+/// bayrak için daha yeni bir istek bekleyen postalara dokunulmaz.
+async fn apply_flag(
+    ctx: &AccountCtx,
+    conn: &mut Conn,
+    action_id: i64,
+    ids: &[MessageId],
+    flag: ServerFlag,
+    value: bool,
 ) -> SyncResult<()> {
-    for (path, validity, uids) in group_by_path(items) {
-        if !select(conn, &path, validity).await? {
+    let name = match flag {
+        ServerFlag::Seen => "\\Seen",
+        ServerFlag::Flagged => "\\Flagged",
+    };
+    let query = format!("{}FLAGS.SILENT ({name})", if value { "+" } else { "-" });
+    let locs = ctx.store.locations(ids)?;
+    for (path, group) in group_by(locs, |l| l.server_path.clone()) {
+        let Some(validity) = try_select(conn, &path).await? else {
             continue;
+        };
+        let wants: Vec<Want> = group
+            .iter()
+            .map(|l| Want {
+                uid: l.server_uid,
+                uidvalidity: l.server_uidvalidity,
+                message_id: l.message_id_header.clone(),
+            })
+            .collect();
+        let uids: Vec<u32> = resolve(conn, validity, &wants, false)
+            .await?
+            .into_iter()
+            .flatten()
+            .collect();
+        if !uids.is_empty() {
+            store_flags(conn, &uid_set(&uids), &query).await?;
         }
-        let set = uid_set(&uids);
-        if let Some(u) = unread {
-            store_flags(
-                conn,
-                &set,
-                if u {
-                    "-FLAGS.SILENT (\\Seen)"
-                } else {
-                    "+FLAGS.SILENT (\\Seen)"
-                },
-            )
-            .await?;
-        }
-        if let Some(s) = starred {
-            store_flags(
-                conn,
-                &set,
-                if s {
-                    "+FLAGS.SILENT (\\Flagged)"
-                } else {
-                    "-FLAGS.SILENT (\\Flagged)"
-                },
-            )
-            .await?;
-        }
+    }
+    let newer: HashSet<MessageId> = ctx
+        .store
+        .actions(ctx.id())?
+        .into_iter()
+        .filter(|a| a.id > action_id)
+        .filter_map(|a| match a.action {
+            Action::SetFlag { ids, flag: f, .. } if f == flag => Some(ids),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    let settle: Vec<MessageId> = ids.iter().copied().filter(|i| !newer.contains(i)).collect();
+    let (unread, starred) = match flag {
+        ServerFlag::Seen => (Some(!value), None),
+        ServerFlag::Flagged => (None, Some(value)),
+    };
+    ctx.changed(ctx.store.set_flags(&settle, unread, starred)?);
+    Ok(())
+}
+
+/// UID'leri taşır (MOVE; yoksa COPY + \Deleted + EXPUNGE).
+async fn move_uids(conn: &mut Conn, set: &str, dest: &str) -> SyncResult<()> {
+    if conn.has_move {
+        conn.session.uid_mv(set, dest).await?;
+    } else {
+        conn.session.uid_copy(set, dest).await?;
+        store_flags(conn, set, "+FLAGS.SILENT (\\Deleted)").await?;
+        expunge(conn, set).await?;
     }
     Ok(())
 }
 
-async fn apply_move(conn: &mut Conn, items: &[Target], dest: &str) -> SyncResult<()> {
+async fn expunge(conn: &mut Conn, set: &str) -> SyncResult<()> {
+    if conn.has_uidplus {
+        let _: Vec<u32> = conn.session.uid_expunge(set).await?.try_collect().await?;
+    } else {
+        let _: Vec<u32> = conn.session.expunge().await?.try_collect().await?;
+    }
+    Ok(())
+}
+
+/// Sunucu onayı bekleyen taşımaları uygular. Postanın kaynaktaki UID'si
+/// denetlenir (yoksa Message-ID ile aranır); sunucu reddederse yerel taşıma
+/// geri alınır. Kaynakta bulunamayan posta hedefteyse taşınmış sayılır
+/// (önceki deneme yarıda kalmış), hiçbir yerde yoksa yerelden de kalkar.
+async fn apply_moves(ctx: &AccountCtx, conn: &mut Conn) -> SyncResult<Vec<String>> {
+    let pending = ctx.store.pending_moves(ctx.id())?;
+    let mut changed: Vec<String> = Vec::new();
+    let mut follow: Vec<String> = Vec::new();
+    let mut again = false;
+    let groups = group_by(pending, |p| {
+        (
+            p.src_path.clone(),
+            p.dest_path.clone(),
+            p.dest_mailbox_id.clone(),
+        )
+    });
+    for ((src, dest, dest_id), items) in groups {
+        let res = move_group(ctx, conn, &src, &dest, &dest_id, &items).await;
+        match res {
+            Ok(outcome) => {
+                again |= outcome.again;
+                changed.extend(outcome.changed);
+                if outcome.moved {
+                    follow.push(dest);
+                }
+            }
+            Err(e) if e.is_connection() => {
+                ctx.changed(changed);
+                return Err(e);
+            }
+            // Sunucu reddetti (NO / TRYCREATE / BAD): posta yerelde de geri döner.
+            Err(e) => {
+                tracing::warn!(account = %ctx.account.id, src, dest, error = %e, "taşıma reddedildi, geri alındı");
+                for p in &items {
+                    changed.extend(ctx.store.revert_move(p.id)?);
+                }
+                ctx.status(SyncState::Error {
+                    message: format!(
+                        "Postalar taşınamadı, eski yerlerine döndü. {}",
+                        e.to_app().message
+                    ),
+                });
+            }
+        }
+    }
+    if again {
+        ctx.store
+            .action_push(ctx.id(), &Action::Moves, None, now_ms())?;
+    }
+    ctx.changed(changed);
+    Ok(follow)
+}
+
+#[derive(Default)]
+struct GroupOutcome {
+    moved: bool,
+    again: bool,
+    changed: Vec<String>,
+}
+
+async fn move_group(
+    ctx: &AccountCtx,
+    conn: &mut Conn,
+    src: &str,
+    dest: &str,
+    dest_id: &str,
+    items: &[PendingMove],
+) -> SyncResult<GroupOutcome> {
+    let mut out = GroupOutcome::default();
     ensure_mailbox(conn, dest).await?;
-    for (path, validity, uids) in group_by_path(items) {
-        if path == dest || !select(conn, &path, validity).await? {
+    let validity = select(conn, src).await?;
+    let wants: Vec<Want> = items
+        .iter()
+        .map(|p| Want {
+            uid: p.src_uid,
+            uidvalidity: p.src_uidvalidity,
+            message_id: p.message_id_header.clone(),
+        })
+        .collect();
+    let found = resolve(conn, validity, &wants, true).await?;
+    let uids: Vec<u32> = found.iter().flatten().copied().collect();
+    if !uids.is_empty() {
+        move_uids(conn, &uid_set(&uids), dest).await?;
+        out.moved = true;
+        for (p, _) in items.iter().zip(&found).filter(|(_, f)| f.is_some()) {
+            out.again |= ctx.store.confirm_move(p.id, dest_id, None, None)?;
+            out.changed.push(dest_id.to_owned());
+        }
+    }
+    let missing: Vec<&PendingMove> = items
+        .iter()
+        .zip(&found)
+        .filter(|(_, f)| f.is_none())
+        .map(|(p, _)| p)
+        .collect();
+    if missing.is_empty() {
+        return Ok(out);
+    }
+    // Kaynakta yok: önceki deneme taşımış olabilir.
+    let dest_validity = try_select(conn, dest).await?;
+    for p in missing {
+        let in_dest = match (dest_validity, p.message_id_header.as_deref()) {
+            (Some(v), Some(mid)) => search_message_id(&mut conn.session, mid)
+                .await?
+                .map(|u| (u, v)),
+            _ => None,
+        };
+        match in_dest {
+            Some((uid, v)) => out.again |= ctx.store.confirm_move(p.id, dest_id, Some(uid), v)?,
+            // Sunucuda bir UID'si vardı ama artık hiçbir yerde yok: başka
+            // yerden silinmiş.
+            None if p.src_uid.is_some() => ctx.store.delete_messages(&[p.id])?,
+            // Sunucuda hiç olmamış yerel kopya.
+            None => ctx.store.forget_server_copy(p.id)?,
+        }
+        out.changed.push(dest_id.to_owned());
+    }
+    Ok(out)
+}
+
+/// Sunucudan kalıcı siler.
+async fn apply_delete(conn: &mut Conn, items: &[ServerRef]) -> SyncResult<()> {
+    for (path, group) in group_by(items.to_vec(), |r| r.path.clone()) {
+        let Some(validity) = try_select(conn, &path).await? else {
+            continue;
+        };
+        let wants: Vec<Want> = group
+            .into_iter()
+            .map(|r| Want {
+                uid: r.uid,
+                uidvalidity: r.uidvalidity,
+                message_id: r.message_id,
+            })
+            .collect();
+        let uids: Vec<u32> = resolve(conn, validity, &wants, false)
+            .await?
+            .into_iter()
+            .flatten()
+            .collect();
+        if uids.is_empty() {
             continue;
         }
         let set = uid_set(&uids);
-        if conn.has_move {
-            conn.session.uid_mv(&set, dest).await?;
-        } else {
-            conn.session.uid_copy(&set, dest).await?;
-            store_flags(conn, &set, "+FLAGS.SILENT (\\Deleted)").await?;
-            if conn.has_uidplus {
-                let _: Vec<u32> = conn.session.uid_expunge(&set).await?.try_collect().await?;
-            } else {
-                let _: Vec<u32> = conn.session.expunge().await?.try_collect().await?;
-            }
-        }
+        store_flags(conn, &set, "+FLAGS.SILENT (\\Deleted)").await?;
+        expunge(conn, &set).await?;
     }
     Ok(())
 }
@@ -887,7 +1369,13 @@ async fn idle_loop(ctx: Arc<AccountCtx>, tx: UnboundedSender<Command>) {
             Ok(()) => return,
             Err(e) => {
                 tracing::debug!(account = %ctx.account.id, error = %e, "IDLE bağlantısı kesildi");
-                tokio::time::sleep(backoff).await;
+                // Onay bekleyen sertifikada sunucu boşuna yoklanmasın.
+                let wait = if e.to_app().code == ErrorCode::Untrusted {
+                    MAX_BACKOFF
+                } else {
+                    backoff
+                };
+                tokio::time::sleep(wait).await;
                 backoff = (backoff * 2).min(MAX_BACKOFF);
             }
         }
@@ -977,6 +1465,7 @@ mod tests {
             roles.iter().find(|r| r.0 == "[Gmail]/Sent Mail").unwrap().1,
             "Sent Mail"
         );
+        assert_eq!(personal_namespace(&listed).prefix, "");
     }
 
     #[test]
@@ -997,28 +1486,81 @@ mod tests {
     }
 
     #[test]
-    fn komut_sirasi_ve_birlestirme() {
-        let t = || Target {
-            path: "INBOX".into(),
-            uid: 1,
-            uidvalidity: None,
+    fn ad_alani_inbox_oneki() {
+        let dot = |p: &str| Listed {
+            delimiter: Some(".".into()),
+            ..l(p, None, false)
         };
+        let ns = personal_namespace(&[dot("INBOX"), dot("INBOX.Sent"), dot("INBOX.Trash")]);
+        assert_eq!(
+            ns,
+            Namespace {
+                prefix: "INBOX.".into(),
+                delimiter: Some(".".into())
+            }
+        );
+        // Kökte kutu varsa önek yok; yalnız INBOX varsa da yok.
+        assert_eq!(
+            personal_namespace(&[dot("INBOX"), dot("INBOX.Sent"), dot("Trash")]).prefix,
+            ""
+        );
+        assert_eq!(personal_namespace(&[dot("INBOX")]).prefix, "");
+        assert_eq!(personal_namespace(&[]), Namespace::default());
+    }
+
+    #[test]
+    fn esitleme_sirasi_ve_birlestirme() {
+        let path = |p: &str| Command::SyncPath(p.into());
         let mut q: VecDeque<Command> = VecDeque::from([
             Command::SyncInbox,
             Command::SyncInbox,
-            Command::Flags {
-                ids: vec![1],
-                items: vec![t()],
-                unread: Some(false),
-                starred: None,
-            },
+            path("Archive"),
             Command::SyncAll,
+            path("Sent"),
+            path("Archive"),
             Command::SyncInbox,
         ]);
-        assert!(matches!(next_command(&mut q), Some(Command::Flags { .. })));
-        assert!(matches!(next_command(&mut q), Some(Command::SyncAll)));
-        assert!(matches!(next_command(&mut q), Some(Command::SyncInbox)));
-        assert!(next_command(&mut q).is_none());
+        assert_eq!(next_sync(&mut q), Some(path("Archive")));
+        assert_eq!(next_sync(&mut q), Some(path("Sent")));
+        assert_eq!(next_sync(&mut q), Some(Command::SyncAll));
+        assert_eq!(
+            next_sync(&mut q),
+            None,
+            "tam eşitleme gelen kutusunu kapsar"
+        );
+        let mut q = VecDeque::from([Command::SyncInbox, Command::SyncInbox]);
+        assert_eq!(next_sync(&mut q), Some(Command::SyncInbox));
+        assert!(q.is_empty());
+
+        let mut p = VecDeque::new();
+        enqueue(&mut p, Command::Wake);
+        enqueue(&mut p, Command::SyncInbox);
+        assert_eq!(p, VecDeque::from([Command::SyncInbox]));
+    }
+
+    #[test]
+    fn imap_tirnak() {
+        assert_eq!(imap_quote("<a@b>").as_deref(), Some("\"<a@b>\""));
+        assert_eq!(imap_quote("a\"b\\c").as_deref(), Some("\"a\\\"b\\\\c\""));
+        assert_eq!(imap_quote("satır\r\nX"), None);
+        assert_eq!(imap_quote("ğ@ornek"), None);
+        assert_eq!(imap_quote(""), None);
+    }
+
+    #[test]
+    fn eklemenin_suresi_boyutla_uzar() {
+        let qa = |raw: Option<Vec<u8>>| QueuedAction {
+            id: 1,
+            account_id: "a".into(),
+            action: Action::Moves,
+            raw,
+            attempts: 0,
+        };
+        assert_eq!(action_timeout(&qa(None)), ACTION_TIMEOUT);
+        assert_eq!(
+            action_timeout(&qa(Some(vec![0; 2_000_000]))),
+            ACTION_TIMEOUT + Duration::from_secs(100)
+        );
     }
 
     #[test]
@@ -1047,5 +1589,133 @@ mod tests {
         assert!(is_syncable(&a));
         a.kind = AccountKind::Jmap;
         assert!(!is_syncable(&a));
+    }
+
+    struct Quiet;
+    impl EventSink for Quiet {
+        fn sync_status(&self, _: SyncStatus) {}
+        fn changed(&self, _: Vec<String>) {}
+        fn new_mail(&self, _: &Account, _: Vec<mh_core::MessageSummary>) {}
+    }
+
+    #[tokio::test]
+    async fn islemler_kuyruga_yazilir_tanitim_hesabi_yerelde_kalir() {
+        use crate::secrets::MemorySecrets;
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        let mut a = Account {
+            id: "a".into(),
+            name: "İş".into(),
+            email: "a@ornek.com".into(),
+            display_name: "A".into(),
+            color: "#000000".into(),
+            kind: AccountKind::Imap,
+            imap: Some(mh_core::ServerConfig {
+                host: "imap.ornek.com".into(),
+                port: 993,
+                security: mh_core::Security::Tls,
+                username: "a".into(),
+            }),
+            smtp: None,
+            jmap_url: None,
+            signature: None,
+            created_at: 0,
+            auth: Default::default(),
+        };
+        store.insert_account(&a).unwrap();
+        a.id = "demo".into();
+        a.imap.as_mut().unwrap().host = "demo.invalid".into();
+        store.insert_account(&a).unwrap();
+        for acc in ["a", "demo"] {
+            store
+                .upsert_mailbox(acc, "INBOX", "INBOX", MailboxRole::Inbox)
+                .unwrap();
+        }
+        let mk = |acc: &str, uid: u32| {
+            let raw = format!(
+                "From: k@ornek.com\r\nSubject: s{uid}\r\nMessage-ID: <{acc}{uid}@ornek>\r\n\r\ngövde"
+            );
+            let mut m = mh_store::NewMessage::from_raw(
+                raw.into_bytes(),
+                false,
+                acc,
+                &format!("{acc}:INBOX"),
+                1,
+            )
+            .unwrap();
+            m.uid = Some(uid);
+            store.upsert_message(&m).unwrap().id
+        };
+        let (x, y) = (mk("a", 1), mk("demo", 1));
+        // Ad alanı biliniyor: yeni arşiv kutusu önekle açılır.
+        store
+            .set_namespace(
+                "a",
+                &Namespace {
+                    prefix: "INBOX.".into(),
+                    delimiter: Some(".".into()),
+                },
+            )
+            .unwrap();
+        let mgr = SyncManager::new(
+            store.clone(),
+            Arc::new(MemorySecrets::new()),
+            Arc::new(Quiet),
+            tokio::runtime::Handle::current(),
+        );
+        mgr.set_flags(&[x, y], Some(false), Some(true)).unwrap();
+        mgr.move_messages(&[x, y], MoveTarget::Archive).unwrap();
+        let kinds: Vec<Action> = store
+            .actions("a")
+            .unwrap()
+            .into_iter()
+            .map(|q| q.action)
+            .collect();
+        assert_eq!(
+            kinds,
+            vec![
+                Action::SetFlag {
+                    ids: vec![x],
+                    flag: ServerFlag::Seen,
+                    value: true
+                },
+                Action::SetFlag {
+                    ids: vec![x],
+                    flag: ServerFlag::Flagged,
+                    value: true
+                },
+                Action::Moves,
+            ]
+        );
+        assert!(store.actions("demo").unwrap().is_empty());
+        let lx = store.location(x).unwrap().unwrap();
+        assert_eq!(
+            (lx.mailbox_path.as_str(), lx.pending, lx.server_uid),
+            ("INBOX.Archive", true, Some(1))
+        );
+        let ly = store.location(y).unwrap().unwrap();
+        assert_eq!((ly.mailbox_path.as_str(), ly.pending), ("Archive", false));
+
+        // Geri al: sunucuya gitmemiş taşıma iptal; kuyruktaki taşıma boşa çalışır.
+        mgr.move_messages(&[x], MoveTarget::Inbox).unwrap();
+        assert!(!store.has_pending_moves("a").unwrap());
+
+        assert!(mgr
+            .append(
+                "a",
+                MailboxRole::Sent,
+                b"Message-ID: <g@o>\r\n\r\nx".to_vec()
+            )
+            .unwrap());
+        assert!(!mgr
+            .append("demo", MailboxRole::Sent, b"x".to_vec())
+            .unwrap());
+        let last = store.actions("a").unwrap().pop().unwrap();
+        assert_eq!(
+            last.action,
+            Action::Append {
+                path: "INBOX.Sent".into(),
+                message_id: Some("g@o".into())
+            }
+        );
     }
 }

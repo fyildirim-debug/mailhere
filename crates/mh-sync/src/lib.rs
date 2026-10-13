@@ -10,11 +10,13 @@ mod mailbox;
 pub mod mutf7;
 mod roles;
 mod secrets;
+pub mod tls;
 
 use mh_core::{Account, MessageSummary, OutboxEvent, SyncStatus};
 
 pub use conn::{
     connect, connect_with, is_local, test_login, test_login_with, tls_config, ImapSession,
+    ImapStream,
 };
 pub use credentials::{
     credentials_for, oauth_secret_key, token_rejected, Credentials, ProviderResolver, TokenProvider,

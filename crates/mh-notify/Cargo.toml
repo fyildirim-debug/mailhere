@@ -9,3 +9,9 @@ rust-version.workspace = true
 
 [dependencies]
 mh-core.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+x11rb.workspace = true

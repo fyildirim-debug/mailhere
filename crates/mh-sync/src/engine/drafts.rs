@@ -1,4 +1,5 @@
-//! Taslaklar: yerel kayıt hemen yapılır, sunucu işi komut kuyruğuna girer.
+//! Taslaklar: yerel kayıt hemen yapılır, sunucu işi kalıcı işlem kuyruğuna
+//! (`Action::Draft`) girer.
 //!
 //! Her kayıt yeni bir Message-ID ile Taslaklar kutusuna `\Draft \Seen`
 //! bayraklarıyla eklenir; önceki sürüm UID'si biliniyorsa UID ile, henüz
@@ -7,29 +8,20 @@
 
 use futures::TryStreamExt;
 use mh_core::{AppError, AppResult, ErrorCode, MailboxRole, MessageId, Millis};
-use mh_store::{MessageLocation, NewMessage};
+use mh_store::{Action, MessageLocation, NewMessage, ServerRef};
 
-use super::{ensure_mailbox, store_flags, Command, Conn, SyncManager};
+use super::{ensure_mailbox, store_flags, Conn, SyncManager};
 use crate::error::SyncResult;
 use crate::mailbox::uid_set;
 
-/// Sunucudan kaldırılacak eski taslak kopyası.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct OldDraft {
-    pub path: String,
-    pub message_id: Option<String>,
-    pub uid: Option<u32>,
-    pub uidvalidity: Option<u32>,
-}
-
-impl From<&MessageLocation> for OldDraft {
-    fn from(l: &MessageLocation) -> Self {
-        Self {
-            path: l.mailbox_path.clone(),
-            message_id: l.message_id_header.clone(),
-            uid: l.uid,
-            uidvalidity: l.uidvalidity,
-        }
+/// Sunucudan kaldırılacak eski taslak kopyası (sunucudaki yeri: taşıması
+/// bekleyen postada kaynak kutu).
+fn old_draft(l: &MessageLocation) -> ServerRef {
+    ServerRef {
+        path: l.server_path.clone(),
+        uid: l.server_uid,
+        uidvalidity: l.server_uidvalidity,
+        message_id: l.message_id_header.clone(),
     }
 }
 
@@ -48,6 +40,20 @@ pub(crate) fn header_search(message_id: &str) -> Option<String> {
 }
 
 impl SyncManager {
+    /// Taslak işini kuyruğa yazar (yalnız sunucuyla eşitlenen hesapta).
+    fn queue_draft(
+        &self,
+        account_id: &str,
+        path: String,
+        raw: Option<&[u8]>,
+        remove: Vec<ServerRef>,
+    ) -> AppResult<()> {
+        if !self.syncable(account_id)? || (raw.is_none() && remove.is_empty()) {
+            return Ok(());
+        }
+        self.queue(account_id, &Action::Draft { path, remove }, raw)
+    }
+
     /// Taslağı yerelde hemen kaydeder (varsa `replace` taslağının yerine,
     /// aynı kimlikle) ve sunucuya eklenmesini sıraya alır. Taslağın kimliğini
     /// ve değişen kutuları döner.
@@ -73,28 +79,19 @@ impl SyncManager {
                 // Aynı sürüm yeniden kaydediliyorsa sunucudaki kopyası kalır.
                 if prev.message_id_header.is_none() || prev.message_id_header != m.message_id_header
                 {
-                    remove.push(OldDraft::from(prev));
+                    remove.push(old_draft(prev));
                 }
             } else {
                 // Gönderen hesap değişti: eski hesabın taslağı da kalkar.
-                self.send(
+                self.queue_draft(
                     &prev.account_id,
-                    Command::Draft {
-                        dest: prev.mailbox_path.clone(),
-                        raw: None,
-                        remove: vec![OldDraft::from(prev)],
-                    },
-                );
+                    prev.server_path.clone(),
+                    None,
+                    vec![old_draft(prev)],
+                )?;
             }
         }
-        self.send(
-            account_id,
-            Command::Draft {
-                dest: dest.mailbox.path,
-                raw: Some(raw),
-                remove,
-            },
-        );
+        self.queue_draft(account_id, dest.mailbox.path, Some(&raw), remove)?;
         Ok((put.id, touched))
     }
 
@@ -104,29 +101,27 @@ impl SyncManager {
         let Some(loc) = self.store.take_draft(id)? else {
             return Ok(Vec::new());
         };
-        self.send(
+        self.queue_draft(
             &loc.account_id,
-            Command::Draft {
-                dest: loc.mailbox_path.clone(),
-                raw: None,
-                remove: vec![OldDraft::from(&loc)],
-            },
-        );
+            loc.server_path.clone(),
+            None,
+            vec![old_draft(&loc)],
+        )?;
         Ok(vec![loc.mailbox_id])
     }
 }
 
-/// Komutu sunucuda uygular; yeniden eşitlenecek kutu yollarını döner.
+/// İşlemi sunucuda uygular; yeniden eşitlenecek kutu yollarını döner.
 pub(super) async fn apply(
     conn: &mut Conn,
     dest: &str,
     raw: Option<&[u8]>,
-    remove: &[OldDraft],
+    remove: &[ServerRef],
 ) -> SyncResult<Vec<String>> {
     let mut touched: Vec<String> = Vec::new();
     if let Some(raw) = raw {
         ensure_mailbox(conn, dest).await?;
-        // Bağlantı eklemeden hemen sonra koptuysa komut yeniden çalışır;
+        // Bağlantı eklemeden hemen sonra koptuysa işlem yeniden çalışır;
         // aynı sürüm sunucudaysa ikinci kez eklenmez.
         let query = mh_mime::parse(raw, true)
             .and_then(|p| p.message_id)

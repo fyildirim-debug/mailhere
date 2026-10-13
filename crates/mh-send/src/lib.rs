@@ -5,6 +5,7 @@ mod message;
 mod mime;
 mod outbox;
 mod parts;
+mod smtp;
 mod transport;
 
 pub use message::{

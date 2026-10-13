@@ -361,7 +361,9 @@ impl JmapManager {
             let local: Vec<MessageId> = list.iter().map(|l| l.id).collect();
             let dest = match dest {
                 Some(d) => {
-                    touched.extend(store.move_local(&local, &d.mailbox.id)?);
+                    // JMAP sunucu yerini kendisi izler (jmap_messages); IMAP'in
+                    // onay bekleyen taşıma sütunları kullanılmaz.
+                    touched.extend(store.move_local_untracked(&local, &d.mailbox.id)?);
                     Dest::Path(d.mailbox.path)
                 }
                 None => Dest::Role(role),

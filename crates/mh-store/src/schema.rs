@@ -113,8 +113,37 @@ const MIGRATIONS: &[&str] = &[
     r#"
     ALTER TABLE accounts ADD COLUMN auth TEXT NOT NULL DEFAULT 'password';
     "#,
-    // 3: başka bir dalda tanımlı; birleştirmede gerçek geçişle değiştirilir.
-    "-- yer tutucu",
+    // 3: kalıcı sunucu işlemleri kuyruğu, sunucu onayı bekleyen taşımanın
+    // kaynağı, eşitlenmeyen kutular ve kişisel IMAP ad alanı.
+    r#"
+    -- Yerelde taşınmış ama sunucuda henüz taşınmamış posta: sunucudaki yeri
+    -- (kutu, UID, UIDVALIDITY) onaya kadar burada kalır.
+    ALTER TABLE messages ADD COLUMN src_mailbox_id TEXT;
+    ALTER TABLE messages ADD COLUMN src_uid INTEGER;
+    ALTER TABLE messages ADD COLUMN src_uidvalidity INTEGER;
+    CREATE INDEX messages_src ON messages(src_mailbox_id, src_uid) WHERE src_mailbox_id IS NOT NULL;
+
+    -- Gmail "Tüm Postalar" gibi hedef olarak kullanılıp eşitlenmeyen kutular.
+    ALTER TABLE mailboxes ADD COLUMN nosync INTEGER NOT NULL DEFAULT 0;
+
+    -- Sunucu işlemleri (bayrak, taşıma, ekleme, silme), hesap başına sırayla.
+    CREATE TABLE actions (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id  TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        payload     TEXT NOT NULL,
+        raw         BLOB,
+        attempts    INTEGER NOT NULL DEFAULT 0,
+        created_at  INTEGER NOT NULL
+    );
+    CREATE INDEX actions_account ON actions(account_id, id);
+
+    -- Yeni rol kutularının açılacağı kişisel ad alanı ("INBOX." gibi).
+    CREATE TABLE imap_namespace (
+        account_id  TEXT PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+        prefix      TEXT NOT NULL,
+        delimiter   TEXT
+    );
+    "#,
     // 4: başka bir dalda tanımlı; birleştirmede gerçek geçişle değiştirilir.
     "-- yer tutucu",
     // 5: JMAP — hesap başına kullanıcı adı ve durum dizgeleri, postaların
@@ -138,6 +167,19 @@ const MIGRATIONS: &[&str] = &[
     "#,
 ];
 
+/// Dallar ayrı geliştirilirken ana dalın ara sürümleri bazı geçişleri yer
+/// tutucu olarak uyguladı (`user_version` ilerledi, tablolar oluşmadı). Bu
+/// geçişler, varlığı denetlenen tablo yoksa sonradan uygulanır.
+const PLACEHOLDER_REPAIRS: &[(usize, &str)] = &[(3, "actions")];
+
+fn table_exists(conn: &Connection, name: &str) -> rusqlite::Result<bool> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+        [name],
+        |r| r.get(0),
+    )
+}
+
 /// Bağlantıyı ayarlar ve eksik geçişleri uygular.
 pub fn migrate(conn: &mut Connection) -> rusqlite::Result<()> {
     conn.pragma_update(None, "foreign_keys", true)?;
@@ -149,6 +191,14 @@ pub fn migrate(conn: &mut Connection) -> rusqlite::Result<()> {
         tx.pragma_update(None, "user_version", (i + 1) as i64)?;
         tx.commit()?;
     }
+    for &(version, table) in PLACEHOLDER_REPAIRS {
+        if current >= version && !table_exists(conn, table)? {
+            tracing::warn!(version, "yer tutucuyla atlanmış geçiş uygulanıyor");
+            let tx = conn.transaction()?;
+            tx.execute_batch(MIGRATIONS[version - 1])?;
+            tx.commit()?;
+        }
+    }
     Ok(())
 }
 
@@ -156,4 +206,31 @@ pub fn migrate(conn: &mut Connection) -> rusqlite::Result<()> {
 #[cfg(test)]
 pub fn latest_version() -> usize {
     MIGRATIONS.len()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn yer_tutucuyla_atlanan_gecis_tamamlanir() {
+        // Ana dalın ara sürümü: 3. geçiş yer tutucu, sürüm en sonda.
+        let mut conn = Connection::open_in_memory().unwrap();
+        for (i, sql) in MIGRATIONS.iter().enumerate() {
+            conn.execute_batch(if i == 2 { "-- yer tutucu" } else { sql })
+                .unwrap();
+        }
+        conn.pragma_update(None, "user_version", MIGRATIONS.len() as i64)
+            .unwrap();
+        assert!(!table_exists(&conn, "actions").unwrap());
+
+        migrate(&mut conn).unwrap();
+        assert!(table_exists(&conn, "actions").unwrap());
+        assert!(table_exists(&conn, "imap_namespace").unwrap());
+        conn.prepare("SELECT src_mailbox_id, src_uid, src_uidvalidity FROM messages")
+            .unwrap();
+        conn.prepare("SELECT nosync FROM mailboxes").unwrap();
+        // İkinci açılışta yeniden uygulanmaz (sütunlar zaten var).
+        migrate(&mut conn).unwrap();
+    }
 }

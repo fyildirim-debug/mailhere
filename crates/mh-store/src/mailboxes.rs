@@ -19,10 +19,20 @@ pub struct MailboxInfo {
     pub uidnext: Option<u32>,
     /// Yerelde görülen en büyük UID.
     pub highest_uid: u32,
+    /// Hedef olarak kullanılır ama eşitlenmez (Gmail "Tüm Postalar").
+    pub nosync: bool,
+}
+
+/// Yeni rol kutularının açılacağı kişisel IMAP ad alanı.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Namespace {
+    /// Kutu adının önüne gelir ("" ya da "INBOX.").
+    pub prefix: String,
+    pub delimiter: Option<String>,
 }
 
 const SELECT: &str = "SELECT b.id, b.account_id, b.path, b.name, b.role,
-        COALESCE(SUM(m.unread), 0), COUNT(m.id), b.uidvalidity, b.uidnext, b.highest_uid
+        COALESCE(SUM(m.unread), 0), COUNT(m.id), b.uidvalidity, b.uidnext, b.highest_uid, b.nosync
     FROM mailboxes b LEFT JOIN messages m ON m.mailbox_id = b.id";
 
 fn role_order(r: MailboxRole) -> u8 {
@@ -51,6 +61,7 @@ fn row_to_info(r: &Row<'_>) -> rusqlite::Result<MailboxInfo> {
         uidvalidity: r.get::<_, Option<i64>>(7)?.map(|v| v as u32),
         uidnext: r.get::<_, Option<i64>>(8)?.map(|v| v as u32),
         highest_uid: r.get::<_, i64>(9)? as u32,
+        nosync: r.get(10)?,
     })
 }
 
@@ -160,6 +171,45 @@ impl Store {
         })
     }
 
+    /// Kutunun eşitlenip eşitlenmeyeceğini kalıcı yazar (LIST sonucundan).
+    pub fn set_mailbox_nosync(&self, id: &str, nosync: bool) -> AppResult<()> {
+        self.with(|c| {
+            c.execute(
+                "UPDATE mailboxes SET nosync = ?2 WHERE id = ?1",
+                params![id, nosync],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Hesabın kişisel ad alanı; henüz bilinmiyorsa `None`.
+    pub fn namespace(&self, account_id: &str) -> AppResult<Option<Namespace>> {
+        self.with(|c| {
+            c.query_row(
+                "SELECT prefix, delimiter FROM imap_namespace WHERE account_id = ?1",
+                [account_id],
+                |r| {
+                    Ok(Namespace {
+                        prefix: r.get(0)?,
+                        delimiter: r.get(1)?,
+                    })
+                },
+            )
+            .optional()
+        })
+    }
+
+    pub fn set_namespace(&self, account_id: &str, ns: &Namespace) -> AppResult<()> {
+        self.with(|c| {
+            c.execute(
+                "INSERT INTO imap_namespace (account_id, prefix, delimiter) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(account_id) DO UPDATE SET prefix = excluded.prefix, delimiter = excluded.delimiter",
+                params![account_id, ns.prefix, ns.delimiter],
+            )?;
+            Ok(())
+        })
+    }
+
     /// Sunucuda artık olmayan kutuları (ve postalarını) siler.
     pub fn remove_mailboxes_except(
         &self,
@@ -222,5 +272,39 @@ mod tests {
             .unwrap();
         assert_eq!(gone, vec!["a:Trash".to_string()]);
         assert_eq!(s.mailboxes_for("a").unwrap().len(), 2);
+    }
+
+    #[test]
+    fn eslenmeyen_kutu_ve_ad_alani_kalici() {
+        let s = store_with_account("a");
+        let id = s
+            .upsert_mailbox("a", "[Gmail]/All Mail", "All Mail", MailboxRole::Archive)
+            .unwrap();
+        assert!(!s.mailbox(&id).unwrap().unwrap().nosync);
+        s.set_mailbox_nosync(&id, true).unwrap();
+        // Yeniden LIST (ad/rol güncellemesi) bayrağı silmez.
+        s.upsert_mailbox(
+            "a",
+            "[Gmail]/All Mail",
+            "Tüm Postalar",
+            MailboxRole::Archive,
+        )
+        .unwrap();
+        let info = s
+            .mailbox_by_role("a", MailboxRole::Archive)
+            .unwrap()
+            .unwrap();
+        assert!(info.nosync);
+
+        assert_eq!(s.namespace("a").unwrap(), None);
+        let ns = Namespace {
+            prefix: "INBOX.".into(),
+            delimiter: Some(".".into()),
+        };
+        s.set_namespace("a", &ns).unwrap();
+        s.set_namespace("a", &ns).unwrap();
+        assert_eq!(s.namespace("a").unwrap(), Some(ns));
+        s.remove_account(&"a".to_string()).unwrap();
+        assert_eq!(s.namespace("a").unwrap(), None);
     }
 }

@@ -135,19 +135,28 @@ impl Outbox {
 
     async fn process(&self, row: OutboxRow) {
         match self.deliver(&row).await {
-            Ok(()) => {
+            Ok(note) => {
                 let _ = self.store.outbox_remove(&row.id);
                 if let Some(draft) = row.msg.draft_id {
                     if let Err(e) = self.delete_draft(draft) {
                         tracing::warn!(error = %e, "gönderilen postanın taslağı silinemedi");
                     }
                 }
-                self.emit(&row.id, None);
+                // Gönderildi; yalnız sonraki adımlarda sorun olduysa not taşır.
+                self.sink.outbox(OutboxEvent {
+                    id: row.id.clone(),
+                    ok: true,
+                    error: note,
+                });
             }
             Err(e) => {
                 let permanent = matches!(
                     e.code,
-                    ErrorCode::Auth | ErrorCode::Invalid | ErrorCode::NotFound | ErrorCode::Keyring
+                    ErrorCode::Auth
+                        | ErrorCode::Invalid
+                        | ErrorCode::NotFound
+                        | ErrorCode::Keyring
+                        | ErrorCode::Untrusted
                 );
                 let attempts = row.attempts + 1;
                 if !permanent && attempts < MAX_ATTEMPTS {
@@ -168,7 +177,10 @@ impl Outbox {
         }
     }
 
-    async fn deliver(&self, row: &OutboxRow) -> AppResult<()> {
+    /// Postayı gönderir. SMTP kabul ettikten sonraki adımların (sunucuya
+    /// ekleme, yerel kopya) hatası gönderimi başarısız saymaz: yeniden
+    /// denenirse alıcıya ikinci kopya gider. Bu durumda kullanıcıya not döner.
+    async fn deliver(&self, row: &OutboxRow) -> AppResult<Option<String>> {
         let account = self
             .store
             .account(&row.account_id)?
@@ -186,6 +198,7 @@ impl Outbox {
         };
         let message = build_with(&account, &row.msg, &opts, now)?;
         let raw = message.formatted();
+        let mut server_copy = false;
         if account.kind == AccountKind::Jmap {
             // JMAP'te SMTP yok: sunucu gönderir ve Gönderilenler'e kendisi taşır.
             if mh_jmap::is_syncable(&account) {
@@ -198,16 +211,25 @@ impl Outbox {
             })?;
             let creds = credentials_for(&self.secrets, self.sync.tokens(), &account).await?;
             crate::transport::send_with(&cfg, &creds, message).await?;
-            if !crate::transport::server_saves_sent(&cfg) {
-                if let Err(e) = self
-                    .sync
-                    .append(&account.id, MailboxRole::Sent, raw.clone())
-                {
-                    tracing::warn!(error = %e, "gönderilen posta sunucuya eklenemedi");
-                }
+            server_copy = !crate::transport::server_saves_sent(&cfg);
+        }
+        // Buradan sonrası gönderimi geri alamaz; hatalar yalnız not olur.
+        let mut failed = false;
+        if server_copy {
+            if let Err(e) = self
+                .sync
+                .append(&account.id, MailboxRole::Sent, raw.clone())
+            {
+                tracing::warn!(error = %e, "gönderilen posta sunucuya eklenemedi");
+                failed = true;
             }
         }
-        self.store_local(&account.id, MailboxRole::Sent, raw, now)
+        if let Err(e) = self.store_local(&account.id, MailboxRole::Sent, raw, now) {
+            tracing::warn!(error = %e, "gönderilen postanın yerel kopyası yazılamadı");
+            failed = true;
+        }
+        Ok(failed
+            .then(|| "Posta gönderildi ancak Gönderilenler kutusuna kaydedilemedi.".to_owned()))
     }
 
     /// Postanın yerel kopyası; sunucu kopyası eşitlemede Message-ID ile eşleşir.
@@ -218,17 +240,8 @@ impl Outbox {
         raw: Vec<u8>,
         now: Millis,
     ) -> AppResult<()> {
-        let mailbox = match self.store.mailbox_by_role(account_id, role)? {
-            Some(m) => m.mailbox.id,
-            None => {
-                let path = if role == MailboxRole::Sent {
-                    "Sent"
-                } else {
-                    "Drafts"
-                };
-                self.store.upsert_mailbox(account_id, path, path, role)?
-            }
-        };
+        // Kutu yoksa sunucunun ad alanında açılacak yolla oluşturulur.
+        let mailbox = self.sync.destination(account_id, role)?.mailbox.id;
         let mut m =
             NewMessage::from_raw(raw, false, account_id, &mailbox, now).ok_or_else(|| {
                 AppError::new(ErrorCode::Internal, "Gönderilen posta ayrıştırılamadı.")
@@ -637,6 +650,124 @@ mod tests {
         assert_eq!(drafts.len(), 1, "ikinci taslak açılmaz");
         assert_eq!(drafts[0].id, draft);
         assert_eq!(drafts[0].subject, "Son hali");
+    }
+
+    fn real_account(smtp_port: u16, smtp_host: &str) -> Account {
+        Account {
+            id: "gercek".into(),
+            name: "İş".into(),
+            email: "furkan@ornek.test".into(),
+            display_name: "Furkan".into(),
+            color: "#4C6FD8".into(),
+            kind: mh_core::AccountKind::Imap,
+            imap: Some(mh_core::ServerConfig {
+                host: "imap.ornek.test".into(),
+                port: 993,
+                security: mh_core::Security::Tls,
+                username: "furkan".into(),
+            }),
+            smtp: Some(mh_core::ServerConfig {
+                host: smtp_host.into(),
+                port: smtp_port,
+                security: mh_core::Security::None,
+                username: String::new(),
+            }),
+            jmap_url: None,
+            signature: None,
+            created_at: 0,
+            auth: Default::default(),
+        }
+    }
+
+    #[tokio::test]
+    async fn gonderilen_sunucuya_kalici_kuyrukla_eklenir() {
+        let (store, rec, outbox) = setup();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            let (sock, _) = listener.accept().await.unwrap();
+            crate::transport::tests::fake_session(sock, true).await
+        });
+        store
+            .insert_account(&real_account(port, "127.0.0.1"))
+            .unwrap();
+        outbox.secrets.set("gercek", "parola").unwrap();
+        let mut m = msg();
+        m.account_id = "gercek".into();
+        m.send_at = Some(0);
+        let item = outbox.enqueue(&m, 0).unwrap();
+        for row in store.outbox_claim_due(now_ms()).unwrap() {
+            outbox.process(row).await;
+        }
+        assert!(server
+            .await
+            .unwrap()
+            .data
+            .contains("Subject: Re: Cumartesi"));
+        assert_eq!(
+            rec.outbox.lock().unwrap().clone(),
+            vec![OutboxEvent {
+                id: item.id,
+                ok: true,
+                error: None
+            }]
+        );
+        // Sunucu kopyası kalıcı kuyrukta (motor bağlanınca eklenir); yerel
+        // kopya Gönderilenler'de.
+        let actions = store.actions("gercek").unwrap();
+        assert_eq!(actions.len(), 1);
+        assert!(matches!(
+            &actions[0].action,
+            mh_store::Action::Append { path, message_id: Some(_) } if path == "Sent"
+        ));
+        assert!(actions[0].raw.as_ref().is_some_and(|r| !r.is_empty()));
+        assert!(store
+            .mailbox_by_role("gercek", MailboxRole::Sent)
+            .unwrap()
+            .is_some_and(|b| b.mailbox.total == 1));
+        assert_eq!(store.outbox_next_due().unwrap(), None, "yeniden denenmez");
+    }
+
+    #[tokio::test]
+    async fn guvenilmeyen_sertifika_yeniden_denenmez() {
+        let (store, rec, outbox) = setup();
+        let cert = crate::transport::tests::self_signed();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let acceptor = cert.acceptor.clone();
+        tokio::spawn(async move {
+            if let Ok((sock, _)) = listener.accept().await {
+                let _ = acceptor.accept(sock).await;
+            }
+        });
+        let mut a = real_account(port, "localhost");
+        a.smtp.as_mut().unwrap().security = mh_core::Security::Tls;
+        store.insert_account(&a).unwrap();
+        outbox.secrets.set("gercek", "parola").unwrap();
+        let mut m = msg();
+        m.account_id = "gercek".into();
+        m.send_at = Some(0);
+        outbox.enqueue(&m, 0).unwrap();
+        for row in store.outbox_claim_due(now_ms()).unwrap() {
+            outbox.process(row).await;
+        }
+        let ev = rec.outbox.lock().unwrap().clone();
+        assert!(!ev[0].ok);
+        let error = ev[0].error.as_deref().unwrap();
+        assert!(error.contains("güvenilir değil"), "{error}");
+        assert!(error.contains("Taslaklar"), "{error}");
+        assert_eq!(store.outbox_next_due().unwrap(), None, "yeniden denenmez");
+        // Gönderilmedi: Gönderilenler'e ekleme yok, yalnız taslak sunucuya gider.
+        let actions: Vec<_> = store
+            .actions("gercek")
+            .unwrap()
+            .into_iter()
+            .map(|a| a.action)
+            .collect();
+        assert!(
+            matches!(actions.as_slice(), [mh_store::Action::Draft { .. }]),
+            "{actions:?}"
+        );
     }
 
     #[tokio::test]

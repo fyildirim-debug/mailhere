@@ -7,8 +7,7 @@
 use mh_core::{AppError, AppResult, ErrorCode, MailboxRole, MessageId};
 use rusqlite::{params, OptionalExtension, Transaction};
 
-use crate::codec::role_from;
-use crate::messages::{insert_as, MessageLocation, NewMessage};
+use crate::messages::{insert_as, row_to_location, MessageLocation, NewMessage, LOCATION_COLS};
 use crate::Store;
 
 /// Taslak kaydının sonucu.
@@ -23,24 +22,12 @@ pub struct DraftPut {
 
 fn location_tx(tx: &Transaction<'_>, id: MessageId) -> rusqlite::Result<Option<MessageLocation>> {
     tx.query_row(
-        "SELECT m.id, m.account_id, m.mailbox_id, b.path, b.role, m.uid, m.uidvalidity,
-                m.raw IS NOT NULL, m.message_id_header, m.size
-         FROM messages m JOIN mailboxes b ON b.id = m.mailbox_id WHERE m.id = ?1",
+        &format!(
+            "SELECT {LOCATION_COLS} FROM messages m JOIN mailboxes b ON b.id = m.mailbox_id
+             WHERE m.id = ?1"
+        ),
         [id],
-        |r| {
-            Ok(MessageLocation {
-                id: r.get(0)?,
-                account_id: r.get(1)?,
-                mailbox_id: r.get(2)?,
-                mailbox_path: r.get(3)?,
-                role: role_from(&r.get::<_, String>(4)?),
-                uid: r.get::<_, Option<i64>>(5)?.map(|v| v as u32),
-                uidvalidity: r.get::<_, Option<i64>>(6)?.map(|v| v as u32),
-                has_raw: r.get(7)?,
-                message_id_header: r.get(8)?,
-                size: r.get::<_, i64>(9)? as u64,
-            })
-        },
+        row_to_location,
     )
     .optional()
 }
