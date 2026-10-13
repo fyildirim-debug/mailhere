@@ -2,8 +2,6 @@
   import { onMount } from 'svelte';
   import {
     call,
-    EVENTS,
-    on,
     toAppError,
     type AuthKind,
     type DiscoveredConfig,
@@ -36,8 +34,6 @@
   let imap = $state<ServerConfig>({ host: '', port: 993, security: 'tls', username: '' });
   let smtp = $state<ServerConfig>({ host: '', port: 465, security: 'tls', username: '' });
   let newAccountId = $state<string | null>(null);
-  let progress = $state<{ done: number; total: number } | null>(null);
-  let online = $state(false);
 
   // JMAP
   let sessionUrl = $state('');
@@ -280,17 +276,22 @@
 
   // --------------------------------------------------------------- hazır
 
+  // Eşitleme durumu uygulama genelindeki kayıttan okunur: hesap eklenirken
+  // gelen olaylar bu adım açılmadan önce düşse de kaçmaz.
+  const sync = $derived(newAccountId ? mail.sync[newAccountId] : undefined);
+  /** İlk indirme bitti mi? Arka uç "çevrimiçi"yi ilk eşitlemeden sonra bildirir. */
+  let downloaded = $state(false);
   $effect(() => {
-    const id = newAccountId;
-    if (!id) return;
-    return on(EVENTS.sync, (s) => {
-      if (s.accountId !== id) return;
-      if (s.state === 'syncing') progress = { done: s.done, total: s.total };
-      if (s.state === 'online') {
-        online = true;
-        progress = null;
-      }
-    });
+    if (sync?.state === 'online') downloaded = true;
+  });
+  const progress = $derived(sync?.state === 'syncing' && sync.total ? sync : null);
+  // İlk indirmeden önceki sorun; sonrası kenar çubuğunun durum satırında görünür.
+  const problem = $derived.by(() => {
+    if (downloaded || !sync) return null;
+    if (sync.state === 'error') return sync.message;
+    if (sync.state === 'offline') return t('onb.syncOffline');
+    if (sync.state === 'untrusted') return t('sync.untrusted', { host: sync.host });
+    return null;
   });
 
   function again() {
@@ -302,8 +303,7 @@
     sessionUrl = '';
     jmapUser = '';
     newAccountId = null;
-    progress = null;
-    online = false;
+    downloaded = false;
     reset();
   }
 
@@ -504,12 +504,24 @@
       <div class="step">
         <span class="ok-icon"><Icon name="check" size={32} /></span>
         <h1>{t('onb.readyTitle')}</h1>
-        <p class="lead">{t('onb.readyLead')}</p>
-        <div class="checks">
+        <p class="lead">{downloaded ? t('onb.readyLeadDone') : t('onb.readyLead')}</p>
+        <div class="checks" role="status" aria-live="polite">
           <div><Icon name="check" size={16} class="ok" />{t('onb.stepFolders')}</div>
-          <div><Icon name={online ? 'check' : 'sync'} size={16} class={online ? 'ok' : 'busy'} />{t('onb.stepPush')}</div>
-          <div><Icon name="sync" size={16} class="busy" />{t('onb.stepMail')}{#if progress?.total}<span class="meta num">  {progress.done}/{progress.total}</span>{/if}</div>
-          <div class="bar indent"><div class="fill" style:width={progress?.total ? `${Math.max(6, (progress.done / progress.total) * 100)}%` : undefined} class:indeterminate={!progress?.total}></div></div>
+          {#if downloaded}
+            <div><Icon name="check" size={16} class="ok" />{t('onb.stepMailDone')}</div>
+          {:else}
+            <div>
+              <Icon name="sync" size={16} class="busy spin" />{t('onb.stepMail')}
+              {#if progress}<span class="meta num step-count">{progress.done}/{progress.total}</span>{/if}
+            </div>
+            <div class="bar indent">
+              <div class="fill" style:width={progress ? `${Math.max(6, (progress.done / progress.total) * 100)}%` : undefined} class:indeterminate={!progress}></div>
+            </div>
+          {/if}
+          <div class:pending={!downloaded}>
+            <Icon name={downloaded ? 'check' : 'bell'} size={16} class={downloaded ? 'ok' : undefined} />{downloaded ? t('onb.stepPush') : t('onb.stepPushWait')}
+          </div>
+          {#if problem}<p class="error" role="alert">{t('onb.syncProblem', { message: problem })}</p>{/if}
         </div>
         <button class="btn-primary wide" onclick={openInbox}>{t('onb.openInbox')}</button>
         <button class="link small again" onclick={again}>{t('onb.another')}</button>
@@ -826,6 +838,18 @@
     color: var(--accent-text);
   }
 
+  .checks .pending {
+    color: var(--ink-3);
+  }
+
+  .checks :global(.spin) {
+    animation: spin 1.2s linear infinite;
+  }
+
+  .step-count {
+    margin-left: auto;
+  }
+
   .bar {
     height: 6px;
     border-radius: 3px;
@@ -858,6 +882,12 @@
     from {
       opacity: 0;
       transform: translateX(10px);
+    }
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
     }
   }
 

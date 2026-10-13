@@ -76,8 +76,11 @@
       onclick={() => setView({ kind: 'inbox' }, account.id)}
     >
       <span class="dot" style:background={account.color}></span>
-      <span>{account.name}</span>
-      <span class="trunc domain">{account.kind === 'jmap' ? 'JMAP' : domainOf(account.email)}</span>
+      <!-- Ad sığmazsa kısalır; alan adı yer kalmazsa alt satıra iner ve gizlenir. -->
+      <span class="acc-text">
+        <span class="trunc">{account.name}</span>
+        <span class="trunc domain">{account.kind === 'jmap' ? 'JMAP' : domainOf(account.email)}</span>
+      </span>
       {#if n > 0}<span class="count num">{n}</span>{/if}
     </button>
   {/each}
@@ -201,7 +204,19 @@
     border-radius: 50%;
   }
 
+  .acc-text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: 8px;
+    height: 22px;
+    overflow: hidden;
+  }
+
   .domain {
+    flex: 1 1 64px;
     font-size: var(--fs-meta);
     color: var(--ink-2);
   }

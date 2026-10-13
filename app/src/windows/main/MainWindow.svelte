@@ -20,6 +20,10 @@
 
   let reader = $state<ReturnType<typeof Reader>>();
 
+  // Hesap ekleme sürerken (ilk hesap dahil) uygulamanın geri kalanı açılmaz:
+  // kenar çubuğu, arama ve komut paleti "Gelen kutusunu aç" ile gelir.
+  const setup = $derived(!mail.accounts.length || mail.screen === 'onboarding');
+
   onMount(() => {
     void initMail();
     initUpdate();
@@ -42,6 +46,7 @@
     if (!sc) return;
     if (sc === 'palette') {
       e.preventDefault();
+      if (setup) return;
       mail.paletteOpen = !mail.paletteOpen;
       return;
     }
@@ -90,7 +95,7 @@
       <span class="name" data-tauri-drag-region>{t('app.name')}</span>
     </div>
     <div class="center" data-tauri-drag-region>
-      {#if mail.accounts.length}
+      {#if !setup}
         <button class="search" onclick={() => (mail.paletteOpen = true)}>
           <Icon name="search" size={16} />
           <span class="trunc grow">{t('palette.placeholder')}</span>
@@ -108,8 +113,8 @@
   </header>
 
   <div class="body">
-    {#if mail.accounts.length}<Sidebar />{/if}
-    {#if !mail.accounts.length || mail.screen === 'onboarding'}
+    {#if !setup}<Sidebar />{/if}
+    {#if setup}
       <!-- Tek örnek: hesap eklenince de aynı bileşen "Hazırsın" adımında kalır. -->
       {#if mail.ready}<Onboarding />{/if}
     {:else if mail.screen === 'settings'}

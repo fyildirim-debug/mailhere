@@ -169,7 +169,14 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     };
     state.accounts.push(account);
     addMailboxes(account.id);
-    emit(EVENTS.sync, { accountId: account.id, state: 'syncing', done: 0, total: 0 });
+    // İlk eşitleme: kutular sırayla iner, sonra "çevrimiçi" (gerçek arka uçtaki sıra).
+    const id = account.id;
+    const total = state.mailboxes.filter((m) => m.accountId === id).length;
+    emit(EVENTS.sync, { accountId: id, state: 'syncing', done: 0, total: 0 });
+    for (let done = 1; done <= total; done++) {
+      setTimeout(() => emit(EVENTS.sync, { accountId: id, state: 'syncing', done, total }), done * 250);
+    }
+    setTimeout(() => emit(EVENTS.sync, { accountId: id, state: 'online' }), (total + 1) * 250);
     return account;
   }
 

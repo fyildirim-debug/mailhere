@@ -13,7 +13,16 @@ test('hesap ekleme: adres → ayarlar → parola → hazır', async ({ page }) =
   await page.getByLabel('Parola', { exact: true }).fill('dogru-parola');
   await page.getByRole('button', { name: 'Hesabı ekle' }).click();
   await expect(page.getByRole('heading', { name: 'Hazırsın' })).toBeVisible();
+  // Kurulum bitene kadar uygulamanın geri kalanı açılmaz.
+  await expect(page.getByRole('navigation', { name: 'Kutular ve hesaplar' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Posta, kişi ya da komut ara/ })).toHaveCount(0);
+  // İlk eşitleme bitince indirme adımı tamamlanır.
+  await expect(page.getByText('Postalar indiriliyor')).toBeVisible();
+  await expect(page.getByText('Postalar indirildi')).toBeVisible();
+  await expect(page.getByText('Anlık bildirim bağlantısı kuruldu')).toBeVisible();
+  await expect(page.getByText('Postalar indiriliyor')).toHaveCount(0);
   await page.getByRole('button', { name: 'Gelen kutusunu aç' }).click();
+  await expect(page.getByRole('navigation', { name: 'Kutular ve hesaplar' })).toBeVisible();
   await expect(page.getByText('Burası sakin')).toBeVisible();
 });
 
