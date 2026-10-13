@@ -2,6 +2,7 @@
 //! IDLE ile anlık bildirim ve sunucu işlemleri.
 
 mod conn;
+mod credentials;
 pub mod discover;
 mod engine;
 mod error;
@@ -12,7 +13,12 @@ mod secrets;
 
 use mh_core::{Account, MessageSummary, OutboxEvent, SyncStatus};
 
-pub use conn::{connect, is_local, test_login, tls_config, ImapSession};
+pub use conn::{
+    connect, connect_with, is_local, test_login, test_login_with, tls_config, ImapSession,
+};
+pub use credentials::{
+    credentials_for, oauth_secret_key, token_rejected, Credentials, ProviderResolver, TokenProvider,
+};
 pub use discover::discover;
 pub use engine::{assign_roles, fetch_body, is_syncable, Listed, SyncManager};
 pub use error::{SyncError, SyncResult};

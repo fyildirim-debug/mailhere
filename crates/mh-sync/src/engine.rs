@@ -20,11 +20,12 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
 use tokio::time::{timeout, Instant};
 
-use crate::conn::{connect, ImapSession};
+use crate::conn::ImapSession;
+use crate::credentials::{connect_account, TokenProvider};
 use crate::error::{SyncError, SyncResult};
 use crate::mailbox::{sync_mailbox, uid_set};
 use crate::roles;
-use crate::secrets::{password_for, SecretStore};
+use crate::secrets::SecretStore;
 use crate::EventSink;
 
 const MIN_BACKOFF: Duration = Duration::from_secs(2);
@@ -89,6 +90,7 @@ struct AccountCtx {
     account: Account,
     store: Arc<Store>,
     secrets: Arc<dyn SecretStore>,
+    tokens: Arc<TokenProvider>,
     sink: Arc<dyn EventSink>,
 }
 
@@ -106,8 +108,7 @@ impl AccountCtx {
             .imap
             .clone()
             .ok_or_else(|| AppError::new(ErrorCode::Invalid, "Hesabın IMAP ayarı yok."))?;
-        let password = password_for(&self.secrets, &self.account.id).await?;
-        connect(&cfg, &password).await
+        connect_account(&cfg, &self.secrets, &self.tokens, &self.account).await
     }
 
     fn emit_new(&self, ids: &[MessageId]) {
@@ -134,6 +135,8 @@ struct Handle {
 pub struct SyncManager {
     store: Arc<Store>,
     secrets: Arc<dyn SecretStore>,
+    /// OAuth hesaplarının erişim jetonu önbelleği (giden kutusu da kullanır).
+    tokens: Arc<TokenProvider>,
     sink: Arc<dyn EventSink>,
     rt: tokio::runtime::Handle,
     accounts: Mutex<HashMap<AccountId, Handle>>,
@@ -159,10 +162,22 @@ impl SyncManager {
         Self {
             store,
             secrets,
+            tokens: Arc::new(TokenProvider::default()),
             sink,
             rt,
             accounts: Mutex::default(),
         }
+    }
+
+    /// Jeton sağlayıcısını değiştirir (testlerde sahte OAuth sunucusu).
+    pub fn with_tokens(mut self, tokens: Arc<TokenProvider>) -> Self {
+        self.tokens = tokens;
+        self
+    }
+
+    /// OAuth erişim jetonu önbelleği.
+    pub fn tokens(&self) -> &Arc<TokenProvider> {
+        &self.tokens
     }
 
     fn handles(&self) -> std::sync::MutexGuard<'_, HashMap<AccountId, Handle>> {
@@ -192,6 +207,7 @@ impl SyncManager {
             account: account.clone(),
             store: self.store.clone(),
             secrets: self.secrets.clone(),
+            tokens: self.tokens.clone(),
             sink: self.sink.clone(),
         });
         let tasks = vec![
@@ -333,7 +349,7 @@ impl SyncManager {
 
     /// Yalnız başlığı indirilmiş postanın gövdesini ayrı bir bağlantıyla indirir.
     pub async fn fetch_body(&self, id: MessageId) -> AppResult<()> {
-        fetch_body(&self.store, &self.secrets, id).await
+        fetch_body(&self.store, &self.secrets, &self.tokens, id).await
     }
 }
 
@@ -341,6 +357,7 @@ impl SyncManager {
 pub async fn fetch_body(
     store: &Store,
     secrets: &Arc<dyn SecretStore>,
+    tokens: &TokenProvider,
     id: MessageId,
 ) -> AppResult<()> {
     let loc = store.location(id)?.ok_or_else(|| {
@@ -371,9 +388,8 @@ pub async fn fetch_body(
         .imap
         .clone()
         .ok_or_else(|| AppError::new(ErrorCode::Invalid, "Hesabın IMAP ayarı yok."))?;
-    let password = password_for(secrets, &account.id).await?;
     let work = async {
-        let mut session = connect(&cfg, &password).await?;
+        let mut session = connect_account(&cfg, secrets, tokens, &account).await?;
         let mb = session.examine(&loc.mailbox_path).await?;
         if loc.uidvalidity.is_some() && mb.uid_validity != loc.uidvalidity {
             return Ok(None);
