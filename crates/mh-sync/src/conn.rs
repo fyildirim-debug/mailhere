@@ -6,13 +6,11 @@ use std::time::Duration;
 
 use async_imap::{Client, Session};
 use mh_core::{AppError, AppResult, ErrorCode, Security, ServerConfig};
-use rustls::pki_types::ServerName;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
-use tokio_rustls::TlsConnector;
 
-use crate::error::{auth_error, network_error, tls_error, SyncError, SyncResult};
+use crate::error::{auth_error, network_error, SyncError, SyncResult};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(30);
@@ -48,7 +46,7 @@ pub fn is_local(host: &str) -> bool {
     matches!(host, "localhost" | "127.0.0.1" | "::1" | "[::1]")
 }
 
-async fn tcp(host: &str, port: u16) -> AppResult<TcpStream> {
+pub(crate) async fn tcp(host: &str, port: u16) -> AppResult<TcpStream> {
     match timeout(CONNECT_TIMEOUT, TcpStream::connect((host, port))).await {
         Ok(Ok(s)) => {
             let _ = s.set_nodelay(true);
@@ -62,24 +60,14 @@ async fn tcp(host: &str, port: u16) -> AppResult<TcpStream> {
     }
 }
 
+/// TLS el sıkışması: webpki, olmazsa kullanıcının onayladığı sertifika
+/// (`crate::tls`); ikisi de değilse `ErrorCode::Untrusted`.
 async fn tls<S: AsyncRead + AsyncWrite + Unpin>(
     host: &str,
+    port: u16,
     stream: S,
 ) -> AppResult<tokio_rustls::client::TlsStream<S>> {
-    let name = ServerName::try_from(host.to_owned())
-        .map_err(|_| AppError::new(ErrorCode::Invalid, format!("Sunucu adı geçersiz: {host}")))?;
-    let connector = TlsConnector::from(tls_config());
-    match timeout(CONNECT_TIMEOUT, connector.connect(name, stream)).await {
-        Ok(Ok(s)) => Ok(s),
-        Ok(Err(e)) => {
-            tracing::warn!(host, error = %e, "TLS el sıkışması başarısız");
-            Err(tls_error())
-        }
-        Err(_) => Err(AppError::new(
-            ErrorCode::Network,
-            "Güvenli bağlantı zaman aşımına uğradı.",
-        )),
-    }
+    crate::tls::handshake(host, port, stream).await
 }
 
 async fn greeting<T: ImapIo>(client: &mut Client<T>) -> SyncResult<()> {
@@ -98,7 +86,7 @@ pub async fn connect(cfg: &ServerConfig, password: &str) -> SyncResult<ImapSessi
     let stream = tcp(host, cfg.port).await?;
     let client: Client<ImapStream> = match cfg.security {
         Security::Tls => {
-            let mut c = Client::new(Box::new(tls(host, stream).await?) as ImapStream);
+            let mut c = Client::new(Box::new(tls(host, cfg.port, stream).await?) as ImapStream);
             greeting(&mut c).await?;
             c
         }
@@ -114,7 +102,7 @@ pub async fn connect(cfg: &ServerConfig, password: &str) -> SyncResult<ImapSessi
                         "Sunucu STARTTLS ile güvenli bağlantıyı desteklemiyor. Güvenliği TLS olarak dene.",
                     ))
                 })?;
-            Client::new(Box::new(tls(host, plain.into_inner()).await?) as ImapStream)
+            Client::new(Box::new(tls(host, cfg.port, plain.into_inner()).await?) as ImapStream)
         }
         Security::None => {
             if !is_local(host) {
@@ -212,5 +200,52 @@ mod tests {
         };
         let err = test_login(&cfg, "yanlis").await.unwrap_err();
         assert_eq!(err.code, ErrorCode::Auth);
+    }
+
+    #[tokio::test]
+    async fn guvenilmeyen_sertifika_onaylaninca_giris() {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        let cert = crate::tls::tests::self_signed(&["localhost"], false);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let acceptor = cert.acceptor();
+        tokio::spawn(async move {
+            while let Ok((sock, _)) = listener.accept().await {
+                let acceptor = acceptor.clone();
+                tokio::spawn(async move {
+                    let Ok(tls) = acceptor.accept(sock).await else {
+                        return;
+                    };
+                    let (r, mut w) = tokio::io::split(tls);
+                    w.write_all(b"* OK hazir\r\n").await.unwrap();
+                    let mut lines = BufReader::new(r).lines();
+                    while let Ok(Some(line)) = lines.next_line().await {
+                        let tag = line.split(' ').next().unwrap_or("*").to_owned();
+                        if line.to_ascii_uppercase().ends_with("LOGOUT") {
+                            let _ = w.write_all(format!("* BYE\r\n{tag} OK\r\n").as_bytes()).await;
+                            break;
+                        }
+                        w.write_all(format!("{tag} OK tamam\r\n").as_bytes())
+                            .await
+                            .unwrap();
+                    }
+                });
+            }
+        });
+        let cfg = ServerConfig {
+            host: "localhost".into(),
+            port,
+            security: Security::Tls,
+            username: "furkan".into(),
+        };
+        let err = test_login(&cfg, "gizli-parola").await.unwrap_err();
+        assert_eq!(err.code, ErrorCode::Untrusted);
+        assert!(!err.message.contains("gizli-parola"));
+        crate::tls::trust(mh_core::TrustedCert {
+            host: "localhost".into(),
+            port,
+            sha256: cert.sha256(),
+        });
+        test_login(&cfg, "gizli-parola").await.unwrap();
     }
 }

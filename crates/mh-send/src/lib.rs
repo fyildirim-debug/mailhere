@@ -3,6 +3,7 @@
 mod message;
 mod mime;
 mod outbox;
+mod smtp;
 mod transport;
 
 pub use message::{build, validate, ReplyRef, MAX_ATTACHMENTS};

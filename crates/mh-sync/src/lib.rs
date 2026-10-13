@@ -9,10 +9,11 @@ mod mailbox;
 pub mod mutf7;
 mod roles;
 mod secrets;
+pub mod tls;
 
 use mh_core::{Account, MessageSummary, OutboxEvent, SyncStatus};
 
-pub use conn::{connect, is_local, test_login, tls_config, ImapSession};
+pub use conn::{connect, is_local, test_login, tls_config, ImapSession, ImapStream};
 pub use discover::discover;
 pub use engine::{assign_roles, fetch_body, is_syncable, Listed, SyncManager};
 pub use error::{SyncError, SyncResult};
