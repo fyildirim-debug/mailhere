@@ -1,0 +1,25 @@
+# Rust
+/target/
+**/target/
+
+# Node
+node_modules/
+app/dist/
+.pnpm-store/
+
+# Test çıktıları
+app/test-results/
+app/playwright-report/
+coverage/
+
+# Yerel ayar ve gizli değerler
+.env
+.env.*
+*.local
+src-tauri/gen/
+
+# Editör / sistem
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
