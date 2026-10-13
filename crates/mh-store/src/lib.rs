@@ -8,6 +8,7 @@ mod actions;
 mod codec;
 mod demo;
 mod drafts;
+mod jmap;
 mod mailboxes;
 mod messages;
 mod outbox;
@@ -24,6 +25,7 @@ use rusqlite::{Connection, Transaction};
 pub use actions::{Action, QueuedAction, ServerFlag, ServerRef};
 pub use demo::{seed_demo, DEMO_HOST};
 pub use drafts::DraftPut;
+pub use jmap::{JmapAccountState, JmapLocation, JmapUpsert};
 pub use mailboxes::{mailbox_id, MailboxInfo, Namespace};
 pub use messages::{
     is_full_address, is_remote_entry, MessageLocation, NewMessage, PendingMove, UpsertOutcome,

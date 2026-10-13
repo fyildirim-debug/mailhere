@@ -101,6 +101,7 @@ pub async fn account_add(
 #[tauri::command]
 pub async fn account_remove(app: AppHandle, state: State<'_, AppState>, id: String) -> Res<()> {
     state.sync.stop(&id);
+    state.jmap.stop(&id);
     state.sync.tokens().forget(&id);
     let removed = state.store.remove_account(&id)?;
     let secrets = state.secrets.clone();
@@ -158,6 +159,9 @@ pub(crate) async fn ensure_body(state: &AppState, id: MessageId) -> AppResult<()
     if loc.has_raw {
         return Ok(());
     }
+    if crate::cmd_jmap::is_jmap_account(state, &loc.account_id)? {
+        return state.jmap.fetch_body(id).await;
+    }
     state.sync.fetch_body(id).await
 }
 
@@ -178,7 +182,7 @@ pub fn messages_flag(
     unread: Option<bool>,
     starred: Option<bool>,
 ) -> Res<()> {
-    let touched = state.sync.set_flags(&ids, unread, starred)?;
+    let touched = crate::cmd_jmap::set_flags(&state, &ids, unread, starred)?;
     crate::sink::changed(&app, touched);
     Ok(())
 }
@@ -190,7 +194,7 @@ pub fn messages_move(
     ids: Vec<MessageId>,
     target: MoveTarget,
 ) -> Res<()> {
-    let touched = state.sync.move_messages(&ids, target)?;
+    let touched = crate::cmd_jmap::move_messages(&state, &ids, target)?;
     crate::sink::changed(&app, touched);
     Ok(())
 }
@@ -436,9 +440,10 @@ pub fn settings_set(
 #[tauri::command]
 pub fn sync_now(app: AppHandle, state: State<'_, AppState>) -> Res<()> {
     state.sync.sync_now();
+    state.jmap.sync_now();
     // Yerel (tanıtım) hesaplar için hemen "çevrimiçi" bildir.
     for a in state.store.accounts()? {
-        if !mh_sync::is_syncable(&a) {
+        if !mh_sync::is_syncable(&a) && !mh_jmap::is_syncable(&a) {
             let _ = app.emit(
                 events::SYNC,
                 SyncStatus {
