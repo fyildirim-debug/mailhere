@@ -14,6 +14,8 @@ mod key;
 mod mailboxes;
 mod messages;
 mod outbox;
+mod rules;
+mod scheduled;
 mod schema;
 mod search;
 mod settings;
@@ -35,7 +37,11 @@ pub use messages::{
     is_full_address, is_remote_entry, MessageLocation, NewMessage, PendingMove, UpsertOutcome,
 };
 pub use outbox::OutboxRow;
-pub use search::fts_query;
+pub use rules::{
+    plan as rule_plan, CompiledRule, ForwardClaim, MoveDest, RuleInput, RulePlan,
+    FORWARDS_PER_HOUR, MAX_RULES,
+};
+pub use search::{fold_loose, fts_query};
 
 /// Yerel depo.
 pub struct Store {
@@ -85,6 +91,7 @@ impl Store {
             .map_err(storage_err)?;
         schema::migrate(&mut conn).map_err(storage_err)?;
         search::fts_secure_delete(&conn).map_err(storage_err)?;
+        search::register_functions(&conn).map_err(storage_err)?;
         // Çökme sonrası yarıda kalan gönderimleri yeniden sıraya al.
         conn.execute("UPDATE outbox SET claimed = 0 WHERE claimed = 1", [])
             .map_err(storage_err)?;

@@ -453,6 +453,7 @@ mod tests {
                 view: View::Inbox,
                 account_id: None,
                 category: None,
+                only: None,
                 cursor: None,
                 limit: 50,
             },

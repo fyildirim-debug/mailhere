@@ -5,6 +5,7 @@ mod message;
 mod mime;
 mod outbox;
 mod parts;
+mod scheduled;
 mod smtp;
 mod transport;
 

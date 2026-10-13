@@ -60,6 +60,7 @@ fn list(store: &Store, view: View) -> Vec<MessageSummary> {
                 view,
                 account_id: Some(ACC.into()),
                 category: None,
+                only: None,
                 cursor: None,
                 limit: 500,
             },

@@ -43,6 +43,15 @@ fn main() {
         "account_add_oauth",
         "cert_inspect",
         "cert_trust",
+        "rules_list",
+        "rule_save",
+        "rule_delete",
+        "rules_reorder",
+        "rule_run",
+        "messages_move_to",
+        "outbox_list",
+        "outbox_send_now",
+        "outbox_to_draft",
     ];
     tauri_build::try_build(
         tauri_build::Attributes::new()

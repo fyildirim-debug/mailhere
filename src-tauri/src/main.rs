@@ -9,8 +9,11 @@ mod cmd_drafts;
 mod cmd_files;
 mod cmd_jmap;
 mod cmd_oauth;
+mod cmd_outbox;
+mod cmd_rules;
 mod commands;
 mod notify;
+mod rules;
 mod secrets;
 mod sink;
 mod state;
@@ -132,6 +135,15 @@ fn main() {
             cmd_oauth::account_add_oauth,
             cmd_cert::cert_inspect,
             cmd_cert::cert_trust,
+            cmd_rules::rules_list,
+            cmd_rules::rule_save,
+            cmd_rules::rule_delete,
+            cmd_rules::rules_reorder,
+            cmd_rules::rule_run,
+            cmd_rules::messages_move_to,
+            cmd_outbox::outbox_list,
+            cmd_outbox::outbox_send_now,
+            cmd_outbox::outbox_to_draft,
         ])
         .build(tauri::generate_context!())
         .expect("Mailhere başlatılamadı");

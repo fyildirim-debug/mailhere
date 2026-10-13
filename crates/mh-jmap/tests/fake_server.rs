@@ -83,6 +83,7 @@ fn list(store: &Store, view: View) -> Vec<MessageSummary> {
                 view,
                 account_id: Some(ACC.into()),
                 category: None,
+                only: None,
                 cursor: None,
                 limit: 100,
             },
@@ -619,6 +620,31 @@ async fn yonetici_islemler_akis_gonderim_taslak() {
         MailboxRole::Trash
     );
     wait_until("sunucuda çöpte", || {
+        server.with(|s| s.emails[&a].mailbox_ids == BTreeSet::from(["mb-tr".to_string()]))
+    })
+    .await;
+
+    // Kural: kimliği bilinen klasöre taşıma, yerelde hemen, sunucuda Email/set ile.
+    let inbox = format!("{ACC}:mb-in");
+    let touched = mgr.move_to_mailbox(&[id_a], &inbox).unwrap();
+    assert!(touched.contains(&inbox));
+    assert_eq!(
+        store.jmap_locations(&[id_a]).unwrap()[0].role,
+        MailboxRole::Inbox
+    );
+    wait_until("sunucuda klasörde", || {
+        server.with(|s| s.emails[&a].mailbox_ids == BTreeSet::from(["mb-in".to_string()]))
+    })
+    .await;
+    assert_eq!(
+        mgr.move_to_mailbox(&[id_a], "yok:kutu").unwrap_err().code,
+        ErrorCode::NotFound
+    );
+    assert!(mgr
+        .move_to_mailbox(&[id_a], &format!("{ACC}:mb-tr"))
+        .map(|_| ())
+        .is_ok());
+    wait_until("sunucuda yeniden çöpte", || {
         server.with(|s| s.emails[&a].mailbox_ids == BTreeSet::from(["mb-tr".to_string()]))
     })
     .await;

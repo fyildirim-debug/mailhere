@@ -391,6 +391,46 @@ impl JmapManager {
         Ok(touched)
     }
 
+    /// Postaları `mailbox_id` klasörüne taşır (kurallar için): önce yerelde,
+    /// sonra sunucuda. Klasörün hesabında olmayan postalara dokunulmaz.
+    /// Etkilenen kutuları döner.
+    pub fn move_to_mailbox(&self, ids: &[MessageId], mailbox_id: &str) -> AppResult<Vec<String>> {
+        let store = &self.shared.store;
+        let dest = store.mailbox(mailbox_id)?.ok_or_else(|| {
+            AppError::new(
+                ErrorCode::NotFound,
+                "Taşınacak klasör bulunamadı; silinmiş olabilir.",
+            )
+        })?;
+        let list: Vec<mh_store::JmapLocation> = store
+            .jmap_locations(ids)?
+            .into_iter()
+            .filter(|l| l.account_id == dest.mailbox.account_id)
+            .collect();
+        if list.is_empty() {
+            return Ok(Vec::new());
+        }
+        let items: Vec<(String, Option<String>)> = list
+            .iter()
+            .filter(|l| l.mailbox_path != dest.mailbox.path)
+            .filter_map(|l| Some((l.jmap_id.clone()?, Some(l.mailbox_path.clone()))))
+            .collect();
+        let local: Vec<MessageId> = list.iter().map(|l| l.id).collect();
+        let mut touched = store.move_local_untracked(&local, &dest.mailbox.id)?;
+        if !items.is_empty() {
+            self.send(
+                &dest.mailbox.account_id,
+                Command::Move {
+                    items,
+                    dest: Dest::Path(dest.mailbox.path),
+                },
+            );
+        }
+        touched.sort();
+        touched.dedup();
+        Ok(touched)
+    }
+
     /// Yalnız başlığı eşitlenmiş postanın gövdesini indirir.
     pub async fn fetch_body(&self, id: MessageId) -> AppResult<()> {
         let store = &self.shared.store;
