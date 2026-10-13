@@ -101,6 +101,7 @@ pub fn setup(app: &mut App, rt: tokio::runtime::Handle) -> Result<(), Box<dyn st
         rt.clone(),
     ));
     let outbox = Outbox::new(store.clone(), secrets.clone(), sync.clone(), sink);
+    outbox.set_jmap(jmap.clone());
     app.manage(AppState {
         store: store.clone(),
         secrets,

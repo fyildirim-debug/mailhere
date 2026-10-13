@@ -150,8 +150,8 @@ pub struct SyncManager {
     accounts: Mutex<HashMap<AccountId, Handle>>,
 }
 
-/// Bu hesap gerçek bir IMAP sunucusuyla eşitlenir mi? (Tanıtım hesapları ve
-/// henüz desteklenmeyen JMAP hesapları yalnız yereldir.)
+/// Bu hesap gerçek bir IMAP sunucusuyla eşitlenir mi? (Tanıtım hesapları
+/// yalnız yereldir; JMAP hesaplarını `mh-jmap` eşitler.)
 pub fn is_syncable(account: &Account) -> bool {
     account.kind == AccountKind::Imap
         && account

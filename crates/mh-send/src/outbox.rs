@@ -1,12 +1,13 @@
 //! Giden kutusu: geri alma süresi, zamanlanmış gönderim, yeniden deneme.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use mh_core::{
     Account, AccountKind, AppError, AppResult, ErrorCode, MailboxRole, MessageId, Millis,
     OutboxEvent, OutboxItem, OutgoingMessage,
 };
+use mh_jmap::JmapManager;
 use mh_store::{NewMessage, OutboxRow, Store};
 use mh_sync::{credentials_for, EventSink, SecretStore, SyncManager};
 use tokio::sync::Notify;
@@ -21,6 +22,8 @@ pub struct Outbox {
     pub(crate) store: Arc<Store>,
     secrets: Arc<dyn SecretStore>,
     pub(crate) sync: Arc<SyncManager>,
+    /// JMAP hesaplarının taslakları için; uygulama açılışta bağlar.
+    pub(crate) jmap: OnceLock<Arc<JmapManager>>,
     pub(crate) sink: Arc<dyn EventSink>,
     wake: Notify,
 }
@@ -51,9 +54,15 @@ impl Outbox {
             store,
             secrets,
             sync,
+            jmap: OnceLock::new(),
             sink,
             wake: Notify::new(),
         })
+    }
+
+    /// JMAP eşitleyicisini bağlar (taslaklar JMAP hesabında onun kuyruğundan gider).
+    pub fn set_jmap(&self, jmap: Arc<JmapManager>) {
+        let _ = self.jmap.set(jmap);
     }
 
     /// Zamanlayıcıyı başlatır.
@@ -628,6 +637,51 @@ mod tests {
         assert_eq!(drafts.len(), 1, "ikinci taslak açılmaz");
         assert_eq!(drafts[0].id, draft);
         assert_eq!(drafts[0].subject, "Son hali");
+    }
+
+    #[tokio::test]
+    async fn jmap_taslagi_jmap_esitleyicisinden_gecer() {
+        let (store, rec, outbox) = setup();
+        let mut m = msg();
+        m.account_id = "demo-sunucu".into();
+        m.subject = "JMAP taslağı".into();
+        // Eşitleyici bağlanmadan JMAP taslağı yazılmaz (sessizce IMAP'e düşmez).
+        assert_eq!(
+            outbox.save_draft(&m, 1_000).unwrap_err().code,
+            ErrorCode::Internal
+        );
+        outbox.set_jmap(Arc::new(mh_jmap::JmapManager::new(
+            store.clone(),
+            Arc::new(MemorySecrets::new()),
+            rec.clone(),
+            tokio::runtime::Handle::current(),
+        )));
+        let drafts = |s: &Store, acc: &str| view(s, mh_core::View::Drafts, acc);
+        let id = outbox.save_draft(&m, 1_000).unwrap();
+        assert!(drafts(&store, "demo-sunucu").iter().any(|d| d.id == id));
+
+        // Aynı kimlikle yerine yazılır.
+        m.draft_id = Some(id);
+        m.subject = "JMAP taslağı 2".into();
+        assert_eq!(outbox.save_draft(&m, 2_000).unwrap(), id);
+        let list = drafts(&store, "demo-sunucu");
+        assert_eq!(
+            list.iter()
+                .filter(|d| d.subject.starts_with("JMAP taslağı"))
+                .count(),
+            1
+        );
+
+        // Gönderen IMAP hesabına geçince JMAP'teki eski taslak kalkar.
+        m.account_id = "demo-is".into();
+        let moved = outbox.save_draft(&m, 3_000).unwrap();
+        assert!(!drafts(&store, "demo-sunucu")
+            .iter()
+            .any(|d| d.subject == "JMAP taslağı 2"));
+        assert!(drafts(&store, "demo-is").iter().any(|d| d.id == moved));
+
+        outbox.delete_draft(moved).unwrap();
+        assert!(!drafts(&store, "demo-is").iter().any(|d| d.id == moved));
     }
 
     #[tokio::test]

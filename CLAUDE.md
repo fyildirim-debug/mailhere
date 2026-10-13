@@ -30,12 +30,14 @@ Tam kurallar: [`docs/TASARIM.md`](docs/TASARIM.md). Tek doğruluk kaynağı: `ap
 ## Mimari
 
 - `app/` — Svelte 5 + TypeScript + Vite arayüzü. Tek giriş, pencere türü `#/main`, `#/notify`, `#/quick/:id`, `#/compose`, `#/onboarding` ile seçilir.
-- `src-tauri/` — Tauri 2 kabuğu: pencereler, tepsi, komutlar, olaylar.
+- `src-tauri/` — Tauri 2 kabuğu: pencereler, tepsi, komutlar, olaylar, imzalı güncelleme.
 - `crates/mh-core` — ortak tipler (arayüzle sözleşme; `app/src/lib/api/types.ts` ile birebir aynı tutulur).
 - `crates/mh-store` — SQLite + FTS5 yerel depo.
 - `crates/mh-mime` — ayrıştırma, HTML temizleme, önizleme, akıllı kategori.
-- `crates/mh-sync` — hesap ayarı keşfi, IMAP eşitleme, IDLE.
-- `crates/mh-send` — SMTP gönderim, giden kutusu, geri alma.
+- `crates/mh-sync` — hesap ayarı keşfi, IMAP eşitleme, IDLE, sertifika onayı, kimlik bilgileri (parola / OAuth jetonu).
+- `crates/mh-jmap` — JMAP (Stalwart vb.): keşif, eşitleme, anlık bildirim (EventSource), gönderim, taslak.
+- `crates/mh-oauth` — Google ve Microsoft OAuth 2 (PKCE, yerel dönüş adresi, XOAUTH2).
+- `crates/mh-send` — SMTP / JMAP gönderim, giden kutusu, geri alma, taslaklar, iletilen ekler.
 - `crates/mh-notify` — bildirim kuralları.
 - Arayüz yalnız gösterir ve komut gönderir; ağ, ayrıştırma ve veri işi Rust'tadır.
 - Arayüz, Tauri dışında (tarayıcı, testler) `app/src/lib/api/mock.ts` sahte arka ucuyla çalışır; sözleşme değişirse ikisi birlikte güncellenir.
