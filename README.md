@@ -18,7 +18,12 @@ Yeni posta geldiğinde koca bir pencere açılmaz: ekranın köşesinde küçük
 - **Akıllı süzgeç** — gelen kutusu Kişiler, Bildirimler ve Bültenler diye kendiliğinden ayrılır.
 - **Klavye önce** — `J/K` gezin, `E` arşivle, `H` ertele, `R` yanıtla, `Ctrl K` her şeyi bul.
 - **Geri alınabilir her şey** — arşivleme, silme, erteleme ve gönderme birkaç saniye geri alınabilir.
-- **Gizlilik varsayılan** — parolalar işletim sisteminin anahtar zincirinde; uzak görseller ve izleme pikselleri kapalı; HTML posta betiksiz ve yalıtılmış gösterilir.
+- **Her hesap** — IMAP/SMTP (ayarlar kendiliğinden bulunur), Gmail ve Outlook / Microsoft 365 için tarayıcıyla giriş (OAuth 2, XOAUTH2), Stalwart gibi JMAP sunucuları (anlık bildirim dahil).
+- **Taslaklar ve iletme** — yazarken taslak kendiliğinden sunucuya kaydedilir; iletilen postanın ekleri de gider; imza hesap başına düzenlenir.
+- **Çevrimdışı güvenli** — arşivleme, bayrak, taşıma gibi sunucu işlemleri kalıcı bir kuyrukta bekler, bağlantı gelince sırayla uygulanır; uygulama kapansa da kaybolmaz.
+- **Gizlilik varsayılan** — parolalar ve jetonlar işletim sisteminin anahtar zincirinde; uzak görseller ve izleme pikselleri kapalı; HTML posta betiksiz ve yalıtılmış gösterilir. Kendinden imzalı sertifika ancak parmak izini görüp onayladığında kabul edilir.
+- **Sakin bildirim** — tam ekran uygulama ya da sunum açıkken kart çıkmaz.
+- **İmzalı güncelleme** — yeni sürüm uygulama içinden kurulur; imzası tutmayan paket kurulmaz.
 - **Hafif** — Tauri 2 ile işletim sisteminin kendi web görünümü kullanılır; ayrı bir tarayıcı gömülmez.
 
 ## Geliştirme

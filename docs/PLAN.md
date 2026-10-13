@@ -45,12 +45,14 @@ Ayrıntılı plan belgesi: [Mailhere — proje planı](https://claude.ai/code/ar
 | --- | --- |
 | 0 · İskelet | tamam |
 | 1 · Okuma | tamam (IMAP; Gmail "Tüm Postalar" eşitlenmez, arşiv hedefi olarak kullanılır) |
-| 2 · Yazma | tamam; eksik: taslağın sunucuya kaydı, imza düzenleme ekranı, iletilen postanın eklerini taşıma |
-| 3 · Bildirim | tamam; GNOME Wayland'de sistem bildirimine düşüş gerçek masaüstünde denenecek |
+| 2 · Yazma | tamam (sunucuda taslak, imza düzenleme, iletilen ekler dahil) |
+| 3 · Bildirim | tamam (tam ekran algılama: Windows, Linux X11); GNOME Wayland'de sistem bildirimine düşüş gerçek masaüstünde denenecek |
 | 4 · Akıllı kutu | tamam |
-| 5 · Sağlayıcılar | başlamadı (OAuth uygulama kaydı ve JMAP eşitleme) |
-| 6 · Yayın | Linux paketleri yerelde üretildi; imzalı otomatik güncelleme yok |
+| 5 · Sağlayıcılar | kod tamam: Google / Microsoft OAuth (Dovecot XOAUTH2 ile sınandı), JMAP (Stalwart 0.16 ile sınandı). Gerçek Google / Microsoft girişi için uygulama kaydı ve istemci kimlikleri bekleniyor |
+| 6 · Yayın | CI her push'ta Linux (deb, rpm, AppImage) ve Windows (NSIS, MSI) paketi üretir; imzalı güncelleme ve `latest.json` hazır, imza anahtarı depo gizli değerlerine eklenince sürüm imzalanır |
 
-Açık işler: geçersiz sertifika için onay ekranı, çevrimdışı sunucu eylemlerinin kalıcı kuyruğu, tam ekran algılama.
+Sağlamlık: kalıcı sunucu işlem kuyruğu (yeniden başlatmaya dayanır), yarıda kalan eşitlemede atlanan posta yok, geri alınan taşımada hayalet ya da kopya satır yok, onaylı (sabitlenmiş) sertifikalar IMAP, SMTP ve JMAP'te.
+
+Açık işler: Google `mail.google.com` kapsamı için Google uygulama doğrulaması; MSI yalnız İngilizce; güncelleme indirme ilerlemesi gösterilmiyor; Windows paketi gerçek bir Windows'ta elle denenecek.
 
 İlk sürüm dışında: takvim, PGP ve S/MIME, Exchange'e özel protokol, mobil.
