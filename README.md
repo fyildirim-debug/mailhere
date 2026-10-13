@@ -46,7 +46,7 @@ MAILHERE_DEMO=1 MAILHERE_SECRETS=memory MAILHERE_DATA_DIR=$(mktemp -d) pnpm taur
 | `MAILHERE_GOOGLE_CLIENT_ID`, `MAILHERE_GOOGLE_CLIENT_SECRET` | Google ile giriş (Gmail, XOAUTH2); masaüstü uygulaması OAuth istemcisi |
 | `MAILHERE_MICROSOFT_CLIENT_ID` | Microsoft ile giriş (Outlook / Microsoft 365, XOAUTH2); genel istemci |
 
-OAuth istemci kimlikleri koda yazılmaz: derlemede (`pnpm tauri build`) bu ortam değişkenlerinden gömülür, çalışırken aynı adlı değişkenler bunları ezer. Boş ya da tanımsızsa o sağlayıcının giriş düğmesi görünmez. CI'da depo gizli değerlerinden (`secrets`) gelir. Dönüş adresi `http://127.0.0.1:<rastgele kapı>/`: Google'da istemci türü "Masaüstü uygulaması" seçilir (ek kayıt gerekmez); Microsoft'ta "Mobil ve masaüstü uygulamaları" platformuna `http://127.0.0.1` dönüş adresi eklenir (kapı eşleşmede yok sayılır).
+OAuth istemci kimlikleri koda yazılmaz: derlemede (`pnpm tauri build`) bu ortam değişkenlerinden gömülür, çalışırken aynı adlı değişkenler bunları ezer. Boş ya da tanımsızsa o sağlayıcının düğmesi uygulama parolasıyla IMAP yoluna yönlendirir. CI'da depo gizli değerlerinden (`secrets`) gelir. Dönüş adresi `http://127.0.0.1:<rastgele kapı>/`: Google'da istemci türü "Masaüstü uygulaması" seçilir (ek kayıt gerekmez); Microsoft'ta "Mobil ve masaüstü uygulamaları" platformuna `http://127.0.0.1` dönüş adresi eklenir (kapı eşleşmede yok sayılır).
 
 Denetimler:
 
