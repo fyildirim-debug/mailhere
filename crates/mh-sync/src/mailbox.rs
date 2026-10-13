@@ -4,11 +4,11 @@ use std::collections::{HashMap, HashSet};
 
 use async_imap::types::{Fetch, Flag};
 use futures::TryStreamExt;
-use mh_core::{MessageId, Millis};
+use mh_core::{AppError, ErrorCode, MessageId, Millis};
 use mh_store::{MailboxInfo, NewMessage, Store};
 
 use crate::conn::ImapSession;
-use crate::error::SyncResult;
+use crate::error::{SyncError, SyncResult};
 
 /// İlk eşitlemede indirilecek en yeni posta sayısı.
 pub const INITIAL_FETCH: u32 = 300;
@@ -70,39 +70,88 @@ fn now_ms() -> Millis {
         .unwrap_or(0)
 }
 
+/// FETCH yanıtından ayrıştırma için gereken sahipli veriler; ayrı iş
+/// parçacığına taşınabilir.
+struct RawFetch {
+    uid: u32,
+    internal: Option<Millis>,
+    raw: Vec<u8>,
+    headers_only: bool,
+    unread: bool,
+    starred: bool,
+    size: Option<u32>,
+}
+
+impl RawFetch {
+    fn of(f: &Fetch) -> Option<Self> {
+        let uid = f.uid?;
+        let (raw, headers_only) = match f.body() {
+            Some(b) => (b.to_vec(), false),
+            None => (f.header()?.to_vec(), true),
+        };
+        let (unread, starred) = flags_of(f);
+        Some(Self {
+            uid,
+            internal: f.internal_date().map(|d| d.timestamp_millis()),
+            raw,
+            headers_only,
+            unread,
+            starred,
+            size: f.size,
+        })
+    }
+}
+
 fn to_message(
-    f: &Fetch,
-    info: &MailboxInfo,
+    f: RawFetch,
+    account_id: &str,
+    mailbox_id: &str,
     uidvalidity: Option<u32>,
     now: Millis,
 ) -> Option<NewMessage> {
-    let uid = f.uid?;
-    let internal = f.internal_date().map(|d| d.timestamp_millis());
-    let (raw, headers_only) = match f.body() {
-        Some(b) => (b.to_vec(), false),
-        None => (f.header()?.to_vec(), true),
-    };
-    let fallback = internal.unwrap_or(now);
-    let mut m = NewMessage::from_raw(
-        raw,
-        headers_only,
-        &info.mailbox.account_id,
-        &info.mailbox.id,
-        fallback,
-    )?;
+    let fallback = f.internal.unwrap_or(now);
+    let mut m = NewMessage::from_raw(f.raw, f.headers_only, account_id, mailbox_id, fallback)?;
     // Gelecekten gelen (bozuk) tarihlerde sunucunun alış zamanı esas alınır.
     if m.date > now + 86_400_000 {
         m.date = fallback;
     }
-    let (unread, starred) = flags_of(f);
-    m.uid = Some(uid);
+    m.uid = Some(f.uid);
     m.uidvalidity = uidvalidity;
-    m.unread = unread;
-    m.starred = starred;
+    m.unread = f.unread;
+    m.starred = f.starred;
     if let Some(size) = f.size {
         m.size = u64::from(size);
     }
     Some(m)
+}
+
+/// Postaları ayrı iş parçacığında ayrıştırır: HTML → metin işlemciye
+/// bağlıdır; büyük ya da kötü niyetli bir posta eşzamansız eşitleme görevini
+/// (ve aynı iş parçacığındaki diğer görevleri) bloklamasın.
+async fn parse_all(
+    items: Vec<RawFetch>,
+    info: &MailboxInfo,
+    uidvalidity: Option<u32>,
+    now: Millis,
+) -> SyncResult<Vec<(u32, Option<NewMessage>)>> {
+    let account = info.mailbox.account_id.clone();
+    let mailbox = info.mailbox.id.clone();
+    tokio::task::spawn_blocking(move || {
+        items
+            .into_iter()
+            .map(|f| {
+                let uid = f.uid;
+                (uid, to_message(f, &account, &mailbox, uidvalidity, now))
+            })
+            .collect()
+    })
+    .await
+    .map_err(|_| {
+        SyncError::App(AppError::new(
+            ErrorCode::Internal,
+            "Postalar ayrıştırılamadı.",
+        ))
+    })
 }
 
 /// İndirilecek UID'ler: yerelde olmayanlar, en yeniler önce (liste hızla
@@ -198,17 +247,27 @@ pub async fn sync_mailbox(
             if uids.is_empty() {
                 continue;
             }
-            let fetches: Vec<Fetch> = session
-                .uid_fetch(uid_set(&uids), query)
-                .await?
-                .try_collect()
-                .await?;
-            for f in fetches
-                .iter()
-                .filter(|f| f.uid.is_some_and(|u| uids.contains(&u)))
-            {
-                let Some(m) = to_message(f, info, mb.uid_validity, now) else {
-                    tracing::warn!(uid = ?f.uid, "posta ayrıştırılamadı, atlandı");
+            let items = {
+                let fetches: Vec<Fetch> = session
+                    .uid_fetch(uid_set(&uids), query)
+                    .await?
+                    .try_collect()
+                    .await?;
+                let mut items = Vec::with_capacity(fetches.len());
+                for f in fetches
+                    .iter()
+                    .filter(|f| f.uid.is_some_and(|u| uids.contains(&u)))
+                {
+                    match RawFetch::of(f) {
+                        Some(r) => items.push(r),
+                        None => tracing::warn!(uid = ?f.uid, "posta okunamadı, atlandı"),
+                    }
+                }
+                items
+            };
+            for (uid, m) in parse_all(items, info, mb.uid_validity, now).await? {
+                let Some(m) = m else {
+                    tracing::warn!(uid, "posta ayrıştırılamadı, atlandı");
                     continue;
                 };
                 let unread = m.unread;

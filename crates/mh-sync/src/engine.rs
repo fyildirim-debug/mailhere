@@ -532,7 +532,15 @@ pub async fn fetch_body(
         Ok(Err(e)) => return Err(e.to_app()),
         Err(_) => return Err(SyncError::Timeout.to_app()),
     };
-    store.store_body(id, &raw)
+    // Ayrıştırma (HTML → metin) işlemciye bağlıdır; büyük ya da kötü niyetli
+    // bir posta eşzamansız iş parçacığını bloklamasın.
+    let (raw, parsed) = tokio::task::spawn_blocking(move || {
+        let parsed = mh_mime::parse(&raw, false);
+        (raw, parsed)
+    })
+    .await
+    .map_err(|_| AppError::new(ErrorCode::Internal, "Posta ayrıştırılamadı."))?;
+    store.store_parsed_body(id, &raw, parsed)
 }
 
 /// IMAP SEARCH için tırnaklı dize; yalnız yazdırılabilir ASCII kabul edilir.
