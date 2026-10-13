@@ -36,12 +36,13 @@ fn plain_store(path: &Path) -> Store {
     Store::init(conn).unwrap()
 }
 
-/// Klasördeki tüm dosyaların baytları (veritabanı, WAL, yan dosyalar).
+/// Klasördeki dosyaların baytları (veritabanı, WAL, yan dosyalar). `-shm`
+/// yalnız WAL dizinidir (içerik taşımaz) ve Windows'ta açıkken kilitlidir.
 fn all_bytes(dir: &Path) -> Vec<(PathBuf, Vec<u8>)> {
     fs::read_dir(dir)
         .unwrap()
         .map(|e| e.unwrap().path())
-        .filter(|p| p.is_file())
+        .filter(|p| p.is_file() && !p.to_string_lossy().ends_with("-shm"))
         .map(|p| {
             let b = fs::read(&p).unwrap();
             (p, b)
@@ -210,8 +211,13 @@ fn plain_with_pending_wal(dir: &Path) -> PathBuf {
         .unwrap();
     fill(&s);
     let copy = dir.join("t.db");
-    fs::copy(&src, &copy).unwrap();
-    fs::copy(sidecar(&src, "-wal"), sidecar(&copy, "-wal")).unwrap();
+    // `fs::copy` değil: Windows'ta açık dosyayı paylaşımlı okumak için.
+    fs::write(&copy, fs::read(&src).unwrap()).unwrap();
+    fs::write(
+        sidecar(&copy, "-wal"),
+        fs::read(sidecar(&src, "-wal")).unwrap(),
+    )
+    .unwrap();
     drop(s);
     fs::remove_dir_all(&src_dir).unwrap();
     copy

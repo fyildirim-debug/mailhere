@@ -158,7 +158,7 @@ pub(crate) fn recover(path: &Path) -> AppResult<()> {
                     // Boş dosya: veri içermez.
                     fs::remove_file(path).map_err(|e| io_error(path, &e))?;
                 }
-                fs::rename(&old, path).map_err(|e| io_error(path, &e))?;
+                rename(&old, path).map_err(|e| io_error(path, &e))?;
             }
             // Yer değiştirme bitmiş; eski dosya, anahtarla açılış doğrulandıktan
             // sonra `finish` içinde silinir.
@@ -290,9 +290,9 @@ fn encrypt_in_place(path: &Path, key: &DbKey) -> Result<(), BoxError> {
 
     // 4. Yer değiştir: önce eski dosya kenara, sonra kopya asıl ada. Arada
     //    kesilirse `recover` eski dosyayı geri koyar.
-    fs::rename(path, &old)?;
-    if let Err(e) = fs::rename(&tmp, path) {
-        let _ = fs::rename(&old, path);
+    rename(path, &old)?;
+    if let Err(e) = rename(&tmp, path) {
+        let _ = rename(&old, path);
         return Err(e.into());
     }
     sync_dir(path);
@@ -393,6 +393,28 @@ fn wipe(path: &Path) -> io::Result<()> {
     remove_db_files(path)?;
     sync_dir(path);
     Ok(())
+}
+
+/// Ad değiştirir. Windows'ta virüs tarayıcısı gibi bir süreç yeni yazılmış
+/// dosyayı kısa süre açık tutabildiğinden birkaç kez yeniden denenir.
+fn rename(from: &Path, to: &Path) -> io::Result<()> {
+    let mut attempt = 0u64;
+    loop {
+        match fs::rename(from, to) {
+            Err(e)
+                if cfg!(windows)
+                    && attempt < 8
+                    && !matches!(
+                        e.kind(),
+                        io::ErrorKind::NotFound | io::ErrorKind::CrossesDevices
+                    ) =>
+            {
+                attempt += 1;
+                std::thread::sleep(std::time::Duration::from_millis(50 * attempt));
+            }
+            other => return other,
+        }
+    }
 }
 
 /// Dosyayı diske yazar. Windows'ta salt okunur tanıtıcıyla yapılamadığından
@@ -497,14 +519,14 @@ pub fn relocate(from: &Path, to: &Path) -> AppResult<bool> {
 /// Aynı birimde ad değiştirir; olmazsa (farklı birim, ör. ağ paylaşımına
 /// yönlendirilmiş profil) kopyalar, diske yazar, yerine koyar ve kaynağı siler.
 fn move_file(src: &Path, dst: &Path) -> io::Result<()> {
-    if fs::rename(src, dst).is_ok() {
+    if rename(src, dst).is_ok() {
         sync_dir(dst);
         return Ok(());
     }
     let part = sidecar(dst, ".tasiniyor");
     fs::copy(src, &part)?;
     sync_file(&part)?;
-    fs::rename(&part, dst)?;
+    rename(&part, dst)?;
     sync_dir(dst);
     fs::remove_file(src)
 }
