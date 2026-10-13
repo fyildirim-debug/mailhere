@@ -90,6 +90,7 @@ pub async fn account_add(
         jmap_url: None,
         signature: None,
         created_at: now_ms(),
+        auth: Default::default(),
     };
     state.store.insert_account(&account)?;
     state.sync.start(account.clone());

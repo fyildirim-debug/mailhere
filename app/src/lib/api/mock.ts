@@ -4,6 +4,9 @@
 import { createDemoData } from './demo-data';
 import {
   defaultSettings,
+  type AuthKind,
+  type MessageId,
+  type OutgoingMessage,
   EVENTS,
   type Account,
   type AppError,
@@ -143,6 +146,48 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     return structuredClone({ ...m, thread, remoteAllowed: allowed, bodyHtml });
   }
 
+  function addMailboxes(accountId: string) {
+    for (const [path, name, role] of [
+      ['INBOX', 'Gelen Kutusu', 'inbox'],
+      ['Sent', 'Gönderilenler', 'sent'],
+      ['Drafts', 'Taslaklar', 'drafts'],
+      ['Archive', 'Arşiv', 'archive'],
+      ['Trash', 'Çöp', 'trash'],
+    ] as const) {
+      state.mailboxes.push({ id: `${accountId}:${path}`, accountId, path, name, role, unread: 0, total: 0 });
+    }
+  }
+
+  function newAccount(partial: Pick<Account, 'name' | 'email' | 'displayName' | 'kind' | 'imap' | 'smtp' | 'jmapUrl' | 'auth'> & { color: string | null }): Account {
+    const colors = ['#4C6FD8', '#2E9A61', '#D08A1E', '#9A5BD6', '#D0566E'];
+    const account: Account = {
+      ...partial,
+      id: `acc-${nextId++}`,
+      color: partial.color ?? colors[state.accounts.length % colors.length],
+      signature: null,
+      createdAt: now(),
+    };
+    state.accounts.push(account);
+    addMailboxes(account.id);
+    emit(EVENTS.sync, { accountId: account.id, state: 'syncing', done: 0, total: 0 });
+    return account;
+  }
+
+  const grants = new Map<string, { provider: AuthKind; email: string; displayName: string | null }>();
+
+  function draftMessage(msg: OutgoingMessage, id: MessageId): MessageDetail {
+    const account = state.accounts.find((a) => a.id === msg.accountId);
+    if (!account) fail('notFound', 'Hesap bulunamadı.');
+    return {
+      id, accountId: account.id, mailboxId: boxFor(account.id, 'drafts'), threadId: `draft-${id}`,
+      from: { name: account.displayName, email: account.email }, to: msg.to, subject: msg.subject,
+      snippet: msg.bodyText.replace(/\s+/g, ' ').slice(0, 200), date: now(), unread: false, starred: false,
+      hasAttachments: msg.attachments.length > 0, category: 'people', snoozedUntil: null, cc: msg.cc, replyTo: [],
+      messageIdHeader: null, references: [], bodyText: msg.bodyText, bodyHtml: null, hasRemoteContent: false,
+      remoteAllowed: false, attachments: [], thread: [],
+    };
+  }
+
   const commands: { [K in CommandName]: (args: CommandArgs<K>) => CommandResult<K> | Promise<CommandResult<K>> } = {
     accounts_list: () => structuredClone(state.accounts),
     account_discover: ({ email }) => {
@@ -158,32 +203,13 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     account_add: ({ input }) => {
       if (!input.password) fail('auth', 'Parola gerekli.');
       if (input.password === 'yanlis') fail('auth', 'Sunucu parolayı kabul etmedi. Parolayı ya da uygulama parolasını kontrol et.');
-      const colors = ['#4C6FD8', '#2E9A61', '#D08A1E', '#9A5BD6', '#D0566E'];
-      const account: Account = {
-        id: `acc-${nextId++}`,
-        name: input.name,
-        email: input.email,
-        displayName: input.displayName,
-        color: input.color ?? colors[state.accounts.length % colors.length],
-        kind: 'imap',
-        imap: input.imap,
-        smtp: input.smtp,
-        jmapUrl: null,
-        signature: null,
-        createdAt: now(),
-      };
-      state.accounts.push(account);
-      for (const [path, name, role] of [
-        ['INBOX', 'Gelen Kutusu', 'inbox'],
-        ['Sent', 'Gönderilenler', 'sent'],
-        ['Drafts', 'Taslaklar', 'drafts'],
-        ['Archive', 'Arşiv', 'archive'],
-        ['Trash', 'Çöp', 'trash'],
-      ] as const) {
-        state.mailboxes.push({ id: `${account.id}:${path}`, accountId: account.id, path, name, role, unread: 0, total: 0 });
+      const pinned = state.settings.trustedCerts.some((c) => c.host === input.imap.host);
+      if (input.imap.host.includes('kendinden') && !pinned) {
+        fail('untrusted', `${input.imap.host} sunucusunun sertifikası güvenilir bir kuruluşça imzalanmamış.`);
       }
-      emit(EVENTS.sync, { accountId: account.id, state: 'syncing', done: 0, total: 0 });
-      return structuredClone(account);
+      return structuredClone(
+        newAccount({ ...input, kind: 'imap', jmapUrl: null, auth: 'password' }),
+      );
     },
     account_remove: ({ id }) => {
       state.accounts = state.accounts.filter((a) => a.id !== id);
@@ -267,6 +293,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       if (!msg.to.length) fail('invalid', 'En az bir alıcı ekle.');
       const id = `out-${nextId++}`;
       const sendAt = msg.sendAt ?? now() + state.settings.undoSendSeconds * 1000;
+      if (msg.draftId != null) state.messages = state.messages.filter((m) => m.id !== msg.draftId);
       const timer = setTimeout(
         () => {
           outbox.delete(id);
@@ -330,6 +357,72 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     notify_hide: () => null,
     notify_pending: () => [],
     notify_snooze: () => null,
+    jmap_discover: ({ email }) => {
+      const domain = email.split('@')[1]?.trim();
+      if (!domain || !domain.includes('.')) fail('discovery', 'Bu adres için JMAP sunucusu bulunamadı.');
+      return `https://${domain}/.well-known/jmap`;
+    },
+    account_add_jmap: ({ input }) => {
+      if (!input.password) fail('auth', 'Parola gerekli.');
+      return newAccount({ ...input, kind: 'jmap', imap: null, smtp: null, jmapUrl: input.sessionUrl, auth: 'password' });
+    },
+    oauth_providers: () => ['google', 'microsoft'],
+    oauth_sign_in: async ({ provider, email }) => {
+      await new Promise((r) => setTimeout(r, 300));
+      const grantId = `grant-${nextId++}`;
+      const addr = email?.includes('@') ? email : provider === 'google' ? 'furkan@gmail.com' : 'furkan@outlook.com';
+      grants.set(grantId, { provider, email: addr, displayName: 'Furkan Yıldırım' });
+      return { grantId, provider, email: addr, displayName: 'Furkan Yıldırım' };
+    },
+    account_add_oauth: ({ input }) => {
+      const g = grants.get(input.grantId);
+      if (!g) fail('auth', 'Giriş süresi doldu. Yeniden giriş yap.');
+      grants.delete(input.grantId);
+      const google = g.provider === 'google';
+      const imap = { host: google ? 'imap.gmail.com' : 'outlook.office365.com', port: 993, security: 'tls' as const, username: g.email };
+      const smtp = { host: google ? 'smtp.gmail.com' : 'smtp.office365.com', port: google ? 465 : 587, security: google ? ('tls' as const) : ('starttls' as const), username: g.email };
+      return newAccount({ name: input.name, email: g.email, displayName: input.displayName, color: input.color, kind: 'imap', imap, smtp, jmapUrl: null, auth: g.provider });
+    },
+    account_update: ({ id, update }) => {
+      const a = state.accounts.find((x) => x.id === id);
+      if (!a) fail('notFound', 'Hesap bulunamadı.');
+      Object.assign(a, update);
+      emit(EVENTS.changed, { mailboxIds: [] });
+      return structuredClone(a);
+    },
+    cert_inspect: ({ host, port }) => ({
+      host,
+      port,
+      sha256: 'A1:B2:C3:D4:E5:F6:07:18:29:3A:4B:5C:6D:7E:8F:90:01:12:23:34:45:56:67:78:89:9A:AB:BC:CD:DE:EF:F0',
+      subject: `CN=${host}`,
+      issuer: `CN=${host}`,
+      notBefore: now() - 30 * 86_400_000,
+      notAfter: now() + 335 * 86_400_000,
+      names: [host],
+      problem: 'kendinden imzalı',
+    }),
+    cert_trust: ({ host, port, sha256 }) => {
+      state.settings.trustedCerts = [...state.settings.trustedCerts.filter((c) => !(c.host === host && c.port === port)), { host, port, sha256 }];
+      emit(EVENTS.settings, structuredClone(state.settings));
+      return null;
+    },
+    draft_save: ({ msg }) => {
+      const id = msg.draftId ?? nextId++;
+      state.messages = state.messages.filter((m) => m.id !== id);
+      state.messages.push(draftMessage(msg, id));
+      emit(EVENTS.changed, { mailboxIds: [] });
+      return id;
+    },
+    draft_delete: ({ id }) => {
+      state.messages = state.messages.filter((m) => m.id !== id);
+      emit(EVENTS.changed, { mailboxIds: [] });
+      return null;
+    },
+    update_check: () =>
+      typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('guncelleme')
+        ? { version: '0.2.0', notes: 'JMAP ve Google girişi.', date: '2026-10-20' }
+        : null,
+    update_install: () => null,
     demo_notify: () => {
       const m = state.messages.find((x) => x.subject === 'Cumartesi kahvaltı?') ?? state.messages[0];
       if (m) {

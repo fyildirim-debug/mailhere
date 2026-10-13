@@ -258,6 +258,8 @@ mod tests {
             in_reply_to: None,
             attachments: vec![],
             send_at: None,
+            forward_from: None,
+            draft_id: None,
         }
     }
 

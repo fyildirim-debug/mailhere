@@ -46,6 +46,19 @@ pub enum AccountKind {
     Jmap,
 }
 
+/// Hesabın kimlik doğrulama yolu.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum AuthKind {
+    /// Parola ya da uygulama parolası (anahtar zincirinde).
+    #[default]
+    Password,
+    /// Google OAuth 2 (XOAUTH2); yenileme jetonu anahtar zincirinde.
+    Google,
+    /// Microsoft OAuth 2 (XOAUTH2); yenileme jetonu anahtar zincirinde.
+    Microsoft,
+}
+
 /// Kayıtlı bir hesap. Parola burada yoktur; anahtar zincirindedir.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -64,6 +77,8 @@ pub struct Account {
     pub jmap_url: Option<String>,
     pub signature: Option<String>,
     pub created_at: Millis,
+    #[serde(default)]
+    pub auth: AuthKind,
 }
 
 /// Hesap ekleme isteği. `password` yalnız bir kez kullanılır ve anahtar
@@ -78,6 +93,51 @@ pub struct NewAccount {
     pub imap: ServerConfig,
     pub smtp: ServerConfig,
     pub password: String,
+}
+
+/// JMAP hesabı ekleme isteği (ör. Stalwart). `password` anahtar zincirine yazılır.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct NewJmapAccount {
+    pub name: String,
+    pub email: String,
+    pub display_name: String,
+    pub color: Option<String>,
+    /// JMAP oturum adresi (ör. https://posta.alanadi.com/.well-known/jmap).
+    pub session_url: String,
+    pub username: String,
+    pub password: String,
+}
+
+/// Tarayıcıda tamamlanan OAuth girişi. Jetonlar arka uçta bekler; arayüze
+/// yalnız kimlik ve adres döner.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct OAuthGrant {
+    pub grant_id: String,
+    pub provider: AuthKind,
+    pub email: String,
+    pub display_name: Option<String>,
+}
+
+/// OAuth girişinden hesap oluşturma isteği.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct NewOAuthAccount {
+    pub grant_id: String,
+    pub name: String,
+    pub display_name: String,
+    pub color: Option<String>,
+}
+
+/// Hesabın düzenlenebilir alanları (tamamı yeniden yazılır).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountUpdate {
+    pub name: String,
+    pub display_name: String,
+    pub color: String,
+    pub signature: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -299,6 +359,12 @@ pub struct OutgoingMessage {
     pub attachments: Vec<String>,
     /// Zamanlanmış gönderim; yoksa geri alma süresi sonunda gider.
     pub send_at: Option<Millis>,
+    /// İletilen posta: ekleri bu postadan kopyalanır.
+    #[serde(default)]
+    pub forward_from: Option<MessageId>,
+    /// Bu gönderimle silinecek (ya da kaydedilirken yerine yazılacak) taslak.
+    #[serde(default)]
+    pub draft_id: Option<MessageId>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -315,6 +381,8 @@ pub enum ComposeMode {
     Reply,
     ReplyAll,
     Forward,
+    /// Kayıtlı bir taslağı açar (`message_id` taslağın kimliği).
+    Draft,
 }
 
 /// Yazma penceresini açarken verilen ön bilgi.
@@ -339,6 +407,11 @@ pub enum SyncState {
     Offline,
     Error {
         message: String,
+    },
+    /// Sunucunun sertifikası güvenilir değil; kullanıcı onayı bekleniyor.
+    Untrusted {
+        host: String,
+        port: u16,
     },
 }
 
@@ -422,6 +495,46 @@ pub struct Settings {
     pub density: Density,
     /// Uzak görsellere izin verilen gönderici adresleri ya da alan adları.
     pub remote_allow: Vec<String>,
+    /// Güncellemeleri arka planda denetle.
+    pub auto_update: bool,
+    /// Kullanıcının onayladığı sertifikalar (sabitlenmiş SHA-256 parmak izi).
+    pub trusted_certs: Vec<TrustedCert>,
+}
+
+/// Kullanıcının elle güvendiği sunucu sertifikası.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TrustedCert {
+    pub host: String,
+    pub port: u16,
+    /// Sertifikanın DER kodlu halinin SHA-256 özeti, büyük harf onaltılık, `:` ayraçlı.
+    pub sha256: String,
+}
+
+/// Sunucu sertifikasının incelemesi (onay ekranı için).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CertInfo {
+    pub host: String,
+    pub port: u16,
+    pub sha256: String,
+    pub subject: String,
+    pub issuer: String,
+    pub not_before: Option<Millis>,
+    pub not_after: Option<Millis>,
+    /// Sertifikanın kapsadığı adlar (SAN).
+    pub names: Vec<String>,
+    /// Neden güvenilmedi (Türkçe, kısa): "kendinden imzalı", "süresi dolmuş", "ad uyuşmuyor"…
+    pub problem: String,
+}
+
+/// Yayımlanmış yeni sürüm.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateInfo {
+    pub version: String,
+    pub notes: Option<String>,
+    pub date: Option<String>,
 }
 
 impl Default for Settings {
@@ -439,6 +552,8 @@ impl Default for Settings {
             undo_send_seconds: 10,
             density: Density::Comfortable,
             remote_allow: Vec::new(),
+            auto_update: true,
+            trusted_certs: Vec::new(),
         }
     }
 }
@@ -459,6 +574,8 @@ pub mod events {
     pub const SETTINGS: &str = "mh:settings";
     /// `OpenEvent`: ana pencere bu postayı açmalı (karttan ya da hızlı okumadan).
     pub const OPEN: &str = "mh:open";
+    /// `UpdateInfo`: yeni sürüm bulundu.
+    pub const UPDATE: &str = "mh:update";
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -508,6 +625,8 @@ pub enum ErrorCode {
     Auth,
     Network,
     Tls,
+    /// Sertifika güvenilir değil; `cert_inspect` ile incelenip onaylanabilir.
+    Untrusted,
     Discovery,
     Keyring,
     Storage,

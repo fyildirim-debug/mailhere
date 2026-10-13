@@ -109,6 +109,10 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX outbox_due ON outbox(send_at);
     "#,
+    // 2: hesabın kimlik doğrulama yolu (parola, Google, Microsoft).
+    r#"
+    ALTER TABLE accounts ADD COLUMN auth TEXT NOT NULL DEFAULT 'password';
+    "#,
 ];
 
 /// Bağlantıyı ayarlar ve eksik geçişleri uygular.

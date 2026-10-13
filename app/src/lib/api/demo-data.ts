@@ -65,17 +65,17 @@ export function createDemoData(now = new Date()): DemoData {
       id: A_WORK, name: 'İş', email: ME_WORK.email, displayName: 'Furkan', color: '#4C6FD8', kind: 'imap',
       imap: { host: 'imap.ornek.com.tr', port: 993, security: 'tls', username: ME_WORK.email },
       smtp: { host: 'smtp.ornek.com.tr', port: 465, security: 'tls', username: ME_WORK.email },
-      jmapUrl: null, signature: '— Furkan', createdAt: at(now, -30, 9, 0),
+      jmapUrl: null, signature: '— Furkan', createdAt: at(now, -30, 9, 0), auth: 'password',
     },
     {
       id: A_HOME, name: 'Kişisel', email: ME_HOME.email, displayName: 'Furkan', color: '#2E9A61', kind: 'imap',
       imap: { host: 'imap.eposta.com', port: 993, security: 'tls', username: ME_HOME.email },
       smtp: { host: 'smtp.eposta.com', port: 465, security: 'tls', username: ME_HOME.email },
-      jmapUrl: null, signature: null, createdAt: at(now, -30, 9, 5),
+      jmapUrl: null, signature: null, createdAt: at(now, -30, 9, 5), auth: 'password',
     },
     {
       id: A_SERVER, name: 'Sunucu', email: 'posta@alanadi.com', displayName: 'Furkan', color: '#D08A1E', kind: 'jmap',
-      imap: null, smtp: null, jmapUrl: 'https://posta.alanadi.com/jmap', signature: null, createdAt: at(now, -30, 9, 10),
+      imap: null, smtp: null, jmapUrl: 'https://posta.alanadi.com/jmap', signature: null, createdAt: at(now, -30, 9, 10), auth: 'password',
     },
   ];
 

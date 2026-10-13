@@ -8,7 +8,7 @@ export type Route =
   | { name: 'quick'; id: number }
   | { name: 'compose'; mode: ComposeMode; id: number | null };
 
-const MODES: ComposeMode[] = ['new', 'reply', 'replyAll', 'forward'];
+const MODES: ComposeMode[] = ['new', 'reply', 'replyAll', 'forward', 'draft'];
 
 export function parseRoute(hash: string): Route {
   const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean);

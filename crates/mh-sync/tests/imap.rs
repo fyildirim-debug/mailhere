@@ -208,6 +208,7 @@ async fn imap_esitleme_uctan_uca() {
         jmap_url: None,
         signature: None,
         created_at: 0,
+        auth: Default::default(),
     };
     store.insert_account(&account).unwrap();
     let secrets: Arc<dyn SecretStore> = Arc::new(MemorySecrets::new());

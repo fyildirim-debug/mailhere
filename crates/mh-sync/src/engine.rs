@@ -1010,6 +1010,7 @@ mod tests {
             jmap_url: None,
             signature: None,
             created_at: 0,
+            auth: Default::default(),
         };
         assert!(!is_syncable(&a));
         a.imap.as_mut().unwrap().host = "imap.ornek.com".into();

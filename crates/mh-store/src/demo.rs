@@ -388,6 +388,7 @@ fn demo_account(a: &DemoAccount, created_at: Millis) -> Account {
         jmap_url: (a.kind == AccountKind::Jmap).then(|| format!("https://{DEMO_HOST}/jmap")),
         signature: None,
         created_at,
+        auth: Default::default(),
     }
 }
 

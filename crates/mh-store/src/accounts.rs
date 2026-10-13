@@ -1,13 +1,29 @@
 //! Hesaplar.
 
-use mh_core::{Account, AccountId, AppResult, ServerConfig};
+use mh_core::{Account, AccountId, AppResult, AuthKind, ServerConfig};
 use rusqlite::{params, OptionalExtension, Row};
 
 use crate::codec::{from_json, kind_from, kind_str, to_json};
 use crate::Store;
 
 const COLS: &str =
-    "id, name, email, display_name, color, kind, imap, smtp, jmap_url, signature, created_at";
+    "id, name, email, display_name, color, kind, imap, smtp, jmap_url, signature, created_at, auth";
+
+fn auth_str(a: AuthKind) -> &'static str {
+    match a {
+        AuthKind::Password => "password",
+        AuthKind::Google => "google",
+        AuthKind::Microsoft => "microsoft",
+    }
+}
+
+fn auth_from(s: &str) -> AuthKind {
+    match s {
+        "google" => AuthKind::Google,
+        "microsoft" => AuthKind::Microsoft,
+        _ => AuthKind::Password,
+    }
+}
 
 fn row_to_account(r: &Row<'_>) -> rusqlite::Result<Account> {
     let server = |idx: usize| -> rusqlite::Result<Option<ServerConfig>> {
@@ -28,6 +44,7 @@ fn row_to_account(r: &Row<'_>) -> rusqlite::Result<Account> {
         jmap_url: r.get(8)?,
         signature: r.get(9)?,
         created_at: r.get(10)?,
+        auth: auth_from(&r.get::<_, String>(11)?),
     })
 }
 
@@ -37,11 +54,11 @@ impl Store {
         self.with(|c| {
             c.execute(
                 &format!(
-                    "INSERT INTO accounts ({COLS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                    "INSERT INTO accounts ({COLS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
                      ON CONFLICT(id) DO UPDATE SET name = excluded.name, email = excluded.email,
                        display_name = excluded.display_name, color = excluded.color, kind = excluded.kind,
                        imap = excluded.imap, smtp = excluded.smtp, jmap_url = excluded.jmap_url,
-                       signature = excluded.signature"
+                       signature = excluded.signature, auth = excluded.auth"
                 ),
                 params![
                     a.id,
@@ -54,7 +71,8 @@ impl Store {
                     a.smtp.as_ref().map(to_json),
                     a.jmap_url,
                     a.signature,
-                    a.created_at
+                    a.created_at,
+                    auth_str(a.auth)
                 ],
             )?;
             Ok(())

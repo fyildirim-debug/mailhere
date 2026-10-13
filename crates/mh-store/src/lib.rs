@@ -118,6 +118,7 @@ pub(crate) mod testutil {
             jmap_url: None,
             signature: None,
             created_at: 1,
+            auth: Default::default(),
         }
     }
 

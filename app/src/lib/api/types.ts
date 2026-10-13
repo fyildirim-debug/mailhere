@@ -18,6 +18,7 @@ export interface ServerConfig {
 }
 
 export type AccountKind = 'imap' | 'jmap';
+export type AuthKind = 'password' | 'google' | 'microsoft';
 
 export interface Account {
   id: AccountId;
@@ -31,6 +32,7 @@ export interface Account {
   jmapUrl: string | null;
   signature: string | null;
   createdAt: Millis;
+  auth: AuthKind;
 }
 
 export interface NewAccount {
@@ -41,6 +43,37 @@ export interface NewAccount {
   imap: ServerConfig;
   smtp: ServerConfig;
   password: string;
+}
+
+export interface NewJmapAccount {
+  name: string;
+  email: string;
+  displayName: string;
+  color: string | null;
+  sessionUrl: string;
+  username: string;
+  password: string;
+}
+
+export interface OAuthGrant {
+  grantId: string;
+  provider: AuthKind;
+  email: string;
+  displayName: string | null;
+}
+
+export interface NewOAuthAccount {
+  grantId: string;
+  name: string;
+  displayName: string;
+  color: string | null;
+}
+
+export interface AccountUpdate {
+  name: string;
+  displayName: string;
+  color: string;
+  signature: string | null;
 }
 
 export type DiscoverySource = 'autoconfig' | 'srv' | 'guess' | 'builtin';
@@ -163,6 +196,10 @@ export interface OutgoingMessage {
   inReplyTo: MessageId | null;
   attachments: string[];
   sendAt: Millis | null;
+  /** İletilen posta: ekleri bu postadan kopyalanır. */
+  forwardFrom?: MessageId | null;
+  /** Gönderilince silinecek ya da kaydederken yerine yazılacak taslak. */
+  draftId?: MessageId | null;
 }
 
 export interface OutboxItem {
@@ -170,7 +207,7 @@ export interface OutboxItem {
   sendAt: Millis;
 }
 
-export type ComposeMode = 'new' | 'reply' | 'replyAll' | 'forward';
+export type ComposeMode = 'new' | 'reply' | 'replyAll' | 'forward' | 'draft';
 
 export interface ComposePrefill {
   mode: ComposeMode;
@@ -183,7 +220,8 @@ export type SyncState =
   | { state: 'online' }
   | { state: 'syncing'; done: number; total: number }
   | { state: 'offline' }
-  | { state: 'error'; message: string };
+  | { state: 'error'; message: string }
+  | { state: 'untrusted'; host: string; port: number };
 
 export type SyncStatus = { accountId: AccountId } & SyncState;
 
@@ -208,6 +246,33 @@ export interface Settings {
   undoSendSeconds: number;
   density: Density;
   remoteAllow: string[];
+  autoUpdate: boolean;
+  trustedCerts: TrustedCert[];
+}
+
+export interface TrustedCert {
+  host: string;
+  port: number;
+  sha256: string;
+}
+
+export interface CertInfo {
+  host: string;
+  port: number;
+  sha256: string;
+  subject: string;
+  issuer: string;
+  notBefore: Millis | null;
+  notAfter: Millis | null;
+  names: string[];
+  /** Neden güvenilmedi (Türkçe, kısa). */
+  problem: string;
+}
+
+export interface UpdateInfo {
+  version: string;
+  notes: string | null;
+  date: string | null;
 }
 
 export const defaultSettings: Settings = {
@@ -223,6 +288,8 @@ export const defaultSettings: Settings = {
   undoSendSeconds: 10,
   density: 'comfortable',
   remoteAllow: [],
+  autoUpdate: true,
+  trustedCerts: [],
 };
 
 // ------------------------------------------------------------------- olaylar
@@ -234,6 +301,7 @@ export const EVENTS = {
   outbox: 'mh:outbox',
   settings: 'mh:settings',
   open: 'mh:open',
+  update: 'mh:update',
 } as const;
 
 export interface NotifyEvent {
@@ -264,6 +332,7 @@ export interface EventPayloads {
   'mh:outbox': OutboxEvent;
   'mh:settings': Settings;
   'mh:open': OpenEvent;
+  'mh:update': UpdateInfo;
 }
 
 // -------------------------------------------------------------------- hatalar
@@ -273,6 +342,7 @@ export type ErrorCode =
   | 'auth'
   | 'network'
   | 'tls'
+  | 'untrusted'
   | 'discovery'
   | 'keyring'
   | 'storage'
@@ -317,6 +387,34 @@ export interface Commands {
   notify_pending: [Record<string, never>, NotifyEvent[]];
   notify_snooze: [{ minutes: number }, null];
   demo_notify: [Record<string, never>, null];
+
+  // JMAP (Stalwart vb.)
+  /** Adresin alan adında JMAP oturum adresini arar (/.well-known/jmap). */
+  jmap_discover: [{ email: string }, string];
+  account_add_jmap: [{ input: NewJmapAccount }, Account];
+
+  // Google / Microsoft OAuth 2
+  /** Bu derlemede istemci kimliği tanımlı sağlayıcılar. */
+  oauth_providers: [Record<string, never>, AuthKind[]];
+  /** Tarayıcıda girişi başlatır, dönüşü bekler; jetonlar arka uçta kalır. */
+  oauth_sign_in: [{ provider: AuthKind; email: string | null }, OAuthGrant];
+  account_add_oauth: [{ input: NewOAuthAccount }, Account];
+
+  account_update: [{ id: AccountId; update: AccountUpdate }, Account];
+
+  // Sertifika onayı
+  cert_inspect: [{ host: string; port: number; security: Security }, CertInfo];
+  cert_trust: [{ host: string; port: number; sha256: string }, null];
+
+  // Taslaklar
+  /** Taslağı kaydeder (msg.draftId varsa yerine yazar); taslağın kimliğini döner. */
+  draft_save: [{ msg: OutgoingMessage }, MessageId];
+  draft_delete: [{ id: MessageId }, null];
+
+  // Güncelleme
+  update_check: [Record<string, never>, UpdateInfo | null];
+  /** İndirir, kurar ve uygulamayı yeniden başlatır. */
+  update_install: [Record<string, never>, null];
 }
 
 export type CommandName = keyof Commands;

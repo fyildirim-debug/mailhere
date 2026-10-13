@@ -155,6 +155,7 @@ mod tests {
             jmap_url: None,
             signature: None,
             created_at: 0,
+            auth: Default::default(),
         }
     }
 
@@ -169,6 +170,8 @@ mod tests {
             in_reply_to: None,
             attachments: vec![],
             send_at: None,
+            forward_from: None,
+            draft_id: None,
         }
     }
 

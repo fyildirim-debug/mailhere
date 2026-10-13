@@ -238,6 +238,7 @@ fn mode_route(mode: ComposeMode) -> &'static str {
         ComposeMode::Reply => "reply",
         ComposeMode::ReplyAll => "replyAll",
         ComposeMode::Forward => "forward",
+        ComposeMode::Draft => "draft",
     }
 }
 
