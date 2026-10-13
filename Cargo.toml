@@ -64,6 +64,13 @@ tauri-plugin-opener = "2.7.1"
 tauri-plugin-dialog = "2.8.2"
 keyring = "3.6.3"
 
+[profile.dev]
+# Yalnız satır bilgisi: derleme klasörü küçük, geri izleme okunur kalır.
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
 [profile.release]
 codegen-units = 1
 lto = true
