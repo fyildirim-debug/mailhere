@@ -1,0 +1,686 @@
+<script lang="ts">
+  import { onMount } from 'svelte';
+  import { appWindow, call, EVENTS, on, pickFiles, toAppError, type Account, type Address, type ComposeMode, type MessageDetail } from '../../lib/api';
+  import { t, when, type MessageKey } from '../../lib/i18n/index.svelte';
+  import Avatar from '../../lib/ui/Avatar.svelte';
+  import FileBadge from '../../lib/ui/FileBadge.svelte';
+  import Icon from '../../lib/ui/Icon.svelte';
+  import WindowControls from '../../lib/ui/WindowControls.svelte';
+  import { baseSubject, displayName, snoozeOptions } from '../../lib/util/format';
+
+  interface Props {
+    mode: ComposeMode;
+    messageId: number | null;
+  }
+
+  let { mode, messageId }: Props = $props();
+
+  let accounts = $state<Account[]>([]);
+  let fromId = $state<string>('');
+  let to = $state<Address[]>([]);
+  let cc = $state<Address[]>([]);
+  let bcc = $state<Address[]>([]);
+  let showCc = $state(false);
+  let showBcc = $state(false);
+  let subject = $state('');
+  let body = $state('');
+  let attachments = $state<string[]>([]);
+  let original = $state<MessageDetail | null>(null);
+  let laterOpen = $state(false);
+  let sendAt = $state<number | null>(null);
+  let queued = $state<{ id: string; at: number } | null>(null);
+  let error = $state<string | null>(null);
+  let bodyEl = $state<HTMLTextAreaElement>();
+  let drafts = $state<Record<'to' | 'cc' | 'bcc', string>>({ to: '', cc: '', bcc: '' });
+  let suggest = $state<{ field: 'to' | 'cc' | 'bcc'; items: Address[]; active: number } | null>(null);
+  let suggestTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const from = $derived(accounts.find((a) => a.id === fromId));
+  const locked = $derived(queued != null);
+
+  onMount(() => {
+    void init();
+    const off = on(EVENTS.outbox, (e) => {
+      if (!queued || e.id !== queued.id) return;
+      if (e.ok) void appWindow.close();
+      else {
+        error = t('toast.sendFailed', { message: e.error ?? '' });
+        queued = null;
+      }
+    });
+    return off;
+  });
+
+  async function init() {
+    accounts = await call('accounts_list');
+    fromId = accounts[0]?.id ?? '';
+    if (messageId != null) {
+      try {
+        const d = await call('message_get', { id: messageId });
+        original = d;
+        fromId = d.accountId;
+        prefill(d);
+      } catch (e) {
+        error = toAppError(e).message;
+      }
+    }
+    document.title = title();
+    setTimeout(() => {
+      if (to.length && bodyEl) {
+        bodyEl.focus();
+        bodyEl.setSelectionRange(0, 0);
+        bodyEl.scrollTop = 0;
+      } else document.getElementById('compose-to')?.focus();
+    });
+  }
+
+  function same(a: Address, b: Address) {
+    return a.email.toLowerCase() === b.email.toLowerCase();
+  }
+
+  function prefill(d: MessageDetail) {
+    const me = accounts.find((a) => a.id === d.accountId)?.email.toLowerCase();
+    const notMe = (a: Address) => a.email.toLowerCase() !== me;
+    const quoted = (d.bodyText ?? d.snippet)
+      .split('\n')
+      .map((l) => `> ${l}`)
+      .join('\n');
+    const header = t('compose.wrote', { date: when(d.date), name: displayName(d.from) });
+    if (mode === 'forward') {
+      subject = `Fwd: ${baseSubject(d.subject)}`;
+      body = `\n\n${t('compose.forwarded')}\n${displayName(d.from)} <${d.from.email}>\n${when(d.date)}\n${d.subject}\n\n${d.bodyText ?? d.snippet}`;
+      return;
+    }
+    subject = `Re: ${baseSubject(d.subject)}`;
+    to = (d.replyTo.length ? d.replyTo : [d.from]).filter(notMe);
+    if (!to.length) to = d.to.filter(notMe);
+    if (mode === 'replyAll') {
+      cc = [...d.to, ...d.cc].filter(notMe).filter((a) => !to.some((x) => same(x, a)));
+      showCc = cc.length > 0;
+    }
+    body = `\n\n${header}\n${quoted}`;
+  }
+
+  function title() {
+    if (mode === 'forward' && original) return t('compose.forward', { subject: baseSubject(original.subject) });
+    if (original) return t('compose.reply', { subject: baseSubject(original.subject) });
+    return t('compose.new');
+  }
+
+  function parse(text: string): Address | null {
+    const m = text.trim().match(/^(?:"?([^"<]*?)"?\s*<)?([^\s<>@]+@[^\s<>@]+\.[^\s<>@]+)>?$/);
+    if (!m) return null;
+    return { name: m[1]?.trim() || null, email: m[2] };
+  }
+
+  function commit(field: 'to' | 'cc' | 'bcc') {
+    const parts = drafts[field].split(/[,;\n]+/).map((x) => x.trim()).filter(Boolean);
+    const bad: string[] = [];
+    const list = field === 'to' ? to : field === 'cc' ? cc : bcc;
+    for (const p of parts) {
+      const a = parse(p);
+      if (a && !list.some((x) => same(x, a))) list.push(a);
+      else if (!a) bad.push(p);
+    }
+    drafts[field] = bad.join(', ');
+  }
+
+  function onRecipientKey(field: 'to' | 'cc' | 'bcc', e: KeyboardEvent) {
+    const list = field === 'to' ? to : field === 'cc' ? cc : bcc;
+    if (suggest?.field === field) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const n = suggest.items.length;
+        suggest.active = (suggest.active + (e.key === 'ArrowDown' ? 1 : n - 1)) % n;
+        return;
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        pick(field, suggest.items[suggest.active]);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        suggest = null;
+        return;
+      }
+    }
+    if (e.key === 'Enter' || e.key === ',' || e.key === ';' || e.key === 'Tab') {
+      if (drafts[field].trim()) {
+        if (e.key !== 'Tab') e.preventDefault();
+        commit(field);
+      }
+    } else if (e.key === 'Backspace' && !drafts[field] && list.length) {
+      list.pop();
+    }
+  }
+
+  function removeAt(field: 'to' | 'cc' | 'bcc', i: number) {
+    (field === 'to' ? to : field === 'cc' ? cc : bcc).splice(i, 1);
+  }
+
+  /** Yazılan parçaya uyan adresleri geçmiş postalardan önerir. */
+  function lookup(field: 'to' | 'cc' | 'bcc') {
+    if (suggestTimer) clearTimeout(suggestTimer);
+    const q = drafts[field].trim();
+    if (q.length < 2) {
+      suggest = null;
+      return;
+    }
+    suggestTimer = setTimeout(async () => {
+      const needle = q.toLocaleLowerCase('tr');
+      const taken = new Set([...to, ...cc, ...bcc].map((a) => a.email.toLowerCase()));
+      const seen = new Map<string, Address>();
+      for (const m of await call('search', { q, limit: 30 })) {
+        for (const a of [m.from, ...m.to]) {
+          const key = a.email.toLowerCase();
+          const hay = `${a.name ?? ''} ${a.email}`.toLocaleLowerCase('tr');
+          if (!taken.has(key) && !seen.has(key) && hay.includes(needle)) seen.set(key, a);
+        }
+      }
+      const items = [...seen.values()].slice(0, 5);
+      suggest = drafts[field].trim() === q && items.length ? { field, items, active: 0 } : null;
+    }, 120);
+  }
+
+  function pick(field: 'to' | 'cc' | 'bcc', a: Address) {
+    const list = field === 'to' ? to : field === 'cc' ? cc : bcc;
+    if (!list.some((x) => same(x, a))) list.push(a);
+    drafts[field] = '';
+    suggest = null;
+    document.getElementById(`compose-${field}`)?.focus();
+  }
+
+  /** Seçili metni sarar (düz metin, okunur işaretlerle). */
+  function wrap(before: string, after = before) {
+    const el = bodyEl;
+    if (!el || locked) return;
+    const { selectionStart: s, selectionEnd: e } = el;
+    const sel = body.slice(s, e);
+    body = body.slice(0, s) + before + sel + after + body.slice(e);
+    queueMicrotask(() => {
+      el.focus();
+      el.setSelectionRange(s + before.length, s + before.length + sel.length);
+    });
+  }
+
+  function bullet() {
+    const el = bodyEl;
+    if (!el || locked) return;
+    const s = el.selectionStart;
+    const lineStart = body.lastIndexOf('\n', s - 1) + 1;
+    body = body.slice(0, lineStart) + '- ' + body.slice(lineStart);
+    queueMicrotask(() => {
+      el.focus();
+      el.setSelectionRange(s + 2, s + 2);
+    });
+  }
+
+  async function attach() {
+    const files = await pickFiles();
+    attachments = [...attachments, ...files.filter((f) => !attachments.includes(f))];
+  }
+
+  function fileName(path: string) {
+    return path.split(/[\\/]/).pop() ?? path;
+  }
+
+  async function send() {
+    error = null;
+    commit('to');
+    commit('cc');
+    commit('bcc');
+    if (!to.length && !cc.length && !bcc.length) {
+      error = t('compose.needRecipient');
+      return;
+    }
+    if (!from) return;
+    const text = from.signature ? `${body.trimEnd()}\n\n${from.signature}` : body;
+    try {
+      const item = await call('send', {
+        msg: {
+          accountId: from.id,
+          to: [...to],
+          cc: [...cc],
+          bcc: [...bcc],
+          subject,
+          bodyText: text,
+          inReplyTo: original?.id ?? null,
+          attachments: [...attachments],
+          sendAt,
+        },
+      });
+      queued = { id: item.id, at: item.sendAt };
+      laterOpen = false;
+    } catch (e) {
+      error = toAppError(e).message;
+    }
+  }
+
+  async function undo() {
+    if (!queued) return;
+    const ok = await call('send_cancel', { id: queued.id });
+    if (ok) queued = null;
+  }
+
+  function onKey(e: KeyboardEvent) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault();
+      if (!locked) void send();
+    } else if (e.key === 'Escape' && laterOpen) {
+      laterOpen = false;
+    }
+  }
+
+  const later = $derived(
+    snoozeOptions(Date.now())
+      .filter((o) => o.key !== 'weekend')
+      .map((o) => ({ ...o, label: `snooze.${o.key}` as MessageKey })),
+  );
+
+  const seconds = $derived(queued ? Math.max(1, Math.round((queued.at - Date.now()) / 1000)) : 0);
+</script>
+
+<svelte:window onkeydown={onKey} />
+
+<div class="win">
+  <header class="titlebar" data-tauri-drag-region>
+    <span class="title trunc" data-tauri-drag-region>{title()}</span>
+    <span class="grow" data-tauri-drag-region></span>
+    <WindowControls height={40} />
+  </header>
+
+  <div class="fields">
+    <div class="field">
+      <label class="flabel" for="compose-from">{t('compose.from')}</label>
+      <select id="compose-from" class="from" bind:value={fromId} disabled={locked || accounts.length < 2}>
+        {#each accounts as a (a.id)}
+          <option value={a.id}>{a.displayName} · {a.email}</option>
+        {/each}
+      </select>
+      {#if from}<span class="acc-dot" style:background={from.color}></span>{/if}
+    </div>
+
+    {#each [{ key: 'to', label: 'compose.to', list: to, show: true }, { key: 'cc', label: 'compose.cc', list: cc, show: showCc }, { key: 'bcc', label: 'compose.bcc', list: bcc, show: showBcc }] as row (row.key)}
+      {#if row.show}
+        {@const field = row.key as 'to' | 'cc' | 'bcc'}
+        <div class="field wrap">
+          <label class="flabel" for="compose-{field}">{t(row.label as MessageKey)}</label>
+          {#each row.list as a, i (a.email)}
+            <span class="chip" title={a.email}>
+              <Avatar address={a} size={20} />
+              <span>{displayName(a)}</span>
+              <button aria-label={t('compose.removeRecipient', { name: displayName(a) })} disabled={locked} onclick={() => removeAt(field, i)}>
+                <Icon name="x" size={12} />
+              </button>
+            </span>
+          {/each}
+          <input
+            id="compose-{field}"
+            class="rinput"
+            placeholder={row.list.length ? '' : t('compose.addRecipient')}
+            bind:value={drafts[field]}
+            oninput={() => lookup(field)}
+            onkeydown={(e) => onRecipientKey(field, e)}
+            onblur={() => setTimeout(() => {
+              if (suggest?.field === field) suggest = null;
+              commit(field);
+            }, 120)}
+            role="combobox"
+            aria-expanded={suggest?.field === field}
+            aria-controls="suggest-{field}"
+            aria-autocomplete="list"
+            disabled={locked}
+            autocomplete="email"
+          />
+          {#if suggest?.field === field}
+            <div class="popover suggest" id="suggest-{field}" role="listbox">
+              {#each suggest.items as a, i (a.email)}
+                <button
+                  class="menu-item"
+                  role="option"
+                  aria-selected={i === suggest.active}
+                  class:active={i === suggest.active}
+                  onmousedown={(e) => {
+                    e.preventDefault();
+                    pick(field, a);
+                  }}
+                >
+                  <Avatar address={a} size={24} />
+                  <span class="trunc">{displayName(a)}</span>
+                  <span class="meta trunc">{a.email}</span>
+                </button>
+              {/each}
+            </div>
+          {/if}
+          {#if field === 'to'}
+            {#if !showCc}<button class="btn-ghost" onclick={() => (showCc = true)}>{t('compose.cc')}</button>{/if}
+            {#if !showBcc}<button class="btn-ghost" onclick={() => (showBcc = true)}>{t('compose.bcc')}</button>{/if}
+          {/if}
+        </div>
+      {/if}
+    {/each}
+
+    <div class="field">
+      <label class="flabel" for="compose-subject">{t('compose.subject')}</label>
+      <input id="compose-subject" class="rinput" bind:value={subject} disabled={locked} />
+    </div>
+  </div>
+
+  <div class="tools">
+    <button class="btn-icon small" aria-label={t('compose.bold')} title={t('compose.bold')} onclick={() => wrap('**')}><Icon name="bold" size={16} /></button>
+    <button class="btn-icon small" aria-label={t('compose.italic')} title={t('compose.italic')} onclick={() => wrap('_')}><Icon name="italic" size={16} /></button>
+    <button class="btn-icon small" aria-label={t('compose.link')} title={t('compose.link')} onclick={() => wrap('[', '](https://)')}><Icon name="link" size={16} /></button>
+    <button class="btn-icon small" aria-label={t('compose.bullet')} title={t('compose.bullet')} onclick={bullet}><Icon name="list" size={16} /></button>
+    <span class="vsep"></span>
+    <button class="btn-icon small" aria-label={t('act.attach')} title={t('act.attach')} onclick={attach} disabled={locked}><Icon name="paperclip" size={16} /></button>
+  </div>
+
+  <div class="editor">
+    <textarea bind:this={bodyEl} bind:value={body} placeholder={t('compose.bodyPlaceholder')} aria-label={t('compose.body')} disabled={locked}></textarea>
+    {#if from?.signature}<div class="signature">{from.signature}</div>{/if}
+    {#if attachments.length}
+      <div class="files">
+        {#each attachments as path (path)}
+          <span class="file" title={path}>
+            <FileBadge name={fileName(path)} />
+            <span class="trunc">{fileName(path)}</span>
+            <button class="btn-icon small" aria-label={t('compose.removeAttachment')} disabled={locked} onclick={() => (attachments = attachments.filter((p) => p !== path))}>
+              <Icon name="x" size={12} />
+            </button>
+          </span>
+        {/each}
+      </div>
+    {/if}
+  </div>
+
+  <footer class="foot">
+    {#if queued}
+      <span class="status"><Icon name="check" size={14} />{t('compose.queued', { n: seconds })}<button class="link" onclick={undo}>{t('act.undo')}</button></span>
+    {:else if error}
+      <span class="status err" role="alert">{error}</span>
+    {:else if sendAt}
+      <span class="status"><Icon name="clock" size={14} />{t('compose.scheduled', { when: when(sendAt) })}<button class="link" onclick={() => (sendAt = null)}>{t('act.cancel')}</button></span>
+    {:else}
+      <span class="meta">{t('read.sendHint')}</span>
+    {/if}
+    <span class="grow"></span>
+    <button class="btn-icon" aria-label={t('compose.discard')} title={t('compose.discard')} onclick={() => appWindow.close()}><Icon name="trash" /></button>
+    <div class="split">
+      <button class="send" onclick={send} disabled={locked}><Icon name="send" size={16} />{sendAt ? t('act.schedule') : t('act.send')}<span class="kbd on-accent">Ctrl Enter</span></button>
+      <button class="more" aria-label={t('compose.later')} title={t('compose.later')} aria-haspopup="menu" aria-expanded={laterOpen} disabled={locked} onclick={() => (laterOpen = !laterOpen)}>
+        <Icon name="chevronDown" size={16} />
+      </button>
+      {#if laterOpen}
+        <div class="popover later" role="menu">
+          <div class="menu-title">{t('compose.later')}</div>
+          {#each later as o (o.key)}
+            <button class="menu-item" role="menuitem" onclick={() => ((sendAt = o.at), (laterOpen = false))}>
+              <Icon name="clock" size={16} />
+              <span class="grow">{t(o.label)}</span>
+              <span class="meta num">{when(o.at)}</span>
+            </button>
+          {/each}
+        </div>
+      {/if}
+    </div>
+  </footer>
+</div>
+
+<style>
+  .win {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--paper);
+  }
+
+  .titlebar {
+    flex: none;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    padding-left: 16px;
+    background: var(--ground);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .title {
+    font-size: var(--fs-meta);
+    font-weight: 500;
+    color: var(--ink-2);
+  }
+
+  .grow {
+    flex: 1;
+  }
+
+  .fields {
+    flex: none;
+    padding: 0 20px;
+  }
+
+  .field {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .field.wrap {
+    position: relative;
+    flex-wrap: wrap;
+    padding: 6px 0;
+  }
+
+  .suggest {
+    top: calc(100% - 2px);
+    left: 56px;
+    width: 380px;
+  }
+
+  .suggest .active {
+    background: var(--sel);
+  }
+
+  .flabel {
+    width: 56px;
+    flex: none;
+    font-size: var(--fs-meta);
+    color: var(--ink-3);
+  }
+
+  .from {
+    flex: 1;
+    min-width: 0;
+    height: 32px;
+    border: 0;
+    background: transparent;
+    color: var(--ink);
+    outline: none;
+    appearance: none;
+  }
+
+  .acc-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+  }
+
+  .rinput {
+    flex: 1;
+    min-width: 120px;
+    height: 32px;
+    border: 0;
+    outline: none;
+    background: transparent;
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 28px;
+    padding: 0 4px;
+    border-radius: 999px;
+    background: var(--surface);
+    border: 1px solid var(--line-strong);
+  }
+
+  .chip button {
+    width: 20px;
+    height: 20px;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--ink-3);
+  }
+
+  .chip button:hover {
+    background: var(--hover);
+    color: var(--ink);
+  }
+
+  .tools {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 6px 14px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .vsep {
+    width: 1px;
+    height: 18px;
+    margin: 0 6px;
+    background: var(--line-strong);
+  }
+
+  .editor {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px 20px 8px;
+    overflow-y: auto;
+  }
+
+  textarea {
+    flex: 1;
+    min-height: 160px;
+    border: 0;
+    outline: none;
+    resize: none;
+    background: transparent;
+    line-height: 1.65;
+  }
+
+  .signature {
+    color: var(--ink-3);
+    white-space: pre-line;
+  }
+
+  .files {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .file {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    max-width: 320px;
+    padding: 4px 4px 4px 4px;
+    border-radius: var(--r-row);
+    background: var(--surface);
+    border: 1px solid var(--line);
+  }
+
+  .foot {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px 14px 20px;
+    border-top: 1px solid var(--line);
+  }
+
+  .status {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: var(--fs-meta);
+    color: var(--ink-2);
+  }
+
+  .status :global(.icon) {
+    color: var(--ok);
+  }
+
+  .status .link {
+    font-size: var(--fs-meta);
+  }
+
+  .err {
+    color: var(--danger);
+  }
+
+  .split {
+    position: relative;
+    display: flex;
+  }
+
+  .send {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 36px;
+    padding: 0 12px 0 14px;
+    border: 0;
+    border-radius: var(--r-btn) 0 0 var(--r-btn);
+    background: var(--accent);
+    color: var(--accent-ink);
+    font-weight: 500;
+  }
+
+  .more {
+    width: 34px;
+    height: 36px;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-left: 1px solid color-mix(in srgb, var(--accent-ink) 25%, transparent);
+    border-radius: 0 var(--r-btn) var(--r-btn) 0;
+    background: var(--accent);
+    color: var(--accent-ink);
+  }
+
+  .send:hover:not(:disabled),
+  .more:hover:not(:disabled) {
+    filter: brightness(1.07);
+  }
+
+  .send:disabled,
+  .more:disabled {
+    opacity: 0.45;
+  }
+
+  .on-accent {
+    background: transparent;
+    border-color: color-mix(in srgb, var(--accent-ink) 35%, transparent);
+    color: inherit;
+  }
+
+  .later {
+    right: 0;
+    bottom: 44px;
+    width: 280px;
+  }
+</style>

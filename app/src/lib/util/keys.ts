@@ -1,0 +1,63 @@
+// Klavye kısayolları (docs/TASARIM.md §8). Saf eşleme; olay bağlama bileşende.
+
+export type Shortcut =
+  | 'compose'
+  | 'reply'
+  | 'replyAll'
+  | 'forward'
+  | 'archive'
+  | 'snooze'
+  | 'star'
+  | 'unread'
+  | 'delete'
+  | 'next'
+  | 'prev'
+  | 'open'
+  | 'palette'
+  | 'undo'
+  | 'escape';
+
+export interface KeyLike {
+  key: string;
+  ctrlKey?: boolean;
+  metaKey?: boolean;
+  altKey?: boolean;
+  shiftKey?: boolean;
+  /** Odak bir metin alanında mı? */
+  editing?: boolean;
+}
+
+const SINGLE: Record<string, Shortcut> = {
+  c: 'compose',
+  r: 'reply',
+  a: 'replyAll',
+  f: 'forward',
+  e: 'archive',
+  h: 'snooze',
+  s: 'star',
+  u: 'unread',
+  j: 'next',
+  k: 'prev',
+  '#': 'delete',
+};
+
+export function shortcutFor(e: KeyLike): Shortcut | null {
+  const mod = !!(e.ctrlKey || e.metaKey);
+  const key = e.key.length === 1 ? e.key.toLocaleLowerCase('en') : e.key;
+  if (mod && !e.altKey && key === 'k') return 'palette';
+  if (key === 'Escape') return 'escape';
+  if (e.editing) return null;
+  if (mod && !e.altKey && !e.shiftKey && key === 'z') return 'undo';
+  if (mod || e.altKey) return null;
+  if (key === 'Delete') return 'delete';
+  if (key === 'Enter') return 'open';
+  if (key === 'ArrowDown') return 'next';
+  if (key === 'ArrowUp') return 'prev';
+  return SINGLE[key] ?? null;
+}
+
+export function isEditing(target: EventTarget | null): boolean {
+  if (!target || typeof (target as HTMLElement).closest !== 'function') return false;
+  const el = target as HTMLElement;
+  return !!el.closest('input, textarea, select, [contenteditable="true"]');
+}

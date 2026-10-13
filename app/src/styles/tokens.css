@@ -1,0 +1,144 @@
+/*
+ * Mailhere tasarım jetonları — tek doğruluk kaynağı.
+ * Kurallar: docs/TASARIM.md. Bileşenler ham renk yazmaz, yalnız bu jetonları kullanır.
+ */
+
+:root,
+:root[data-theme='light'] {
+  color-scheme: light;
+  --ground: #eceef2;
+  --surface: #f6f7f9;
+  --paper: #ffffff;
+  --raised: #ffffff;
+  --line: #e1e4ea;
+  --line-strong: #d2d6de;
+  --ink: #15171c;
+  --ink-2: #4f5562;
+  --ink-3: #636a76;
+  --accent: #4655d4;
+  --accent-ink: #ffffff;
+  --accent-soft: #e6e8fb;
+  --accent-text: #3a47b8;
+  --sel: #e4e7fa;
+  --hover: rgba(21, 23, 28, 0.045);
+  --amber: #c27d12;
+  --ok: #2e8a57;
+  --danger: #c2372e;
+  --scroll: rgba(21, 23, 28, 0.18);
+  --toast-bg: #15171c;
+  --toast-ink: #f1f2f5;
+  --toast-act: #aeb6fb;
+  --mail-paper: #ffffff;
+  /* Marka bölgesi (karşılama paneli, logo): her temada beyaz metin taşır. */
+  --brand: #4655d4;
+  --brand-ink: #ffffff;
+  --brand-ink-2: #e3e6fb;
+  --signal: #f2b544;
+  --shadow-sm: 0 4px 14px -4px rgba(20, 24, 40, 0.18), 0 1px 2px rgba(20, 24, 40, 0.06);
+  --shadow: 0 14px 36px -10px rgba(20, 24, 40, 0.22), 0 2px 6px rgba(20, 24, 40, 0.06);
+  --shadow-lg: 0 24px 48px -12px rgba(5, 10, 20, 0.45), 0 4px 12px rgba(5, 10, 20, 0.2);
+  --seg-on-shadow: 0 1px 2px rgba(20, 24, 40, 0.1);
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --ground: #0f1115;
+  --surface: #14161b;
+  --paper: #191c22;
+  --raised: #22252d;
+  --line: #262a32;
+  --line-strong: #343944;
+  --ink: #e6e8ed;
+  --ink-2: #aeb4bf;
+  --ink-3: #8e95a1;
+  --accent: #8c96f6;
+  --accent-ink: #0d0f1f;
+  --accent-soft: #272c4d;
+  --accent-text: #aab2fa;
+  --sel: #242945;
+  --hover: rgba(230, 232, 237, 0.05);
+  --amber: #e2a84a;
+  --ok: #5cc48a;
+  --danger: #ef7a70;
+  --scroll: rgba(230, 232, 237, 0.16);
+  --toast-bg: #e6e8ed;
+  --toast-ink: #15171c;
+  --toast-act: #3a47b8;
+  --mail-paper: #ffffff;
+  --brand: #3440b0;
+  --brand-ink: #ffffff;
+  --brand-ink-2: #e3e6fb;
+  --signal: #f2b544;
+  --shadow-sm: 0 6px 16px -4px rgba(0, 0, 0, 0.5);
+  --shadow: 0 18px 44px -10px rgba(0, 0, 0, 0.6), 0 2px 6px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 24px 48px -12px rgba(0, 0, 0, 0.7), 0 4px 12px rgba(0, 0, 0, 0.4);
+  --seg-on-shadow: none;
+}
+
+:root {
+  /* Yazı ölçeği: yalnız bu beş adım. */
+  --fs-meta: 12px;
+  --fs-body: 15px;
+  --fs-section: 19px;
+  --fs-title: 24px;
+  --fs-display: 30px;
+
+  /* Hareket */
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --t-fast: 120ms;
+  --t-state: 200ms;
+  --t-panel: 280ms;
+  --t-arrive: 520ms;
+
+  /* Köşeler */
+  --r-kbd: 5px;
+  --r-sm: 7px;
+  --r-icon: 8px;
+  --r-btn: 9px;
+  --r-row: 10px;
+  --r-card: 12px;
+  --r-float: 14px;
+  --r-palette: 16px;
+
+  --font: 'Geist Variable', 'Geist', ui-sans-serif, system-ui, sans-serif;
+}
+
+/* Avatar paleti: zemin + aynı tonda koyu metin (gri değil). */
+:root,
+:root[data-theme='light'] {
+  --av-0-bg: #e1e8fa; --av-0-fg: #2c4a8f;
+  --av-1-bg: #f8e3e7; --av-1-fg: #8e2d45;
+  --av-2-bg: #e6e8ec; --av-2-fg: #3b414d;
+  --av-3-bg: #f7ebd6; --av-3-fg: #7a4d0e;
+  --av-4-bg: #e0f0e6; --av-4-fg: #23603c;
+  --av-5-bg: #ece5fa; --av-5-fg: #5a3a9a;
+  --av-6-bg: #ddf0ef; --av-6-fg: #1f5f5b;
+  --av-7-bg: #fae6da; --av-7-fg: #8a3f17;
+  --av-8-bg: #ddedf7; --av-8-fg: #1d5677;
+
+  --file-pdf-bg: #fbe3e0; --file-pdf-fg: #a3352a;
+  --file-sheet-bg: #dff1e5; --file-sheet-fg: #25713f;
+  --file-doc-bg: #e1e8fa; --file-doc-fg: #2c4a8f;
+  --file-image-bg: #ece5fa; --file-image-fg: #5a3a9a;
+  --file-archive-bg: #f7ebd6; --file-archive-fg: #7a4d0e;
+  --file-other-bg: #e6e8ec; --file-other-fg: #3b414d;
+}
+
+:root[data-theme='dark'] {
+  --av-0-bg: #1f2a44; --av-0-fg: #afc3f2;
+  --av-1-bg: #3d2129; --av-1-fg: #f0b4c2;
+  --av-2-bg: #262a31; --av-2-fg: #c4c9d2;
+  --av-3-bg: #3a2d17; --av-3-fg: #ebc88e;
+  --av-4-bg: #1b3326; --av-4-fg: #a8ddbb;
+  --av-5-bg: #2c2342; --av-5-fg: #cdb9f3;
+  --av-6-bg: #183230; --av-6-fg: #a3dcd8;
+  --av-7-bg: #3b2619; --av-7-fg: #f2be9c;
+  --av-8-bg: #172d3b; --av-8-fg: #a5d0eb;
+
+  --file-pdf-bg: #3d2120; --file-pdf-fg: #f2ada5;
+  --file-sheet-bg: #1b3326; --file-sheet-fg: #a8ddbb;
+  --file-doc-bg: #1f2a44; --file-doc-fg: #afc3f2;
+  --file-image-bg: #2c2342; --file-image-fg: #cdb9f3;
+  --file-archive-bg: #3a2d17; --file-archive-fg: #ebc88e;
+  --file-other-bg: #262a31; --file-other-fg: #c4c9d2;
+}
