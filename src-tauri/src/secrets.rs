@@ -21,6 +21,36 @@ fn keyring_err(e: keyring::Error) -> AppError {
     )
 }
 
+/// Veritabanı şifreleme anahtarının kasası: parolalarla aynı depo (anahtar
+/// zinciri ya da bellek kipinde süreç belleği), kullanıcı adı `db-key`.
+pub struct DbKeyVault<'a> {
+    secrets: &'a dyn SecretStore,
+    persistent: bool,
+}
+
+impl<'a> DbKeyVault<'a> {
+    pub fn new(secrets: &'a dyn SecretStore, persistent: bool) -> Self {
+        Self {
+            secrets,
+            persistent,
+        }
+    }
+}
+
+impl mh_store::KeyVault for DbKeyVault<'_> {
+    fn load(&self) -> AppResult<Option<String>> {
+        self.secrets.get(mh_store::DB_KEY_SECRET)
+    }
+
+    fn save(&self, secret: &str) -> AppResult<()> {
+        self.secrets.set(mh_store::DB_KEY_SECRET, secret)
+    }
+
+    fn persistent(&self) -> bool {
+        self.persistent
+    }
+}
+
 impl SecretStore for KeyringSecrets {
     fn get(&self, account_id: &str) -> AppResult<Option<String>> {
         match entry(account_id)?.get_password() {

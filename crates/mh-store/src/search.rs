@@ -2,10 +2,31 @@
 
 use mh_core::{AppResult, MessageSummary};
 use mh_mime::fold_tr;
-use rusqlite::params;
+use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::messages::{row_to_summary, SUMMARY_COLS};
 use crate::Store;
+
+/// Silinen postanın sözcükleri dizinde kalmasın: FTS5 `secure-delete`
+/// açıkken silme, dizindeki girdiyi işaretlemek yerine gerçekten kaldırır.
+/// İlk açılışta önceki silmelerden kalan girdiler birleştirmeyle (tek
+/// seferlik `optimize`) atılır.
+pub(crate) fn fts_secure_delete(conn: &Connection) -> rusqlite::Result<()> {
+    let on: Option<i64> = conn
+        .query_row(
+            "SELECT v FROM messages_fts_config WHERE k = 'secure-delete'",
+            [],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if on != Some(1) {
+        conn.execute_batch(
+            "INSERT INTO messages_fts(messages_fts, rank) VALUES ('secure-delete', 1);
+             INSERT INTO messages_fts(messages_fts) VALUES ('optimize');",
+        )?;
+    }
+    Ok(())
+}
 
 /// Kullanıcı girdisini güvenli bir FTS5 sorgusuna çevirir: harf/rakam
 /// dışındaki her şey ayırıcıdır, her sözcük önek olarak aranır ve tümü

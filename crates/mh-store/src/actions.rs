@@ -383,15 +383,11 @@ mod tests {
 
     #[test]
     fn kuyruk_yeniden_acilista_kalir() {
-        let dir = std::env::temp_dir().join(format!(
-            "mh-actions-test-{}-{}",
-            std::process::id(),
-            line!()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("t.db");
+        let dir = crate::testutil::TempDir::new("kuyruk");
+        let path = dir.path().join("t.db");
+        let key = crate::DbKey::generate().unwrap();
         {
-            let s = Store::open(&path).unwrap();
+            let s = Store::open(&path, &key).unwrap();
             s.insert_account(&account("a")).unwrap();
             s.action_push("a", &flag(&[7], ServerFlag::Seen, true), None, 1)
                 .unwrap();
@@ -410,12 +406,10 @@ mod tests {
             )
             .unwrap();
         }
-        let s = Store::open(&path).unwrap();
+        let s = Store::open(&path, &key).unwrap();
         let list = kinds(&s, "a");
         assert_eq!(list.len(), 2);
         assert_eq!(list[0], flag(&[7], ServerFlag::Seen, true));
         assert!(matches!(&list[1], Action::Delete { items } if items[0].uid == Some(4)));
-        drop(s);
-        let _ = std::fs::remove_dir_all(dir);
     }
 }

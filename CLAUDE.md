@@ -45,6 +45,7 @@ Tam kurallar: [`docs/TASARIM.md`](docs/TASARIM.md). Tek doğruluk kaynağı: `ap
 ## Güvenlik
 
 - Parola ve jetonlar yalnız işletim sistemi anahtar zincirinde (`keyring`); veritabanına, günlüğe, hata mesajına yazılmaz.
+- Yerel veritabanı diskte SQLCipher ile şifreli (AES-256); 256 bitlik anahtar ilk açılışta üretilir ve yalnız anahtar zincirinde durur (`Mailhere` / `db-key`). Anahtar zinciri yoksa şifresiz veritabanına düşülmez; hata gösterilir. Veri klasörü 0700, veritabanı dosyaları 0600; `secure_delete` açık.
 - HTML posta Rust'ta temizlenir (ammonia), betiksiz ve CSP'li çerçevede gösterilir; uzak içerik varsayılan kapalı.
 - TLS zorunlu; geçersiz sertifika açık onay ister.
 
