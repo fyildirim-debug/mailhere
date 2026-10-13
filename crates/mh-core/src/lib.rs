@@ -82,8 +82,8 @@ pub struct Account {
 }
 
 /// Hesap ekleme isteği. `password` yalnız bir kez kullanılır ve anahtar
-/// zincirine yazılır.
-#[derive(Serialize, Deserialize, Clone, Debug)]
+/// zincirine yazılır; `Debug` çıktısında gizlenir.
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct NewAccount {
     pub name: String,
@@ -95,8 +95,23 @@ pub struct NewAccount {
     pub password: String,
 }
 
-/// JMAP hesabı ekleme isteği (ör. Stalwart). `password` anahtar zincirine yazılır.
-#[derive(Serialize, Deserialize, Clone, Debug)]
+impl std::fmt::Debug for NewAccount {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NewAccount")
+            .field("name", &self.name)
+            .field("email", &self.email)
+            .field("display_name", &self.display_name)
+            .field("color", &self.color)
+            .field("imap", &self.imap)
+            .field("smtp", &self.smtp)
+            .field("password", &"***")
+            .finish()
+    }
+}
+
+/// JMAP hesabı ekleme isteği (ör. Stalwart). `password` anahtar zincirine
+/// yazılır; `Debug` çıktısında gizlenir.
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct NewJmapAccount {
     pub name: String,
@@ -107,6 +122,20 @@ pub struct NewJmapAccount {
     pub session_url: String,
     pub username: String,
     pub password: String,
+}
+
+impl std::fmt::Debug for NewJmapAccount {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NewJmapAccount")
+            .field("name", &self.name)
+            .field("email", &self.email)
+            .field("display_name", &self.display_name)
+            .field("color", &self.color)
+            .field("session_url", &self.session_url)
+            .field("username", &self.username)
+            .field("password", &"***")
+            .finish()
+    }
 }
 
 /// Tarayıcıda tamamlanan OAuth girişi. Jetonlar arka uçta bekler; arayüze
@@ -661,6 +690,39 @@ pub type AppResult<T> = Result<T, AppError>;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hesap_isteklerinde_parola_gizlenir() {
+        let server = ServerConfig {
+            host: "imap.ornek.com.tr".into(),
+            port: 993,
+            security: Security::Tls,
+            username: "furkan".into(),
+        };
+        let a = NewAccount {
+            name: "İş".into(),
+            email: "furkan@ornek.com.tr".into(),
+            display_name: "Furkan".into(),
+            color: None,
+            imap: server.clone(),
+            smtp: server,
+            password: "cokgizliparola".into(),
+        };
+        let j = NewJmapAccount {
+            name: "İş".into(),
+            email: "furkan@ornek.com.tr".into(),
+            display_name: "Furkan".into(),
+            color: None,
+            session_url: "https://posta.ornek.com.tr/.well-known/jmap".into(),
+            username: "furkan".into(),
+            password: "cokgizliparola".into(),
+        };
+        for shown in [format!("{a:?}"), format!("{j:?}"), format!("{a:#?}")] {
+            assert!(!shown.contains("cokgizliparola"), "{shown}");
+            assert!(shown.contains("furkan@ornek.com.tr"));
+            assert!(shown.contains("***"));
+        }
+    }
 
     #[test]
     fn view_json_bicimi() {
