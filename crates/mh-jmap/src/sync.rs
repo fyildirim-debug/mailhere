@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use mh_core::{Address, AppError, ErrorCode, MailboxRole, MessageId, Millis};
+use mh_core::{Address, AppError, AppResult, ErrorCode, MailboxRole, MessageId, Millis};
 use mh_store::{NewMessage, Store};
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
@@ -226,7 +226,11 @@ pub fn to_new_message(e: &Email, account_id: &str, mailbox_id: &str, now: Millis
         to: addresses(e.to.as_ref()),
         cc: addresses(e.cc.as_ref()),
         reply_to: addresses(e.reply_to.as_ref()),
-        subject: e.subject.as_deref().unwrap_or("").trim().to_owned(),
+        // Yön değiştiren ve denetim karakterleri atılır; çok uzun konu kısaltılır.
+        subject: mh_mime::clean_line(e.subject.as_deref().unwrap_or("").trim())
+            .chars()
+            .take(1000)
+            .collect(),
         snippet: e
             .preview
             .as_deref()
@@ -677,8 +681,20 @@ pub async fn fetch_body(
     let raw = client
         .download(&blob, "posta.eml", "message/rfc822")
         .await?;
-    store.store_body(id, &raw)?;
+    store_body_off_thread(store, id, raw).await?;
     Ok(())
+}
+
+/// Gövdeyi ayrı iş parçacığında ayrıştırıp yazar: kötü niyetli bir HTML'in
+/// ayrıştırılması eşzamansız görevleri tutmasın.
+async fn store_body_off_thread(store: &Store, id: MessageId, raw: Vec<u8>) -> AppResult<()> {
+    let (raw, parsed) = tokio::task::spawn_blocking(move || {
+        let parsed = mh_mime::parse(&raw, false);
+        (raw, parsed)
+    })
+    .await
+    .map_err(|e| AppError::new(ErrorCode::Internal, format!("Posta ayrıştırılamadı: {e}")))?;
+    store.store_parsed_body(id, &raw, parsed)
 }
 
 /// Yeni postaların gövdelerini indirir; indirilenlerin kimliklerini döner.
@@ -690,7 +706,7 @@ pub async fn prefetch(
     let mut done = Vec::new();
     for (id, blob) in list {
         match client.download(blob, "posta.eml", "message/rfc822").await {
-            Ok(raw) => match store.store_body(*id, &raw) {
+            Ok(raw) => match store_body_off_thread(store, *id, raw).await {
                 Ok(()) => done.push(*id),
                 Err(e) => tracing::warn!(error = %e, "gövde yazılamadı"),
             },
