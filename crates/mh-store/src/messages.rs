@@ -475,7 +475,17 @@ impl Store {
 
     /// Sonradan indirilen gövdeyi yazar ve önizleme/arama alanlarını yeniler.
     pub fn store_body(&self, id: MessageId, raw: &[u8]) -> AppResult<()> {
-        let parsed = mh_mime::parse(raw, false);
+        self.store_parsed_body(id, raw, mh_mime::parse(raw, false))
+    }
+
+    /// [`Store::store_body`]; ayrıştırma önceden (ör. eşzamansız görevi
+    /// bloklamamak için ayrı iş parçacığında) yapılmıştır.
+    pub fn store_parsed_body(
+        &self,
+        id: MessageId,
+        raw: &[u8],
+        parsed: Option<ParsedMessage>,
+    ) -> AppResult<()> {
         self.with(|c| {
             match parsed {
                 Some(p) => c.execute(
