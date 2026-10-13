@@ -141,7 +141,7 @@ pub fn messages_list(state: State<'_, AppState>, query: ListQuery) -> Res<Page<M
 }
 
 /// Gövde yerelde yoksa sunucudan indirir.
-async fn ensure_body(state: &AppState, id: MessageId) -> AppResult<()> {
+pub(crate) async fn ensure_body(state: &AppState, id: MessageId) -> AppResult<()> {
     let loc = state.store.location(id)?.ok_or_else(|| {
         AppError::new(
             ErrorCode::NotFound,
@@ -320,8 +320,14 @@ pub async fn attachment_open(
 
 // ------------------------------------------------------------------ gönderim
 
+/// Postayı giden kutusuna alır. İletilen postanın (`forward_from`) ekleri
+/// kopyalanacağı için gövdesi önce indirilir; `draft_id` taslağı başarılı
+/// gönderimden sonra silinir.
 #[tauri::command]
-pub fn send(state: State<'_, AppState>, msg: OutgoingMessage) -> Res<OutboxItem> {
+pub async fn send(state: State<'_, AppState>, msg: OutgoingMessage) -> Res<OutboxItem> {
+    if let Some(id) = msg.forward_from {
+        ensure_body(&state, id).await?;
+    }
     state.outbox.enqueue(&msg, now_ms())
 }
 

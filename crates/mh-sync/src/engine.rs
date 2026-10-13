@@ -4,6 +4,8 @@
 //! sunucu işlemleri, sırayla) ve INBOX üzerinde IDLE bekleyen ayrı bir
 //! bağlantı. Bağlantı koparsa üstel bekleme ile yeniden denenir.
 
+mod drafts;
+
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -74,13 +76,19 @@ enum Command {
         dest: String,
         raw: Vec<u8>,
     },
+    /// Taslağın yeni sürümünü ekler (`raw`) ve eski kopyalarını siler.
+    Draft {
+        dest: String,
+        raw: Option<Vec<u8>>,
+        remove: Vec<drafts::OldDraft>,
+    },
 }
 
 impl Command {
     fn is_action(&self) -> bool {
         matches!(
             self,
-            Self::Flags { .. } | Self::Move { .. } | Self::Append { .. }
+            Self::Flags { .. } | Self::Move { .. } | Self::Append { .. } | Self::Draft { .. }
         )
     }
 }
@@ -567,6 +575,12 @@ async fn execute(ctx: &AccountCtx, conn: &mut Conn, cmd: &Command) -> SyncResult
                 .append(dest, Some("(\\Seen)"), None, raw)
                 .await?;
             sync_path(ctx, conn, dest).await
+        }
+        Command::Draft { dest, raw, remove } => {
+            for path in drafts::apply(conn, dest, raw.as_deref(), remove).await? {
+                sync_path(ctx, conn, &path).await?;
+            }
+            Ok(())
         }
     }
 }

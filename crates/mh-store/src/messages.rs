@@ -223,13 +223,23 @@ fn compute_thread_id(tx: &Transaction<'_>, m: &NewMessage) -> rusqlite::Result<S
 }
 
 fn insert(tx: &Transaction<'_>, m: &NewMessage) -> rusqlite::Result<MessageId> {
+    insert_as(tx, m, None)
+}
+
+/// Postayı ekler; `id` verilirse satır bu kimlikle yazılır (taslağın yerine
+/// yazılması kimliği korur).
+pub(crate) fn insert_as(
+    tx: &Transaction<'_>,
+    m: &NewMessage,
+    id: Option<MessageId>,
+) -> rusqlite::Result<MessageId> {
     let thread_id = compute_thread_id(tx, m)?;
     tx.prepare_cached(
         "INSERT INTO messages (account_id, mailbox_id, uid, uidvalidity, message_id_header, in_reply_to, refs,
             thread_id, from_addr, to_addrs, cc_addrs, reply_to, subject, snippet, date, unread, starred,
-            has_attachments, category, size, body_fetched, fts_subject, fts_sender, fts_body, raw)
+            has_attachments, category, size, body_fetched, fts_subject, fts_sender, fts_body, raw, id)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
-            ?21, ?22, ?23, ?24, ?25)",
+            ?21, ?22, ?23, ?24, ?25, ?26)",
     )?
     .execute(params![
         m.account_id,
@@ -257,6 +267,7 @@ fn insert(tx: &Transaction<'_>, m: &NewMessage) -> rusqlite::Result<MessageId> {
         fold_tr(&sender_text(&m.from)),
         fold_tr(m.body_text.as_deref().unwrap_or("")),
         m.raw,
+        id,
     ])?;
     Ok(tx.last_insert_rowid())
 }
@@ -355,15 +366,18 @@ impl Store {
         })
     }
 
-    /// Yanıt için (Message-ID, References) başlıkları.
+    /// Yanıt için (Message-ID, References) başlıkları. Taslakta taslağın
+    /// kendisi değil, yanıtladığı posta esas alınır (In-Reply-To).
     pub fn reply_refs(&self, id: MessageId) -> AppResult<Option<(Option<String>, Vec<String>)>> {
         self.with(|c| {
             c.query_row(
-                "SELECT message_id_header, refs FROM messages WHERE id = ?1",
+                "SELECT m.message_id_header, m.refs, m.in_reply_to, b.role
+                 FROM messages m JOIN mailboxes b ON b.id = m.mailbox_id WHERE m.id = ?1",
                 [id],
                 |r| {
+                    let draft = role_from(&r.get::<_, String>(3)?) == MailboxRole::Drafts;
                     Ok((
-                        r.get::<_, Option<String>>(0)?,
+                        r.get::<_, Option<String>>(if draft { 2 } else { 0 })?,
                         from_json::<Vec<String>>(1, &r.get::<_, String>(1)?)?,
                     ))
                 },
@@ -769,6 +783,7 @@ impl Store {
         let thread = self.thread(id)?;
         Ok(MessageDetail {
             cc,
+            bcc: rendered.as_ref().map(|r| r.bcc.clone()).unwrap_or_default(),
             reply_to,
             message_id_header,
             references,
