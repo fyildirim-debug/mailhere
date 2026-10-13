@@ -1,4 +1,7 @@
 //! DNS SRV kayıtları (RFC 6186 / RFC 8314).
+//!
+//! Yanıt DNSSEC ile doğrulanmaz: hedef e-posta alan adı dışındaysa sonuç
+//! `other_domain` ile işaretlenir (bkz. `super::discover`), arayüz uyarır.
 
 use std::time::Duration;
 
@@ -25,7 +28,8 @@ async fn best(resolver: &TokioResolver, name: String) -> Option<(String, u16)> {
         .collect();
     records.sort_by_key(|s| (s.priority, std::cmp::Reverse(s.weight)));
     let s = records.first()?;
-    let host = s.target.to_utf8();
+    // ASCII (punycode) biçim: alan adı karşılaştırması ve bağlantı için.
+    let host = s.target.to_ascii();
     Some((host.trim_end_matches('.').to_owned(), s.port))
 }
 

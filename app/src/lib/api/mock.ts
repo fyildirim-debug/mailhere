@@ -198,6 +198,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
         imap: { host: `imap.${domain}`, port: 993, security: 'tls', username: email },
         smtp: { host: `smtp.${domain}`, port: 465, security: 'tls', username: email },
         source: 'autoconfig',
+        otherDomain: false,
       };
     },
     account_add: ({ input }) => {
