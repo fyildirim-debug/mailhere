@@ -81,6 +81,7 @@
       "endpoints": [
         "https://github.com/fyildirim-debug/mailhere/releases/latest/download/latest.json"
       ],
+      "requireSignedVersion": true,
       "windows": {
         "installMode": "passive"
       }
