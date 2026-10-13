@@ -246,6 +246,10 @@ pub(crate) mod tests {
         };
         send(&cfg, "", message()).await.unwrap();
         let seen = server.await.unwrap();
+        assert_eq!(
+            seen.commands[0], "EHLO [127.0.0.1]",
+            "makine adı EHLO'da gitmez"
+        );
         assert!(seen.data.contains("Subject: Cumartesi"), "{seen:?}");
         assert!(
             seen.data.contains("To: =?utf-8?b?") || seen.data.contains("To: \"Ay"),
@@ -312,7 +316,8 @@ pub(crate) mod tests {
         let server = tokio::spawn(async move {
             let (mut sock, _) = listener.accept().await.unwrap();
             sock.write_all(b"220 sahte ESMTP\r\n").await.unwrap();
-            assert!(plain_line(&mut sock).await.starts_with("EHLO "));
+            // STARTTLS öncesi düz metin: makine adı sızmaz.
+            assert_eq!(plain_line(&mut sock).await, "EHLO [127.0.0.1]");
             sock.write_all(b"250-sahte\r\n250 STARTTLS\r\n")
                 .await
                 .unwrap();
@@ -334,8 +339,8 @@ pub(crate) mod tests {
         };
         send(&cfg, "parola", message()).await.unwrap();
         let seen = server.await.unwrap();
-        assert!(
-            seen.commands[0].starts_with("EHLO"),
+        assert_eq!(
+            seen.commands[0], "EHLO [127.0.0.1]",
             "TLS sonrası yeniden EHLO"
         );
         assert!(seen.commands.iter().any(|c| c.starts_with("AUTH PLAIN")));

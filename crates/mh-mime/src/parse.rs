@@ -8,7 +8,7 @@ use mh_core::{Address, Attachment, Category, Millis};
 
 use crate::category::classify;
 use crate::html::{normalize_cid, sanitize_html};
-use crate::text::{html_to_text, snippet, tidy_lines};
+use crate::text::{clean_display_name, html_to_text, snippet, tidy_lines};
 
 /// Arama dizinine yazılacak gövde metninin üst sınırı (karakter).
 const INDEX_TEXT_LIMIT: usize = 64 * 1024;
@@ -56,6 +56,8 @@ fn parser() -> MessageParser {
     MessageParser::default()
 }
 
+/// Adres listesi. Görünen ad kaynağında temizlenir (`clean_display_name`):
+/// çözülmüş ad satır sonu ya da denetim karakteri taşıyabilir.
 fn convert_addresses(a: Option<&mail_parser::Address<'_>>) -> Vec<Address> {
     a.map(|a| {
         a.iter()
@@ -66,9 +68,9 @@ fn convert_addresses(a: Option<&mail_parser::Address<'_>>) -> Vec<Address> {
                 }
                 let name = addr
                     .name()
-                    .map(str::trim)
-                    .filter(|n| !n.is_empty() && *n != email);
-                Some(Address::new(name, email))
+                    .map(clean_display_name)
+                    .filter(|n| !n.is_empty() && n != email);
+                Some(Address::new(name.as_deref(), email))
             })
             .collect()
     })
@@ -466,6 +468,34 @@ JVBERi0xLjQKJcOkw7zDtsOfCg==\r
         assert_eq!(all, vec![data]);
         assert!(visible_attachments(ALTERNATIVE.as_bytes()).is_empty());
         assert!(r.bcc.is_empty());
+    }
+
+    #[test]
+    fn gorunen_adda_satir_sonu_ve_denetim_karakteri_temizlenir() {
+        // "Evil\r\nX-Inject: 1" kodlanmış sözcük olarak gelir.
+        let raw = "From: =?utf-8?b?RXZpbA0KWC1JbmplY3Q6IDE=?= <evil@kotu.com>\r\n\
+To: =?utf-8?b?RXZpbA0KWC1JbmplY3Q6IDE=?= <a@ornek.com>, \"Tab\tAd\" <b@ornek.com>\r\n\
+Cc: =?utf-8?b?4oCuZXhlLnBkZg==?= <c@ornek.com>\r\n\
+Reply-To: =?utf-8?b?DQo=?= <d@ornek.com>\r\n\
+Bcc: =?utf-8?b?RXZpbA0KWC1JbmplY3Q6IDE=?= <e@ornek.com>\r\n\
+Subject: x\r\n\r\nMetin";
+        let p = parse(raw.as_bytes(), false).unwrap();
+        assert_eq!(
+            p.from,
+            Address::new(Some("Evil X-Inject: 1"), "evil@kotu.com")
+        );
+        assert_eq!(p.to[0].name.as_deref(), Some("Evil X-Inject: 1"));
+        assert_eq!(p.to[1].name.as_deref(), Some("Tab Ad"));
+        // U+202E (sağdan sola zorlama) atılır.
+        assert_eq!(p.cc[0].name.as_deref(), Some("exe.pdf"));
+        // Yalnız satır sonundan oluşan ad hiç ad sayılmaz.
+        assert_eq!(p.reply_to, vec![Address::new(None, "d@ornek.com")]);
+        let r = render(raw.as_bytes(), false).unwrap();
+        assert_eq!(r.bcc[0].name.as_deref(), Some("Evil X-Inject: 1"));
+        for a in p.to.iter().chain(&p.cc).chain(&r.bcc).chain([&p.from]) {
+            let n = a.name.as_deref().unwrap_or("");
+            assert!(!n.chars().any(char::is_control), "{n:?}");
+        }
     }
 
     #[test]
