@@ -43,6 +43,7 @@ fn main() {
         "account_add_oauth",
         "cert_inspect",
         "cert_trust",
+        "unsubscribe",
     ];
     tauri_build::try_build(
         tauri_build::Attributes::new()

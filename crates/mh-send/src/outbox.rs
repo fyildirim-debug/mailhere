@@ -180,7 +180,7 @@ impl Outbox {
     /// Postayı gönderir. SMTP kabul ettikten sonraki adımların (sunucuya
     /// ekleme, yerel kopya) hatası gönderimi başarısız saymaz: yeniden
     /// denenirse alıcıya ikinci kopya gider. Bu durumda kullanıcıya not döner.
-    async fn deliver(&self, row: &OutboxRow) -> AppResult<Option<String>> {
+    pub(crate) async fn deliver(&self, row: &OutboxRow) -> AppResult<Option<String>> {
         let account = self
             .store
             .account(&row.account_id)?
@@ -673,7 +673,9 @@ mod tests {
                 username: String::new(),
             }),
             jmap_url: None,
-            signature: None,
+            signatures: Vec::new(),
+            signature_new: None,
+            signature_reply: None,
             created_at: 0,
             auth: Default::default(),
         }

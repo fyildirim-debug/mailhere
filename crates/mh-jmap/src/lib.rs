@@ -109,7 +109,9 @@ mod tests {
             imap: None,
             smtp: None,
             jmap_url: url.map(str::to_owned),
-            signature: None,
+            signatures: Vec::new(),
+            signature_new: None,
+            signature_reply: None,
             created_at: 0,
             auth: Default::default(),
         }

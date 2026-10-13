@@ -88,7 +88,9 @@ pub async fn account_add(
         imap: Some(input.imap),
         smtp: Some(input.smtp),
         jmap_url: None,
-        signature: None,
+        signatures: Vec::new(),
+        signature_new: None,
+        signature_reply: None,
         created_at: now_ms(),
         auth: Default::default(),
     };
@@ -515,6 +517,7 @@ pub fn normalize_settings(mut s: Settings) -> Settings {
         .filter(|e| mh_store::is_remote_entry(e))
         .collect();
     s.trusted_certs = crate::cmd_cert::normalize_trusted(s.trusted_certs);
+    s.templates = crate::signatures::normalize_templates(s.templates);
     s
 }
 

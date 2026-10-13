@@ -129,7 +129,9 @@ async fn gercek_sunucu_uctan_uca() {
         imap: None,
         smtp: None,
         jmap_url: Some(url.clone()),
-        signature: None,
+        signatures: Vec::new(),
+        signature_new: None,
+        signature_reply: None,
         created_at: 0,
         auth: Default::default(),
     };

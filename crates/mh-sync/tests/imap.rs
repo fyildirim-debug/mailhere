@@ -187,7 +187,9 @@ fn test_account(cfg: &ServerConfig) -> Account {
         imap: Some(cfg.clone()),
         smtp: None,
         jmap_url: None,
-        signature: None,
+        signatures: Vec::new(),
+        signature_new: None,
+        signature_reply: None,
         created_at: 0,
         auth: Default::default(),
     }

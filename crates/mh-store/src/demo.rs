@@ -386,7 +386,9 @@ fn demo_account(a: &DemoAccount, created_at: Millis) -> Account {
         imap: (a.kind == AccountKind::Imap).then(|| server(993)),
         smtp: Some(server(465)),
         jmap_url: (a.kind == AccountKind::Jmap).then(|| format!("https://{DEMO_HOST}/jmap")),
-        signature: None,
+        signatures: Vec::new(),
+        signature_new: None,
+        signature_reply: None,
         created_at,
         auth: Default::default(),
     }
