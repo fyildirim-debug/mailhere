@@ -40,6 +40,8 @@ pub struct Rendered {
     pub html: Option<String>,
     pub has_remote_content: bool,
     pub attachments: Vec<Attachment>,
+    /// Başlıkta saklanan gizli alıcılar (yalnız taslaklarda bulunur).
+    pub bcc: Vec<Address>,
 }
 
 /// Diske yazılacak bir ek.
@@ -286,14 +288,17 @@ pub fn render(raw: &[u8], remote_allowed: bool) -> Option<Rendered> {
     let sanitized = html
         .as_deref()
         .map(|h| sanitize_html(h, remote_allowed, inline_map(&msg)));
+    // Sondaki satır sonları atılır: tek parçalı postada gövdeyi bitiren CRLF
+    // metne dahildir ve taslak her açılıp kaydedildiğinde bir satır uzardı.
     let text = text
-        .map(|t| t.replace("\r\n", "\n"))
+        .map(|t| t.replace("\r\n", "\n").trim_end_matches('\n').to_owned())
         .or_else(|| html.as_deref().map(html_to_text));
     Some(Rendered {
         text,
         has_remote_content: sanitized.as_ref().is_some_and(|s| s.has_remote),
         html: sanitized.map(|s| s.html),
         attachments,
+        bcc: convert_addresses(msg.bcc()),
     })
 }
 
@@ -306,6 +311,25 @@ pub fn attachment(raw: &[u8], index: u32) -> Option<AttachmentData> {
         mime: mime_of(part),
         bytes: part.contents().to_vec(),
     })
+}
+
+/// Okuma alanında gösterilen eklerin tamamı (iletirken kopyalanır); HTML
+/// gövdede kullanılan satır içi görseller hariç.
+pub fn visible_attachments(raw: &[u8]) -> Vec<AttachmentData> {
+    let Some(msg) = parser().parse(raw) else {
+        return Vec::new();
+    };
+    let (_, html) = bodies(&msg);
+    let shown = list_attachments(&msg, html.as_deref());
+    msg.attachments()
+        .enumerate()
+        .filter(|(i, _)| shown.iter().any(|a| a.index as usize == *i))
+        .map(|(i, part)| AttachmentData {
+            name: attachment_name(part, i),
+            mime: mime_of(part),
+            bytes: part.contents().to_vec(),
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -436,6 +460,22 @@ JVBERi0xLjQKJcOkw7zDtsOfCg==\r
         assert_eq!(data.name, "Sozlesme_v3.pdf");
         assert!(data.bytes.starts_with(b"%PDF-1.4"));
         assert!(attachment(MIXED.as_bytes(), 9).is_none());
+
+        // İletirken yalnız görünen ekler kopyalanır.
+        let all = visible_attachments(MIXED.as_bytes());
+        assert_eq!(all, vec![data]);
+        assert!(visible_attachments(ALTERNATIVE.as_bytes()).is_empty());
+        assert!(r.bcc.is_empty());
+    }
+
+    #[test]
+    fn taslakta_gizli_alici() {
+        let raw = "From: furkan@ornek.com.tr\r\nBcc: Gizli <gizli@ornek.com.tr>\r\nSubject: Taslak\r\n\r\nMetin";
+        let r = render(raw.as_bytes(), false).unwrap();
+        assert_eq!(
+            r.bcc,
+            vec![Address::new(Some("Gizli"), "gizli@ornek.com.tr")]
+        );
     }
 
     #[test]

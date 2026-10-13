@@ -1,6 +1,6 @@
 //! Hesaplar.
 
-use mh_core::{Account, AccountId, AppResult, AuthKind, ServerConfig};
+use mh_core::{Account, AccountId, AccountUpdate, AppResult, AuthKind, ServerConfig};
 use rusqlite::{params, OptionalExtension, Row};
 
 use crate::codec::{from_json, kind_from, kind_str, to_json};
@@ -101,6 +101,21 @@ impl Store {
         })
     }
 
+    /// Hesabın düzenlenebilir alanlarını yazar (doğrulama çağıranın işidir).
+    /// Hesap yoksa `None`.
+    pub fn update_account(&self, id: &str, u: &AccountUpdate) -> AppResult<Option<Account>> {
+        let changed = self.with(|c| {
+            c.execute(
+                "UPDATE accounts SET name = ?2, display_name = ?3, color = ?4, signature = ?5 WHERE id = ?1",
+                params![id, u.name, u.display_name, u.color, u.signature],
+            )
+        })?;
+        if changed == 0 {
+            return Ok(None);
+        }
+        self.account(id)
+    }
+
     /// Hesabı ve tüm yerel verisini siler. Silindiyse `true`.
     pub fn remove_account(&self, id: &AccountId) -> AppResult<bool> {
         self.with(|c| Ok(c.execute("DELETE FROM accounts WHERE id = ?1", [id])? > 0))
@@ -122,5 +137,27 @@ mod tests {
         assert!(s.remove_account(&"a".to_string()).unwrap());
         assert!(s.account("a").unwrap().is_none());
         assert!(!s.remove_account(&"a".to_string()).unwrap());
+    }
+
+    #[test]
+    fn duzenlenebilir_alanlar() {
+        let s = store_with_account("a");
+        let u = mh_core::AccountUpdate {
+            name: "Kişisel".into(),
+            display_name: "Furkan Y.".into(),
+            color: "#2E9A61".into(),
+            signature: Some("Sevgiler,\nFurkan".into()),
+        };
+        let a = s.update_account("a", &u).unwrap().unwrap();
+        assert_eq!(
+            (a.name.as_str(), a.display_name.as_str(), a.color.as_str()),
+            ("Kişisel", "Furkan Y.", "#2E9A61")
+        );
+        assert_eq!(a.signature.as_deref(), Some("Sevgiler,\nFurkan"));
+        // Sunucu ayarları ve adres değişmez.
+        assert_eq!(a.imap, account("a").imap);
+        assert_eq!(a.email, "a@ornek.com.tr");
+        assert_eq!(s.account("a").unwrap().unwrap(), a);
+        assert!(s.update_account("yok", &u).unwrap().is_none());
     }
 }

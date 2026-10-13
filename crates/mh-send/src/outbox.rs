@@ -4,23 +4,24 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use mh_core::{
-    Account, AppError, AppResult, ErrorCode, MailboxRole, Millis, OutboxEvent, OutboxItem,
-    OutgoingMessage,
+    Account, AppError, AppResult, ErrorCode, MailboxRole, MessageId, Millis, OutboxEvent,
+    OutboxItem, OutgoingMessage,
 };
 use mh_store::{NewMessage, OutboxRow, Store};
 use mh_sync::{credentials_for, EventSink, SecretStore, SyncManager};
 use tokio::sync::Notify;
 
-use crate::message::{build, validate, ReplyRef};
+use crate::message::{build_with, validate_with, BuildOptions};
+use crate::parts::{forwarded_local, reply_ref, total_size};
 
 /// Kalıcı olmayan hatada en fazla deneme.
 const MAX_ATTEMPTS: u32 = 3;
 
 pub struct Outbox {
-    store: Arc<Store>,
+    pub(crate) store: Arc<Store>,
     secrets: Arc<dyn SecretStore>,
-    sync: Arc<SyncManager>,
-    sink: Arc<dyn EventSink>,
+    pub(crate) sync: Arc<SyncManager>,
+    pub(crate) sink: Arc<dyn EventSink>,
     wake: Notify,
 }
 
@@ -62,9 +63,14 @@ impl Outbox {
     }
 
     /// Postayı sıraya alır: `send_at` verilmişse o an, yoksa geri alma süresi
-    /// sonunda gönderilir.
+    /// sonunda gönderilir. İletilen postanın ekleri (`forward_from`) sınıra
+    /// dahildir; içerik yerelde yoksa gönderimde indirilir.
     pub fn enqueue(&self, msg: &OutgoingMessage, now: Millis) -> AppResult<OutboxItem> {
-        validate(msg)?;
+        let forwarded = match msg.forward_from {
+            Some(id) => forwarded_local(&self.store, id)?.map_or(0, |list| total_size(&list)),
+            None => 0,
+        };
+        validate_with(msg, forwarded, false)?;
         if self.store.account(&msg.account_id)?.is_none() {
             return Err(AppError::new(
                 ErrorCode::NotFound,
@@ -122,6 +128,11 @@ impl Outbox {
         match self.deliver(&row).await {
             Ok(()) => {
                 let _ = self.store.outbox_remove(&row.id);
+                if let Some(draft) = row.msg.draft_id {
+                    if let Err(e) = self.delete_draft(draft) {
+                        tracing::warn!(error = %e, "gönderilen postanın taslağı silinemedi");
+                    }
+                }
                 self.emit(&row.id, None);
             }
             Err(e) => {
@@ -153,18 +164,18 @@ impl Outbox {
             .store
             .account(&row.account_id)?
             .ok_or_else(|| AppError::new(ErrorCode::NotFound, "Gönderen hesap bulunamadı."))?;
-        let reply = match row.msg.in_reply_to {
-            Some(id) => self
-                .store
-                .reply_refs(id)?
-                .map(|(message_id, references)| ReplyRef {
-                    message_id,
-                    references,
-                }),
-            None => None,
+        let reply = reply_ref(&self.store, &row.msg)?;
+        let extra = match row.msg.forward_from {
+            Some(id) => self.forwarded(id).await?,
+            None => Vec::new(),
         };
         let now = now_ms();
-        let message = build(&account, &row.msg, reply.as_ref(), now)?;
+        let opts = BuildOptions {
+            reply: reply.as_ref(),
+            extra: &extra,
+            draft: false,
+        };
+        let message = build_with(&account, &row.msg, &opts, now)?;
         let raw = message.formatted();
         if !is_demo(&account) {
             let cfg = account.smtp.clone().ok_or_else(|| {
@@ -213,16 +224,26 @@ impl Outbox {
         Ok(())
     }
 
+    /// İletilen postanın ekleri; içerik yerelde yoksa önce indirilir.
+    async fn forwarded(&self, id: MessageId) -> AppResult<Vec<mh_mime::AttachmentData>> {
+        if let Some(list) = forwarded_local(&self.store, id)? {
+            return Ok(list);
+        }
+        self.sync.fetch_body(id).await?;
+        crate::parts::forwarded_required(&self.store, id)
+    }
+
+    /// Gönderilemeyen postayı taslak olarak saklar (varsa kendi taslağının yerine).
     fn save_as_draft(&self, row: &OutboxRow) -> AppResult<()> {
-        let account = self
-            .store
-            .account(&row.account_id)?
-            .ok_or_else(|| AppError::new(ErrorCode::NotFound, "Hesap bulunamadı."))?;
         let mut msg = row.msg.clone();
         // Taslak, eksik ek yüzünden yeniden başarısız olmasın.
         msg.attachments.retain(|p| std::path::Path::new(p).exists());
-        let raw = build(&account, &msg, None, now_ms())?.formatted();
-        self.store_local(&account.id, MailboxRole::Drafts, raw, now_ms())
+        if self.save_draft(&msg, now_ms()).is_ok() {
+            return Ok(());
+        }
+        // İletilen ekler alınamadıysa en azından metin kalsın.
+        msg.forward_from = None;
+        self.save_draft(&msg, now_ms()).map(|_| ())
     }
 }
 
@@ -346,5 +367,260 @@ mod tests {
             "yanıt aynı konuşmada"
         );
         assert_eq!(store.outbox_next_due().unwrap(), None);
+    }
+
+    fn view(store: &Store, view: mh_core::View, account: &str) -> Vec<MessageSummary> {
+        store
+            .list(
+                &mh_core::ListQuery {
+                    view,
+                    account_id: Some(account.into()),
+                    category: None,
+                    cursor: None,
+                    limit: 100,
+                },
+                now_ms(),
+            )
+            .unwrap()
+            .items
+    }
+
+    async fn run_due(store: &Store, outbox: &Outbox) {
+        for row in store.outbox_claim_due(now_ms()).unwrap() {
+            outbox.process(row).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn taslak_kaydet_yerine_yaz_sil() {
+        let (store, _, outbox) = setup();
+        let drafts = |s: &Store| view(s, mh_core::View::Drafts, "demo-is");
+        let before = drafts(&store).len();
+
+        // Alıcısız taslak kaydedilir; gizli alıcı saklanır.
+        let mut m = msg();
+        m.to.clear();
+        m.bcc = vec![Address::new(None, "gizli@ornek.com.tr")];
+        m.subject = "Bütçe planı".into();
+        let id = outbox.save_draft(&m, 1_000).unwrap();
+        assert_eq!(drafts(&store).len(), before + 1);
+        let d = store.detail(id, &[]).unwrap();
+        assert_eq!(d.summary.subject, "Bütçe planı");
+        assert_eq!(d.bcc, vec![Address::new(None, "gizli@ornek.com.tr")]);
+        assert!(!d.summary.unread);
+        assert_eq!(d.body_text.as_deref(), Some("Geliyorum!"));
+
+        // Yerine yazınca kimlik ve sayı aynı kalır; metin her kayıtta uzamaz.
+        m.draft_id = Some(id);
+        m.subject = "Bütçe planı v2".into();
+        m.body_text = d.body_text.clone().unwrap();
+        m.to = vec![Address::new(Some("Kerem"), "kerem@ornek.com.tr")];
+        assert_eq!(outbox.save_draft(&m, 2_000).unwrap(), id);
+        assert_eq!(drafts(&store).len(), before + 1);
+        let d = store.detail(id, &[]).unwrap();
+        assert_eq!(d.summary.subject, "Bütçe planı v2");
+        assert_eq!(d.summary.to, m.to);
+        assert_eq!(d.body_text.as_deref(), Some(m.body_text.as_str()));
+
+        // Silme yerelden kaldırır; ikinci silme sessizce geçer.
+        outbox.delete_draft(id).unwrap();
+        assert!(store.summary(id).unwrap().is_none());
+        assert_eq!(drafts(&store).len(), before);
+        outbox.delete_draft(id).unwrap();
+
+        // Taslak olmayan posta bu yolla silinmez.
+        let inbox = store
+            .find_by_subject("Cumartesi kahvaltı?")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            outbox.delete_draft(inbox.id).unwrap_err().code,
+            ErrorCode::Invalid
+        );
+        assert!(store.summary(inbox.id).unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn iletilen_ekler_ve_gonderilen_taslak() {
+        let (store, rec, outbox) = setup();
+        let original = store
+            .find_by_subject("Sözleşme imzaya hazır")
+            .unwrap()
+            .unwrap();
+        let attachment = store.detail(original.id, &[]).unwrap().attachments[0].clone();
+
+        // İletilen posta taslağa ekleriyle kaydedilir.
+        let mut m = msg();
+        m.account_id = original.account_id.clone();
+        m.subject = "Fwd: Sözleşme imzaya hazır".into();
+        m.forward_from = Some(original.id);
+        let draft = outbox.save_draft(&m, 1_000).unwrap();
+        assert_eq!(
+            store.detail(draft, &[]).unwrap().attachments,
+            vec![attachment.clone()]
+        );
+
+        // Taslaktan gönderim: ekler kopyalanır, taslak gönderimden sonra silinir.
+        m.draft_id = Some(draft);
+        m.send_at = Some(0);
+        let item = outbox.enqueue(&m, 0).unwrap();
+        assert!(
+            store.summary(draft).unwrap().is_some(),
+            "geri alma süresinde taslak durur"
+        );
+        run_due(&store, &outbox).await;
+        assert_eq!(
+            rec.outbox.lock().unwrap().clone(),
+            vec![OutboxEvent {
+                id: item.id,
+                ok: true,
+                error: None
+            }]
+        );
+        assert!(store.summary(draft).unwrap().is_none(), "taslak silindi");
+        let sent = view(&store, mh_core::View::Sent, &m.account_id);
+        let fwd = sent
+            .iter()
+            .find(|s| s.subject == "Fwd: Sözleşme imzaya hazır")
+            .unwrap();
+        assert!(fwd.has_attachments);
+        let d = store.detail(fwd.id, &[]).unwrap();
+        assert_eq!(d.attachments.len(), 1);
+        assert_eq!(
+            (d.attachments[0].name.as_str(), d.attachments[0].size),
+            (attachment.name.as_str(), attachment.size)
+        );
+        let a = |id| mh_mime::attachment(&store.raw(id).unwrap().unwrap(), 0).unwrap();
+        assert_eq!(a(fwd.id).bytes, a(original.id).bytes, "içerik aynen");
+    }
+
+    /// Arayüz, ekli bir taslağı yeniden açınca `forward_from` ve `draft_id`
+    /// olarak taslağın kendi kimliğini verir.
+    #[tokio::test]
+    async fn yeniden_acilan_taslagin_ekleri_korunur() {
+        let (store, rec, outbox) = setup();
+        let dir = std::env::temp_dir().join(format!("mh-taslak-ek-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("Bütçe.xlsx");
+        std::fs::write(&path, b"PK\x03\x04 tablo").unwrap();
+
+        let mut m = msg();
+        m.attachments = vec![path.to_string_lossy().into_owned()];
+        let draft = outbox.save_draft(&m, 1_000).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+
+        // Yeniden açılan taslak: dosya yolu yok, ekler taslağın kendisinden.
+        m.attachments.clear();
+        m.forward_from = Some(draft);
+        m.draft_id = Some(draft);
+        m.body_text = "Güncel metin".into();
+        assert_eq!(outbox.save_draft(&m, 2_000).unwrap(), draft);
+        let d = store.detail(draft, &[]).unwrap();
+        assert_eq!(d.attachments.len(), 1);
+        assert_eq!(d.attachments[0].name, "Bütçe.xlsx");
+        assert_eq!(d.body_text.as_deref(), Some("Güncel metin"));
+
+        m.send_at = Some(0);
+        let item = outbox.enqueue(&m, 0).unwrap();
+        run_due(&store, &outbox).await;
+        assert_eq!(
+            rec.outbox.lock().unwrap().clone(),
+            vec![OutboxEvent {
+                id: item.id,
+                ok: true,
+                error: None
+            }]
+        );
+        assert!(store.summary(draft).unwrap().is_none());
+        let sent = view(&store, mh_core::View::Sent, "demo-is");
+        let d = store.detail(sent[0].id, &[]).unwrap();
+        assert_eq!(d.attachments.len(), 1);
+        assert_eq!(d.attachments[0].name, "Bütçe.xlsx");
+        let raw = store.raw(sent[0].id).unwrap().unwrap();
+        assert_eq!(
+            mh_mime::attachment(&raw, 0).unwrap().bytes,
+            b"PK\x03\x04 tablo"
+        );
+    }
+
+    #[tokio::test]
+    async fn olmayan_taslak_yerine_yenisi_acilir() {
+        let (store, _, outbox) = setup();
+        let mut m = msg();
+        m.draft_id = Some(424_242);
+        let id = outbox.save_draft(&m, 1_000).unwrap();
+        assert_ne!(id, 424_242);
+        assert_eq!(store.summary(id).unwrap().unwrap().subject, m.subject);
+    }
+
+    #[tokio::test]
+    async fn taslaktan_yanit_ayni_konusmada() {
+        let (store, _, outbox) = setup();
+        let original = store
+            .find_by_subject("Cumartesi kahvaltı?")
+            .unwrap()
+            .unwrap();
+        let mut m = msg();
+        m.account_id = original.account_id.clone();
+        m.in_reply_to = Some(original.id);
+        let draft = outbox.save_draft(&m, 1_000).unwrap();
+        // Arayüz taslağı yeniden açıp yanıt bağını vermeden gönderir.
+        m.in_reply_to = None;
+        m.draft_id = Some(draft);
+        m.send_at = Some(0);
+        outbox.enqueue(&m, 0).unwrap();
+        run_due(&store, &outbox).await;
+        let sent = view(&store, mh_core::View::Sent, &m.account_id);
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].thread_id, original.thread_id);
+        let refs = store.reply_refs(sent[0].id).unwrap().unwrap().1;
+        assert!(!refs.is_empty(), "References korunur");
+    }
+
+    #[tokio::test]
+    async fn iletilen_posta_yoksa_reddedilir() {
+        let (_, _, outbox) = setup();
+        let mut m = msg();
+        m.forward_from = Some(987_654);
+        assert_eq!(outbox.enqueue(&m, 0).unwrap_err().code, ErrorCode::NotFound);
+        assert_eq!(
+            outbox.save_draft(&m, 0).unwrap_err().code,
+            ErrorCode::NotFound
+        );
+    }
+
+    #[tokio::test]
+    async fn kalici_hatada_kendi_taslagi_guncellenir() {
+        let (store, rec, outbox) = setup();
+        // Parolası anahtar zincirinde olmayan gerçek (tanıtım dışı) hesap.
+        let mut account = store.account("demo-is").unwrap().unwrap();
+        account.id = "gercek".into();
+        account.imap = None;
+        account.smtp = Some(mh_core::ServerConfig {
+            host: "smtp.ornek.com.tr".into(),
+            port: 465,
+            security: mh_core::Security::Tls,
+            username: "furkan".into(),
+        });
+        store.insert_account(&account).unwrap();
+        let mut m = msg();
+        m.account_id = "gercek".into();
+        let draft = outbox.save_draft(&m, 1_000).unwrap();
+        m.draft_id = Some(draft);
+        m.subject = "Son hali".into();
+        m.send_at = Some(0);
+        outbox.enqueue(&m, 0).unwrap();
+        run_due(&store, &outbox).await;
+        let ev = rec.outbox.lock().unwrap().clone();
+        assert!(!ev[0].ok);
+        assert!(ev[0]
+            .error
+            .as_deref()
+            .unwrap()
+            .ends_with("Posta Taslaklar'a kaydedildi."));
+        let drafts = view(&store, mh_core::View::Drafts, "gercek");
+        assert_eq!(drafts.len(), 1, "ikinci taslak açılmaz");
+        assert_eq!(drafts[0].id, draft);
+        assert_eq!(drafts[0].subject, "Son hali");
     }
 }
