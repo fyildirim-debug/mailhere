@@ -110,6 +110,9 @@ fn now_ms() -> Millis {
         .unwrap_or(0)
 }
 
+/// Sunucunun bildirdiği adres. Görünen ad kaynağında temizlenir: satır sonu,
+/// denetim ve yön değiştiren karakterler boşluğa çevrilir (yanıt başlığına
+/// olduğu gibi yazılamaz).
 fn to_address(a: &EmailAddress) -> Option<Address> {
     let email = a
         .email
@@ -119,9 +122,9 @@ fn to_address(a: &EmailAddress) -> Option<Address> {
     let name = a
         .name
         .as_deref()
-        .map(str::trim)
-        .filter(|n| !n.is_empty() && *n != email);
-    Some(Address::new(name, email))
+        .map(mh_mime::clean_display_name)
+        .filter(|n| !n.is_empty() && n != email);
+    Some(Address::new(name.as_deref(), email))
 }
 
 fn addresses(list: Option<&Vec<EmailAddress>>) -> Vec<Address> {
@@ -767,6 +770,36 @@ mod tests {
         assert_eq!(m.size, 1234);
         assert_eq!(m.category, mh_core::Category::People);
         assert!(m.raw.is_none());
+    }
+
+    #[test]
+    fn gorunen_adda_satir_sonu_temizlenir() {
+        // Sunucu adı çözülmüş verir: "=?utf-8?b?RXZpbA0KWC1JbmplY3Q6IDE=?=" → "Evil\r\nX-Inject: 1".
+        let e = email(json!({
+            "id": "M1",
+            "mailboxIds": {"mb1": true},
+            "from": [{"name": "Evil\r\nX-Inject: 1", "email": "evil@kotu.com"}],
+            "to": [
+                {"name": "\u{202E}fdp.exe", "email": "a@ornek.com"},
+                {"name": "\r\n\t", "email": "b@ornek.com"}
+            ],
+            "cc": [{"name": "Ayşe\u{0}\u{7}Demir", "email": "c@ornek.com"}],
+            "replyTo": [{"name": "Evil\nX: 2", "email": "d@ornek.com"}],
+        }));
+        let m = to_new_message(&e, "a", "a:mb1", 5);
+        assert_eq!(
+            m.from,
+            Address::new(Some("Evil X-Inject: 1"), "evil@kotu.com")
+        );
+        assert_eq!(
+            m.to,
+            vec![
+                Address::new(Some("fdp.exe"), "a@ornek.com"),
+                Address::new(None, "b@ornek.com")
+            ]
+        );
+        assert_eq!(m.cc[0].name.as_deref(), Some("Ayşe Demir"));
+        assert_eq!(m.reply_to[0].name.as_deref(), Some("Evil X: 2"));
     }
 
     #[test]

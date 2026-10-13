@@ -121,6 +121,30 @@ pub fn collapse_ws(s: &str) -> String {
     out
 }
 
+/// Yön değiştiren biçim karakterleri (U+202A–U+202E, U+2066–U+2069): adın
+/// görünüşünü ters çevirip yanıltabilir.
+fn is_bidi_control(c: char) -> bool {
+    matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+}
+
+/// Görünen adı (ör. `"Ayşe Demir" <ayse@...>`) temizler: CR, LF, sekme ve
+/// diğer denetim karakterleri ile yön değiştiren karakterler boşluğa çevrilir,
+/// boşluklar sadeleşir. Kodlanmış sözcükten (`=?utf-8?b?...?=`) çözülen ad
+/// satır sonu içerebilir; yanıtlarken başlığa olduğu gibi yazılamaz.
+pub fn clean_display_name(s: &str) -> String {
+    let spaced: String = s
+        .chars()
+        .map(|c| {
+            if c.is_control() || is_bidi_control(c) {
+                ' '
+            } else {
+                c
+            }
+        })
+        .collect();
+    collapse_ws(&spaced)
+}
+
 /// Liste satırında gösterilen önizleme: alıntı satırları atlanır, boşluklar
 /// sadeleşir, ~200 karakterde kelime sınırından kesilir.
 pub fn snippet(text: &str) -> String {
@@ -226,5 +250,20 @@ mod tests {
     #[test]
     fn turkce_katlama() {
         assert_eq!(fold_tr("IŞIK İzmir"), "işik izmir");
+    }
+
+    #[test]
+    fn gorunen_ad_temizlenir() {
+        assert_eq!(
+            clean_display_name("Evil\r\nX-Inject: 1"),
+            "Evil X-Inject: 1"
+        );
+        assert_eq!(clean_display_name(" Ayşe\tDemir\u{0}\u{7f} "), "Ayşe Demir");
+        assert_eq!(
+            clean_display_name("fatura\u{202E}fdp.exe\u{2066}x\u{2069}"),
+            "fatura fdp.exe x"
+        );
+        assert_eq!(clean_display_name("\u{85}\u{2028}"), "");
+        assert_eq!(clean_display_name("Furkan Yıldırım"), "Furkan Yıldırım");
     }
 }
