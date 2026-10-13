@@ -60,6 +60,10 @@ ring = "0.17.14"
 x509-parser = "0.18.1"
 rcgen = { version = "0.14.10", default-features = false, features = ["crypto", "ring"] }
 
+# Tam ekran algısı (Windows: Shell API, Linux: X11 saf Rust istemcisi)
+windows-sys = { version = "0.61.2", features = ["Win32_UI_Shell"] }
+x11rb = { version = "0.14.0", default-features = false }
+
 # Masaüstü kabuğu (kararlı Tauri 2.x)
 tauri = { version = "2.12.3", features = ["tray-icon", "image-png"] }
 tauri-build = { version = "2.7.2", features = [] }

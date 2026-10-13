@@ -2,11 +2,15 @@
 //!
 //! Yeni bir posta geldiğinde köşe kartı mı açılacağını, yoksa yalnız tepsi
 //! rozetinin mi güncelleneceğini belirler. Karar saf bir işlevdir; saat ve
-//! tam ekran durumu dışarıdan verilir.
+//! tam ekran durumu dışarıdan verilir (`is_fullscreen`).
+
+mod fullscreen;
 
 use std::sync::atomic::{AtomicI64, Ordering};
 
 use mh_core::{Category, MessageSummary, Millis, NotifyMode, Settings};
+
+pub use fullscreen::is_fullscreen;
 
 /// Bildirim kararı.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
