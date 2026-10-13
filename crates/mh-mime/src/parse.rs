@@ -8,10 +8,14 @@ use mh_core::{Address, Attachment, Category, Millis};
 
 use crate::category::classify;
 use crate::html::{normalize_cid, sanitize_html};
-use crate::text::{clean_display_name, html_to_text, snippet, tidy_lines};
+use crate::text::{clean_display_name, clean_line, html_to_text, snippet, tidy_lines};
 
 /// Arama dizinine yazılacak gövde metninin üst sınırı (karakter).
 const INDEX_TEXT_LIMIT: usize = 64 * 1024;
+/// Konu satırının üst sınırı (karakter); konuşma kimliği ve depo için.
+const SUBJECT_LIMIT: usize = 1000;
+/// Ek adının üst sınırı (karakter).
+const NAME_LIMIT: usize = 255;
 
 /// Listeleme ve dizinleme için gereken alanlar.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -169,17 +173,19 @@ fn inline_map(msg: &Message<'_>) -> HashMap<String, String> {
         .collect()
 }
 
+/// Ek adı. Yön değiştiren ve denetim karakterleri atılır
+/// (`fatura\u{202E}fdp.exe` uzantıyı ters gösteremez), uzunluk sınırlanır.
 fn attachment_name(part: &MessagePart<'_>, index: usize) -> String {
     if let Some(n) = part
         .attachment_name()
-        .map(str::trim)
+        .map(clean_line)
         .filter(|n| !n.is_empty())
     {
-        return n.to_owned();
+        return truncate_chars(&n, NAME_LIMIT);
     }
     if let PartType::Message(m) = &part.body {
-        if let Some(s) = m.subject().map(str::trim).filter(|s| !s.is_empty()) {
-            return format!("{s}.eml");
+        if let Some(s) = m.subject().map(clean_line).filter(|s| !s.is_empty()) {
+            return format!("{}.eml", truncate_chars(&s, NAME_LIMIT - 4));
         }
         return format!("ileti-{}.eml", index + 1);
     }
@@ -264,7 +270,7 @@ pub fn parse(raw: &[u8], headers_only: bool) -> Option<ParsedMessage> {
         to: convert_addresses(msg.to()),
         cc: convert_addresses(msg.cc()),
         reply_to: convert_addresses(msg.reply_to()),
-        subject: msg.subject().map(str::trim).unwrap_or("").to_owned(),
+        subject: truncate_chars(&clean_line(msg.subject().unwrap_or("")), SUBJECT_LIMIT),
         date: msg.date().map(|d| d.to_timestamp() * 1000),
         snippet: plain.as_deref().map(snippet).unwrap_or_default(),
         body_text: if headers_only {
@@ -528,6 +534,60 @@ Subject: x\r\n\r\nMetin";
         assert_eq!(
             parse(kargo.as_bytes(), false).unwrap().category,
             Category::Notifications
+        );
+    }
+
+    #[test]
+    fn konu_ve_ek_adinda_yon_karakterleri_atilir() {
+        let b64 = |s: &str| base64::engine::general_purpose::STANDARD.encode(s);
+        let raw = format!(
+            "From: a@ornek.com\r\n\
+Subject: =?utf-8?b?{}?=\r\n\
+MIME-Version: 1.0\r\n\
+Content-Type: multipart/mixed; boundary=\"s\"\r\n\
+\r\n\
+--s\r\n\
+Content-Type: text/plain\r\n\
+\r\n\
+Metin\r\n\
+--s\r\n\
+Content-Type: application/octet-stream\r\n\
+Content-Disposition: attachment; filename*=utf-8''fatura%E2%80%AEfdp.exe\r\n\
+Content-Transfer-Encoding: base64\r\n\
+\r\n\
+TVo=\r\n\
+--s\r\n\
+Content-Type: application/pdf; name=\"=?utf-8?b?{}?=\"\r\n\
+Content-Disposition: attachment\r\n\
+\r\n\
+x\r\n\
+--s--\r\n",
+            b64("s\u{202E}fdp.exe\u{200F}\r\nX"),
+            b64("\u{2067}rapor\u{2069}.pdf\u{0}"),
+        );
+        let p = parse(raw.as_bytes(), false).unwrap();
+        assert_eq!(p.subject, "sfdp.exe  X");
+        let r = render(raw.as_bytes(), false).unwrap();
+        let names: Vec<&str> = r.attachments.iter().map(|a| a.name.as_str()).collect();
+        assert_eq!(names, ["faturafdp.exe", "rapor.pdf"]);
+        assert_eq!(attachment(raw.as_bytes(), 0).unwrap().name, "faturafdp.exe");
+        let all = visible_attachments(raw.as_bytes());
+        assert_eq!(all[1].name, "rapor.pdf");
+    }
+
+    #[test]
+    fn uzun_konu_sinirlanir() {
+        let raw = format!(
+            "From: a@ornek.com\r\nSubject: {}son\r\n\r\nMetin",
+            "re:".repeat(100_000)
+        );
+        let t = std::time::Instant::now();
+        let p = parse(raw.as_bytes(), true).unwrap();
+        assert_eq!(p.subject.chars().count(), SUBJECT_LIMIT);
+        assert!(
+            t.elapsed() < std::time::Duration::from_secs(1),
+            "{:?}",
+            t.elapsed()
         );
     }
 }

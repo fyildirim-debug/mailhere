@@ -2,6 +2,8 @@
 
 use std::collections::HashSet;
 
+use crate::prescan::{canonicalize, strip_tags};
+
 /// Önizleme uzunluğu (karakter).
 pub const SNIPPET_LEN: usize = 200;
 
@@ -73,15 +75,28 @@ fn unescape_serialized(s: &str) -> String {
         .replace("&amp;", "&")
 }
 
+/// html5ever'la düz metne çevrilecek en büyük HTML (bayt). Önizleme ve arama
+/// dizini için ilk ~64 bin karakter yeter; daha büyüğü doğrusal yedek yoldan
+/// geçer.
+pub const TEXT_HTML_LIMIT: usize = 256 * 1024;
+
 /// HTML'i okunabilir düz metne çevirir (betik ve stil içeriği atılır).
+///
+/// Çok büyük ya da çok derin iç içe HTML html5ever'da karesel süre alır; o
+/// durumda etiketler doğrusal olarak atılır.
 pub fn html_to_text(html: &str) -> String {
-    let prepared = insert_breaks(html);
+    let canon = (html.len() <= TEXT_HTML_LIMIT)
+        .then(|| canonicalize(&insert_breaks(html)))
+        .flatten();
+    let Some(canon) = canon else {
+        return tidy_lines(&strip_tags(html));
+    };
     let drop: HashSet<&str> = ["script", "style", "title", "noscript", "template", "head"]
         .into_iter()
         .collect();
     let cleaned = ammonia::Builder::empty()
         .clean_content_tags(drop)
-        .clean(&prepared)
+        .clean(&canon)
         .to_string();
     tidy_lines(&unescape_serialized(&cleaned))
 }
@@ -170,20 +185,31 @@ fn truncate_words(s: &str, max: usize) -> String {
 
 /// Türkçe büyük/küçük harf farkını gözeterek küçültür (İ/I/ı → i).
 pub fn fold_tr(s: &str) -> String {
-    s.chars()
-        .flat_map(|c| match c {
-            'İ' | 'I' | 'ı' => vec!['i'],
-            c => c.to_lowercase().collect(),
-        })
-        .collect()
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            // ASCII'de `I` da `i` olur.
+            c if c.is_ascii() => out.push(c.to_ascii_lowercase()),
+            'İ' | 'ı' => out.push('i'),
+            c => out.extend(c.to_lowercase()),
+        }
+    }
+    out
 }
+
+/// Konuşma kimliğinde kullanılan sadeleştirilmiş konunun üst sınırı (karakter).
+const THREAD_SUBJECT_LIMIT: usize = 1000;
 
 /// Konu satırından yanıt/iletme öneklerini atar ("Re:", "Fwd:", "YNT:",
 /// "İLT:", "Cevap:" …, art arda olsa da). Sonuç Türkçe katlanmış küçük
 /// harflidir (ı → i); konuşma kimliği için kullanılır.
+///
+/// Önekler dilimlenerek atılır (kopyalanmaz): binlerce `re:` içeren konu da
+/// doğrusal sürede işlenir. Sonuç en çok 1000 karakterdir.
 pub fn normalize_subject(subject: &str) -> String {
     const PREFIXES: &[&str] = &["re", "fwd", "fw", "ynt", "ilt", "cevap", "yanit", "ilet"];
-    let mut s = fold_tr(subject.trim());
+    let folded = fold_tr(subject.trim());
+    let mut s = folded.as_str();
     loop {
         let trimmed = s.trim_start();
         let mut stripped = None;
@@ -192,14 +218,13 @@ pub fn normalize_subject(subject: &str) -> String {
                 // "Re[2]:" ya da "Re :" biçimlerini de kabul et.
                 let mut rest = rest.trim_start();
                 if let Some(r) = rest.strip_prefix('[') {
-                    if let Some(end) = r.find(']') {
-                        if r[..end].chars().all(|c| c.is_ascii_digit()) {
-                            rest = r[end + 1..].trim_start();
-                        }
+                    let digits = r.bytes().take_while(u8::is_ascii_digit).count();
+                    if let Some(r) = r[digits..].strip_prefix(']') {
+                        rest = r.trim_start();
                     }
                 }
                 if let Some(r) = rest.strip_prefix(':') {
-                    stripped = Some(r.to_owned());
+                    stripped = Some(r);
                     break;
                 }
             }
@@ -209,7 +234,38 @@ pub fn normalize_subject(subject: &str) -> String {
             None => break,
         }
     }
-    collapse_ws(&s)
+    let out = collapse_ws(s);
+    match out.char_indices().nth(THREAD_SUBJECT_LIMIT) {
+        Some((pos, _)) => out[..pos].trim_end().to_owned(),
+        None => out,
+    }
+}
+
+/// Tek satırlık görünen metni (konu, ek adı) temizler: yön değiştiren biçim
+/// karakterleri (U+202A–U+202E, U+2066–U+2069) ve yön işaretleri (U+200E,
+/// U+200F, U+061C) atılır; satır sonu ve sekme gibi boşluk denetimleri boşluğa,
+/// diğer denetim karakterleri (C0, DEL, C1) hiçe çevrilir; baş ve son boşluk
+/// kırpılır. `fatura\u{202E}fdp.exe` gibi adlar uzantıyı ters gösteremez.
+pub fn clean_line(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if is_bidi_control(c) || matches!(c, '\u{200E}' | '\u{200F}' | '\u{061C}') {
+            continue;
+        }
+        if c.is_control() || matches!(c, '\u{2028}' | '\u{2029}') {
+            if c.is_whitespace() {
+                out.push(' ');
+            }
+            continue;
+        }
+        out.push(c);
+    }
+    let trimmed = out.trim();
+    if trimmed.len() == out.len() {
+        out
+    } else {
+        trimmed.to_owned()
+    }
 }
 
 #[cfg(test)]
@@ -245,6 +301,65 @@ mod tests {
         assert_eq!(normalize_subject("Re[2]: Fw : Toplantı"), "toplanti");
         assert_eq!(normalize_subject("Rehber"), "rehber");
         assert_eq!(normalize_subject("  ISPARTA  gezisi "), "isparta gezisi");
+        assert_eq!(normalize_subject("Re[]: Re[x]: a"), "re[x]: a");
+    }
+
+    #[test]
+    fn uzun_onek_zinciri_dogrusal_islenir() {
+        // 300 KB'lık `re:re:…` konusu (önceden önek başına kopya: karesel).
+        let subject = format!("{}Toplantı", "re:".repeat(100_000));
+        let t = std::time::Instant::now();
+        assert_eq!(normalize_subject(&subject), "toplanti");
+        assert!(
+            t.elapsed() < std::time::Duration::from_millis(50),
+            "{:?}",
+            t.elapsed()
+        );
+        let subject = format!("{}x", "Re[1]: ".repeat(50_000));
+        assert_eq!(normalize_subject(&subject), "x");
+        // Sonuç sınırlı.
+        let long = "a".repeat(5_000);
+        assert_eq!(normalize_subject(&long).chars().count(), 1000);
+    }
+
+    #[test]
+    fn derin_ic_ice_html_hizla_metne_doner() {
+        // 50 bin: boyut sınırının altında, derinlik denetimine takılır;
+        // 100 bin (500 KB): boyut sınırının üstünde.
+        for n in [50_000, 100_000] {
+            let html = format!("{}Merhaba{}", "<div>".repeat(n), "</div>".repeat(10));
+            let t = std::time::Instant::now();
+            assert_eq!(html_to_text(&html), "Merhaba");
+            assert!(
+                t.elapsed() < std::time::Duration::from_secs(1),
+                "{n}: {:?}",
+                t.elapsed()
+            );
+        }
+        // Sınırın üstündeki büyük HTML doğrusal yoldan geçer.
+        let big = format!(
+            "<style>p{{}}</style>{}<p>son &amp; bitti</p>",
+            "<p>satır</p>".repeat(30_000)
+        );
+        assert!(big.len() > TEXT_HTML_LIMIT);
+        let text = html_to_text(&big);
+        assert!(text.starts_with("satır\n\nsatır"), "{}", &text[..40]);
+        assert!(text.ends_with("satır\n\nson & bitti"));
+    }
+
+    #[test]
+    fn tek_satir_metin_temizlenir() {
+        assert_eq!(clean_line("s\u{202E}fdp.exe"), "sfdp.exe");
+        assert_eq!(clean_line("fatura\u{202E}fdp.exe"), "faturafdp.exe");
+        assert_eq!(
+            clean_line(" a\u{200E}b\u{200F}c\u{061C}\u{2066}d\u{2069} "),
+            "abcd"
+        );
+        assert_eq!(
+            clean_line("Satır\r\nİki\tÜç\u{0}\u{7f}\u{9b}"),
+            "Satır  İki Üç"
+        );
+        assert_eq!(clean_line("Furkan Yıldırım"), "Furkan Yıldırım");
     }
 
     #[test]
