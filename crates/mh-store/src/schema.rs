@@ -113,6 +113,37 @@ const MIGRATIONS: &[&str] = &[
     r#"
     ALTER TABLE accounts ADD COLUMN auth TEXT NOT NULL DEFAULT 'password';
     "#,
+    // 3: kalıcı sunucu işlemleri kuyruğu, sunucu onayı bekleyen taşımanın
+    // kaynağı, eşitlenmeyen kutular ve kişisel IMAP ad alanı.
+    r#"
+    -- Yerelde taşınmış ama sunucuda henüz taşınmamış posta: sunucudaki yeri
+    -- (kutu, UID, UIDVALIDITY) onaya kadar burada kalır.
+    ALTER TABLE messages ADD COLUMN src_mailbox_id TEXT;
+    ALTER TABLE messages ADD COLUMN src_uid INTEGER;
+    ALTER TABLE messages ADD COLUMN src_uidvalidity INTEGER;
+    CREATE INDEX messages_src ON messages(src_mailbox_id, src_uid) WHERE src_mailbox_id IS NOT NULL;
+
+    -- Gmail "Tüm Postalar" gibi hedef olarak kullanılıp eşitlenmeyen kutular.
+    ALTER TABLE mailboxes ADD COLUMN nosync INTEGER NOT NULL DEFAULT 0;
+
+    -- Sunucu işlemleri (bayrak, taşıma, ekleme, silme), hesap başına sırayla.
+    CREATE TABLE actions (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id  TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        payload     TEXT NOT NULL,
+        raw         BLOB,
+        attempts    INTEGER NOT NULL DEFAULT 0,
+        created_at  INTEGER NOT NULL
+    );
+    CREATE INDEX actions_account ON actions(account_id, id);
+
+    -- Yeni rol kutularının açılacağı kişisel ad alanı ("INBOX." gibi).
+    CREATE TABLE imap_namespace (
+        account_id  TEXT PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+        prefix      TEXT NOT NULL,
+        delimiter   TEXT
+    );
+    "#,
 ];
 
 /// Bağlantıyı ayarlar ve eksik geçişleri uygular.

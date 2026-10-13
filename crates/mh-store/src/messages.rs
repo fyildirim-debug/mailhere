@@ -102,6 +102,10 @@ pub struct UpsertOutcome {
 }
 
 /// Sunucu işlemleri için bir postanın yeri.
+///
+/// `mailbox_*`, `role`, `uid` ve `uidvalidity` postanın yerelde göründüğü
+/// kutuyu anlatır. Taşıma sunucuda henüz onaylanmadıysa (`pending`) posta
+/// sunucuda hâlâ eski kutudadır; sunucu işlemleri `server_*` alanlarını kullanır.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MessageLocation {
     pub id: MessageId,
@@ -114,6 +118,52 @@ pub struct MessageLocation {
     pub has_raw: bool,
     pub message_id_header: Option<String>,
     pub size: u64,
+    /// Sunucu onayı bekleyen bir taşıma var.
+    pub pending: bool,
+    /// Postanın sunucudaki kutusu.
+    pub server_path: String,
+    pub server_uid: Option<u32>,
+    pub server_uidvalidity: Option<u32>,
+}
+
+/// Sunucu onayı bekleyen taşıma: posta sunucuda `src_*` yerinde, yerelde
+/// `dest_*` kutusunda görünüyor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingMove {
+    pub id: MessageId,
+    pub src_mailbox_id: String,
+    pub src_path: String,
+    pub src_uid: Option<u32>,
+    pub src_uidvalidity: Option<u32>,
+    pub dest_mailbox_id: String,
+    pub dest_path: String,
+    pub message_id_header: Option<String>,
+}
+
+/// "<hesap>:<yol>" kimliğinden yolu çıkarır.
+fn path_of(mailbox_id: &str, account_id: &str) -> String {
+    mailbox_id
+        .strip_prefix(account_id)
+        .and_then(|r| r.strip_prefix(':'))
+        .unwrap_or(mailbox_id)
+        .to_owned()
+}
+
+/// `(kutu, uid)` başka bir satırda kayıtlıysa (yinelenen kopya) onu siler ki
+/// UID bu satıra yazılabilsin.
+fn free_uid(
+    tx: &Transaction<'_>,
+    id: MessageId,
+    mailbox_id: &str,
+    uid: Option<u32>,
+) -> rusqlite::Result<()> {
+    if let Some(uid) = uid {
+        tx.execute(
+            "DELETE FROM messages WHERE mailbox_id = ?1 AND uid = ?2 AND id != ?3",
+            params![mailbox_id, i64::from(uid), id],
+        )?;
+    }
+    Ok(())
 }
 
 pub(crate) const SUMMARY_COLS: &str = "m.id, m.account_id, m.mailbox_id, m.thread_id, m.from_addr, m.to_addrs,
@@ -158,14 +208,47 @@ fn parse_cursor(c: &str) -> AppResult<(Millis, MessageId)> {
         })
 }
 
+/// Adres tam mı: boş olmayan yerel kısım, `@` ve en az iki parçalı alan adı.
+/// (`From: <com>` gibi bozuk başlıklar "com" adresine çözülür; bu bir alan adı
+/// sanılıp tüm .com göndericilerine izin verilmesin.)
+pub fn is_full_address(email: &str) -> bool {
+    match email.trim().rsplit_once('@') {
+        Some((local, domain)) => !local.is_empty() && is_domain(domain),
+        None => false,
+    }
+}
+
+/// En az iki parçalı, boş parçası ve boşluğu olmayan alan adı.
+fn is_domain(d: &str) -> bool {
+    let d = d.strip_suffix('.').unwrap_or(d);
+    d.contains('.')
+        && !d.contains('@')
+        && d.split('.').all(|p| !p.is_empty())
+        && !d.chars().any(|c| c.is_whitespace() || c.is_control())
+}
+
+/// Uzak içerik izin listesine yazılabilecek öğe: tam adres, "ornek.com" ya da
+/// "@ornek.com". Tek parçalı alan adları ("com") kabul edilmez.
+pub fn is_remote_entry(entry: &str) -> bool {
+    let e = entry.trim();
+    if e.contains('@') && !e.starts_with('@') {
+        return is_full_address(e);
+    }
+    is_domain(e.strip_prefix('@').unwrap_or(e))
+}
+
 /// Gönderen uzak içerik izin listesinde mi? Liste öğesi tam adres ya da alan
-/// adıdır ("ornek.com" / "@ornek.com"; alt alan adlarını da kapsar).
+/// adıdır ("ornek.com" / "@ornek.com"; alt alan adlarını da kapsar). Bozuk
+/// adresli gönderen ve geçersiz liste öğeleri hiçbir zaman eşleşmez.
 pub fn remote_allowed(list: &[String], email: &str) -> bool {
     let email = email.trim().to_ascii_lowercase();
+    if !is_full_address(&email) {
+        return false;
+    }
     let domain = email.rsplit_once('@').map(|(_, d)| d).unwrap_or("");
     list.iter().any(|entry| {
         let e = entry.trim().to_ascii_lowercase();
-        if e.is_empty() {
+        if !is_remote_entry(&e) {
             return false;
         }
         if e.contains('@') && !e.starts_with('@') {
@@ -261,18 +344,29 @@ fn insert(tx: &Transaction<'_>, m: &NewMessage) -> rusqlite::Result<MessageId> {
     Ok(tx.last_insert_rowid())
 }
 
-/// Var olan satıra sunucu bayraklarını ve (eksikse) gövdeyi yazar.
-fn refresh(tx: &Transaction<'_>, id: MessageId, m: &NewMessage) -> rusqlite::Result<()> {
-    tx.prepare_cached(
-        "UPDATE messages SET uid = ?2, uidvalidity = ?3, unread = ?4, starred = ?5 WHERE id = ?1",
-    )?
-    .execute(params![
-        id,
-        m.uid.map(i64::from),
-        m.uidvalidity.map(i64::from),
-        m.unread,
-        m.starred
-    ])?;
+/// Var olan satıra sunucu bayraklarını ve (eksikse) gövdeyi yazar. Taşıması
+/// bekleyen satırın (`pending`) UID'si `src_*` sütunlarındadır; ona dokunulmaz.
+fn refresh(
+    tx: &Transaction<'_>,
+    id: MessageId,
+    m: &NewMessage,
+    pending: bool,
+) -> rusqlite::Result<()> {
+    if pending {
+        tx.prepare_cached("UPDATE messages SET unread = ?2, starred = ?3 WHERE id = ?1")?
+            .execute(params![id, m.unread, m.starred])?;
+    } else {
+        tx.prepare_cached(
+            "UPDATE messages SET uid = ?2, uidvalidity = ?3, unread = ?4, starred = ?5 WHERE id = ?1",
+        )?
+        .execute(params![
+            id,
+            m.uid.map(i64::from),
+            m.uidvalidity.map(i64::from),
+            m.unread,
+            m.starred
+        ])?;
+    }
     if let Some(raw) = &m.raw {
         tx.prepare_cached(
             "UPDATE messages SET raw = ?2, body_fetched = 1, snippet = ?3, has_attachments = ?4, fts_body = ?5
@@ -290,28 +384,38 @@ fn refresh(tx: &Transaction<'_>, id: MessageId, m: &NewMessage) -> rusqlite::Res
 }
 
 impl Store {
-    /// Postayı ekler. Aynı kutuda aynı UID varsa bayrakları günceller; yerel
-    /// taşımadan sonra UID'siz bekleyen kopya varsa onu sahiplenir.
+    /// Postayı ekler. Sunucuda aynı yeri (kutu + UID) tutan satır varsa
+    /// bayrakları günceller; taşıma onaylandıktan sonra UID'siz bekleyen kopya
+    /// varsa onu sahiplenir. Taşıması bekleyen satır hedef kutuda
+    /// sahiplenilmez: posta sunucuda hâlâ kaynaktadır.
     pub fn upsert_message(&self, m: &NewMessage) -> AppResult<UpsertOutcome> {
         self.with_tx(|tx| {
             if let Some(uid) = m.uid {
-                let found: Option<MessageId> = tx
-                    .prepare_cached("SELECT id FROM messages WHERE mailbox_id = ?1 AND uid = ?2")?
-                    .query_row(params![m.mailbox_id, i64::from(uid)], |r| r.get(0))
+                let found: Option<(MessageId, bool)> = tx
+                    .prepare_cached(
+                        "SELECT id, 0 FROM messages WHERE mailbox_id = ?1 AND uid = ?2
+                         UNION ALL
+                         SELECT id, 1 FROM messages WHERE src_mailbox_id = ?1 AND src_uid = ?2
+                         LIMIT 1",
+                    )?
+                    .query_row(params![m.mailbox_id, i64::from(uid)], |r| {
+                        Ok((r.get(0)?, r.get(1)?))
+                    })
                     .optional()?;
                 let found = match (found, m.message_id_header.as_deref()) {
-                    (Some(id), _) => Some(id),
+                    (Some(f), _) => Some(f),
                     (None, Some(mid)) => tx
                         .prepare_cached(
-                            "SELECT id FROM messages WHERE mailbox_id = ?1 AND uid IS NULL
-                             AND message_id_header = ?2 ORDER BY id LIMIT 1",
+                            "SELECT id, 0 FROM messages WHERE mailbox_id = ?1 AND uid IS NULL
+                             AND src_mailbox_id IS NULL AND message_id_header = ?2
+                             ORDER BY id LIMIT 1",
                         )?
-                        .query_row(params![m.mailbox_id, mid], |r| r.get(0))
+                        .query_row(params![m.mailbox_id, mid], |r| Ok((r.get(0)?, r.get(1)?)))
                         .optional()?,
                     (None, None) => None,
                 };
-                if let Some(id) = found {
-                    refresh(tx, id, m)?;
+                if let Some((id, pending)) = found {
+                    refresh(tx, id, m, pending)?;
                     return Ok(UpsertOutcome {
                         id,
                         inserted: false,
@@ -484,22 +588,38 @@ impl Store {
         self.with(|c| {
             let mut st = c.prepare(&format!(
                 "SELECT m.id, m.account_id, m.mailbox_id, b.path, b.role, m.uid, m.uidvalidity,
-                        m.raw IS NOT NULL, m.message_id_header, m.size
+                        m.raw IS NOT NULL, m.message_id_header, m.size,
+                        m.src_mailbox_id, m.src_uid, m.src_uidvalidity
                  FROM messages m JOIN mailboxes b ON b.id = m.mailbox_id WHERE m.id IN ({})",
                 in_list(ids.len())
             ))?;
             let rows = st.query_map(params_from_iter(ids_params(ids)), |r| {
+                let u32_at = |i: usize| -> rusqlite::Result<Option<u32>> {
+                    Ok(r.get::<_, Option<i64>>(i)?.map(|v| v as u32))
+                };
+                let account_id: String = r.get(1)?;
+                let mailbox_path: String = r.get(3)?;
+                let src: Option<String> = r.get(10)?;
+                let (uid, uidvalidity) = (u32_at(5)?, u32_at(6)?);
+                let (server_path, server_uid, server_uidvalidity) = match &src {
+                    Some(src) => (path_of(src, &account_id), u32_at(11)?, u32_at(12)?),
+                    None => (mailbox_path.clone(), uid, uidvalidity),
+                };
                 Ok(MessageLocation {
                     id: r.get(0)?,
-                    account_id: r.get(1)?,
                     mailbox_id: r.get(2)?,
-                    mailbox_path: r.get(3)?,
                     role: role_from(&r.get::<_, String>(4)?),
-                    uid: r.get::<_, Option<i64>>(5)?.map(|v| v as u32),
-                    uidvalidity: r.get::<_, Option<i64>>(6)?.map(|v| v as u32),
+                    uid,
+                    uidvalidity,
                     has_raw: r.get(7)?,
                     message_id_header: r.get(8)?,
                     size: r.get::<_, i64>(9)? as u64,
+                    pending: src.is_some(),
+                    server_path,
+                    server_uid,
+                    server_uidvalidity,
+                    account_id,
+                    mailbox_path,
                 })
             })?;
             rows.collect()
@@ -565,29 +685,217 @@ impl Store {
         })
     }
 
-    /// Postaları yerelde başka kutuya taşır (UID sunucu onayından sonra
-    /// eşitlemede yeniden bulunur). Etkilenen kutuları döner.
+    /// Postaları yerelde başka kutuya taşır; sunucudaki yerleri (kutu, UID,
+    /// UIDVALIDITY) sunucu onayına kadar `src_*` sütunlarında saklanır.
+    ///
+    /// - Zaten hedefte olan postalara dokunulmaz.
+    /// - Taşıması henüz sunucuya gitmemiş postayı kaynağına geri almak (geri
+    ///   al) bekleyen taşımayı iptal eder: eski UID geri yazılır, sunucuda bir
+    ///   şey yapılmaz.
+    /// - Bekleyen taşıma yeniden taşınırsa sunucudaki yer korunur; sunucu
+    ///   doğrudan son hedefe taşır.
+    ///
+    /// Etkilenen kutuları döner.
     pub fn move_local(&self, ids: &[MessageId], target_mailbox_id: &str) -> AppResult<Vec<String>> {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
         let mut touched = self.touched_mailboxes(ids)?;
-        self.with(|c| {
-            let mut p = vec![Value::Text(target_mailbox_id.into())];
+        let list = in_list(ids.len());
+        let target = || Value::Text(target_mailbox_id.into());
+        // Parametreler: [hedef], kimlikler, [hedef, hedef].
+        let shaped = |lead: bool, tail: usize| {
+            let mut p: Vec<Value> = if lead { vec![target()] } else { Vec::new() };
             p.extend(ids_params(ids));
-            c.execute(
+            p.extend((0..tail).map(|_| target()));
+            params_from_iter(p)
+        };
+        let changed = self.with_tx(|tx| {
+            // 1) Kaynağına dönen bekleyen taşıma: iptal.
+            let mut n = tx.execute(
                 &format!(
-                    "UPDATE messages SET mailbox_id = ?, uid = NULL, uidvalidity = NULL, snoozed_until = NULL
-                     WHERE id IN ({}) AND account_id = (SELECT account_id FROM mailboxes WHERE id = ?)",
-                    in_list(ids.len())
+                    "UPDATE messages SET mailbox_id = src_mailbox_id, uid = src_uid,
+                        uidvalidity = src_uidvalidity, src_mailbox_id = NULL, src_uid = NULL,
+                        src_uidvalidity = NULL, snoozed_until = NULL
+                     WHERE id IN ({list}) AND src_mailbox_id = ?"
                 ),
-                params_from_iter(p.into_iter().chain([Value::Text(target_mailbox_id.into())])),
-            )
+                shaped(false, 1),
+            )?;
+            // 2) Bekleyen taşıma başka bir kutuya: yalnız görünen kutu değişir.
+            n += tx.execute(
+                &format!(
+                    "UPDATE messages SET mailbox_id = ?, snoozed_until = NULL
+                     WHERE id IN ({list}) AND src_mailbox_id IS NOT NULL AND mailbox_id != ?
+                       AND account_id = (SELECT account_id FROM mailboxes WHERE id = ?)"
+                ),
+                shaped(true, 2),
+            )?;
+            // 3) Yeni taşıma: sunucudaki yer saklanır.
+            n += tx.execute(
+                &format!(
+                    "UPDATE messages SET src_mailbox_id = mailbox_id, src_uid = uid,
+                        src_uidvalidity = uidvalidity, mailbox_id = ?, uid = NULL,
+                        uidvalidity = NULL, snoozed_until = NULL
+                     WHERE id IN ({list}) AND src_mailbox_id IS NULL AND mailbox_id != ?
+                       AND account_id = (SELECT account_id FROM mailboxes WHERE id = ?)"
+                ),
+                shaped(true, 2),
+            )?;
+            Ok(n)
         })?;
-        if !touched.iter().any(|t| t == target_mailbox_id) {
+        if changed > 0 && !touched.iter().any(|t| t == target_mailbox_id) {
             touched.push(target_mailbox_id.into());
         }
         Ok(touched)
+    }
+
+    /// Yalnız yerel taşıma (sunucusu olmayan tanıtım hesapları): sunucu yeri
+    /// tutulmaz. Zaten hedefte olan postalara dokunulmaz.
+    pub fn move_local_untracked(
+        &self,
+        ids: &[MessageId],
+        target_mailbox_id: &str,
+    ) -> AppResult<Vec<String>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut touched = self.touched_mailboxes(ids)?;
+        let changed = self.with(|c| {
+            let target = || Value::Text(target_mailbox_id.into());
+            let mut p = vec![target()];
+            p.extend(ids_params(ids));
+            p.extend([target(), target()]);
+            c.execute(
+                &format!(
+                    "UPDATE messages SET mailbox_id = ?, uid = NULL, uidvalidity = NULL,
+                        snoozed_until = NULL, src_mailbox_id = NULL, src_uid = NULL,
+                        src_uidvalidity = NULL
+                     WHERE id IN ({}) AND mailbox_id != ?
+                       AND account_id = (SELECT account_id FROM mailboxes WHERE id = ?)",
+                    in_list(ids.len())
+                ),
+                params_from_iter(p),
+            )
+        })?;
+        if changed > 0 && !touched.iter().any(|t| t == target_mailbox_id) {
+            touched.push(target_mailbox_id.into());
+        }
+        Ok(touched)
+    }
+
+    /// Hesabın sunucu onayı bekleyen taşımaları.
+    pub fn pending_moves(&self, account_id: &str) -> AppResult<Vec<PendingMove>> {
+        self.with(|c| {
+            let mut st = c.prepare_cached(
+                "SELECT m.id, m.src_mailbox_id, m.src_uid, m.src_uidvalidity, m.mailbox_id, b.path,
+                        m.message_id_header
+                 FROM messages m JOIN mailboxes b ON b.id = m.mailbox_id
+                 WHERE m.account_id = ?1 AND m.src_mailbox_id IS NOT NULL ORDER BY m.id",
+            )?;
+            let rows = st.query_map([account_id], |r| {
+                let src: String = r.get(1)?;
+                Ok(PendingMove {
+                    id: r.get(0)?,
+                    src_path: path_of(&src, account_id),
+                    src_mailbox_id: src,
+                    src_uid: r.get::<_, Option<i64>>(2)?.map(|v| v as u32),
+                    src_uidvalidity: r.get::<_, Option<i64>>(3)?.map(|v| v as u32),
+                    dest_mailbox_id: r.get(4)?,
+                    dest_path: r.get(5)?,
+                    message_id_header: r.get(6)?,
+                })
+            })?;
+            rows.collect()
+        })
+    }
+
+    /// Sunucuya gitmesi gereken taşıma var mı?
+    pub fn has_pending_moves(&self, account_id: &str) -> AppResult<bool> {
+        self.with(|c| {
+            c.query_row(
+                "SELECT EXISTS(SELECT 1 FROM messages WHERE account_id = ?1 AND src_mailbox_id IS NOT NULL)",
+                [account_id],
+                |r| r.get(0),
+            )
+        })
+    }
+
+    /// Sunucu postayı `dest_mailbox_id` kutusuna taşıdı (yeni UID biliniyorsa
+    /// verilir). Posta yerelde de oradaysa taşıma tamamlanır; bu arada kullanıcı
+    /// postayı başka yere taşıdıysa (ya da geri aldıysa) sunucudaki yeni yer
+    /// kaynak olarak yazılır ve `true` döner: bir taşıma daha gerekir.
+    pub fn confirm_move(
+        &self,
+        id: MessageId,
+        dest_mailbox_id: &str,
+        new_uid: Option<u32>,
+        new_uidvalidity: Option<u32>,
+    ) -> AppResult<bool> {
+        self.with_tx(|tx| {
+            let shown: Option<String> = tx
+                .query_row("SELECT mailbox_id FROM messages WHERE id = ?1", [id], |r| {
+                    r.get(0)
+                })
+                .optional()?;
+            let Some(shown) = shown else {
+                return Ok(false);
+            };
+            let (uid, validity) = (new_uid.map(i64::from), new_uidvalidity.map(i64::from));
+            if shown == dest_mailbox_id {
+                free_uid(tx, id, dest_mailbox_id, new_uid)?;
+                tx.execute(
+                    "UPDATE messages SET uid = ?2, uidvalidity = ?3, src_mailbox_id = NULL,
+                        src_uid = NULL, src_uidvalidity = NULL WHERE id = ?1",
+                    params![id, uid, validity],
+                )?;
+                Ok(false)
+            } else {
+                tx.execute(
+                    "UPDATE messages SET uid = NULL, uidvalidity = NULL, src_mailbox_id = ?2,
+                        src_uid = ?3, src_uidvalidity = ?4 WHERE id = ?1",
+                    params![id, dest_mailbox_id, uid, validity],
+                )?;
+                Ok(true)
+            }
+        })
+    }
+
+    /// Sunucu taşımayı reddetti: posta yerelde de kaynağına (eski UID'siyle)
+    /// döner. Etkilenen kutuları döner.
+    pub fn revert_move(&self, id: MessageId) -> AppResult<Vec<String>> {
+        self.with_tx(|tx| {
+            let row: Option<(String, Option<String>, Option<i64>)> = tx
+                .query_row(
+                    "SELECT mailbox_id, src_mailbox_id, src_uid FROM messages WHERE id = ?1",
+                    [id],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .optional()?;
+            let Some((shown, Some(src), src_uid)) = row else {
+                return Ok(Vec::new());
+            };
+            free_uid(tx, id, &src, src_uid.map(|u| u as u32))?;
+            tx.execute(
+                "UPDATE messages SET mailbox_id = src_mailbox_id, uid = src_uid,
+                    uidvalidity = src_uidvalidity, src_mailbox_id = NULL, src_uid = NULL,
+                    src_uidvalidity = NULL WHERE id = ?1",
+                [id],
+            )?;
+            Ok(vec![shown, src])
+        })
+    }
+
+    /// Posta sunucuda yok ve hiç UID'si olmadı (yalnız yerel kopya): bekleyen
+    /// taşıma düşer, posta yerelde göründüğü yerde kalır.
+    pub fn forget_server_copy(&self, id: MessageId) -> AppResult<()> {
+        self.with(|c| {
+            c.execute(
+                "UPDATE messages SET uid = NULL, uidvalidity = NULL, src_mailbox_id = NULL,
+                    src_uid = NULL, src_uidvalidity = NULL WHERE id = ?1",
+                [id],
+            )?;
+            Ok(())
+        })
     }
 
     /// Ertele ya da ertelemeyi kaldır (`until = None`).
@@ -634,11 +942,18 @@ impl Store {
         })
     }
 
-    /// Kutudaki UID'li postalar: (kimlik, uid, okunmadı, yıldız), UID'ye göre.
+    /// Sunucuda bu kutuda bulunan (UID'si bilinen) postalar: (kimlik, uid,
+    /// okunmadı, yıldız), UID'ye göre. Taşıması bekleyen postalar sunucuda
+    /// hâlâ bulundukları kaynak kutuda sayılır.
     pub fn local_uids(&self, mailbox_id: &str) -> AppResult<Vec<(MessageId, u32, bool, bool)>> {
         self.with(|c| {
             let mut st = c.prepare_cached(
-                "SELECT id, uid, unread, starred FROM messages WHERE mailbox_id = ?1 AND uid IS NOT NULL ORDER BY uid",
+                "SELECT id, uid, unread, starred FROM messages
+                 WHERE mailbox_id = ?1 AND uid IS NOT NULL AND src_mailbox_id IS NULL
+                 UNION ALL
+                 SELECT id, src_uid, unread, starred FROM messages
+                 WHERE src_mailbox_id = ?1 AND src_uid IS NOT NULL
+                 ORDER BY 2",
             )?;
             let rows = st.query_map([mailbox_id], |r| {
                 Ok((r.get(0)?, r.get::<_, i64>(1)? as u32, r.get(2)?, r.get(3)?))
@@ -647,11 +962,17 @@ impl Store {
         })
     }
 
-    /// UIDVALIDITY değişince kutunun sunucu kopyalarını siler.
+    /// UIDVALIDITY değişince kutunun sunucu kopyalarını siler. Bu kutudan
+    /// taşınmayı bekleyen postaların eski UID'si unutulur (taşıma sırasında
+    /// Message-ID ile aranır).
     pub fn clear_mailbox_uids(&self, mailbox_id: &str) -> AppResult<()> {
-        self.with(|c| {
-            c.execute(
-                "DELETE FROM messages WHERE mailbox_id = ?1 AND uid IS NOT NULL",
+        self.with_tx(|tx| {
+            tx.execute(
+                "DELETE FROM messages WHERE mailbox_id = ?1 AND uid IS NOT NULL AND src_mailbox_id IS NULL",
+                [mailbox_id],
+            )?;
+            tx.execute(
+                "UPDATE messages SET src_uid = NULL, src_uidvalidity = NULL WHERE src_mailbox_id = ?1",
                 [mailbox_id],
             )?;
             Ok(())
@@ -942,8 +1263,16 @@ pub(crate) mod tests {
         );
         let loc = s.location(id).unwrap().unwrap();
         assert_eq!((loc.role, loc.uid), (MailboxRole::Archive, None));
+        assert!(loc.pending);
+        assert_eq!(
+            (loc.server_path.as_str(), loc.server_uid),
+            ("INBOX", Some(7)),
+            "sunucu onayına kadar posta kaynakta sayılır"
+        );
 
-        // Eşitleme arşivde aynı postayı yeni UID ile görünce satırı sahiplenir.
+        // Sunucu taşıdıktan sonra eşitleme arşivde aynı postayı yeni UID ile
+        // görünce satırı sahiplenir.
+        assert!(!s.confirm_move(id, "a:Archive", None, None).unwrap());
         let mut seen = m.clone();
         seen.mailbox_id = "a:Archive".into();
         seen.uid = Some(42);
@@ -1028,6 +1357,152 @@ pub(crate) mod tests {
         assert!(remote_allowed(&list, "x@haber.bulten.co"));
         assert!(!remote_allowed(&list, "x@kotubulten.co"));
         assert!(!remote_allowed(&[], "x@y.z"));
+
+        // `From: <com>` "com" adresine çözülür: alan adı sanılmamalı.
+        let bad = vec!["com".to_string(), "@com".into(), "@".into(), "x@".into()];
+        assert!(!remote_allowed(&bad, "kim@ornek.com"));
+        assert!(!remote_allowed(&bad, "com"));
+        assert!(!remote_allowed(&list, "bulten.co"), "bozuk gönderen eşleşmez");
+        assert!(is_full_address("ayse@eposta.com"));
+        for a in ["com", "@eposta.com", "ayse@", "ayse@com", "a@b..c", "a b@c.d e"] {
+            assert!(!is_full_address(a), "{a}");
+        }
+        assert!(is_remote_entry("ornek.com") && is_remote_entry("@ornek.com"));
+        assert!(!is_remote_entry("com") && !is_remote_entry("x@com"));
+    }
+
+    fn inbox_msg(s: &Store, subject: &str, uid: u32) -> MessageId {
+        let mut m = msg("a", "a:INBOX", subject, 10);
+        m.uid = Some(uid);
+        m.uidvalidity = Some(5);
+        m.message_id_header = Some(format!("{uid}@ornek"));
+        s.upsert_message(&m).unwrap().id
+    }
+
+    #[test]
+    fn geri_alma_bekleyen_tasimayi_iptal_eder() {
+        let s = setup();
+        let id = inbox_msg(&s, "Geri alınacak", 7);
+        s.move_local(&[id], "a:Archive").unwrap();
+        assert_eq!(s.pending_moves("a").unwrap().len(), 1);
+        assert_eq!(
+            s.local_uids("a:INBOX").unwrap(),
+            vec![(id, 7, true, false)],
+            "sunucu onayına kadar kaynakta"
+        );
+        assert!(s.local_uids("a:Archive").unwrap().is_empty());
+
+        // Arşivden çöpe: sunucudaki yer korunur, hedef değişir.
+        s.move_local(&[id], "a:Trash").unwrap();
+        let p = s.pending_moves("a").unwrap();
+        assert_eq!(
+            (p[0].src_path.as_str(), p[0].src_uid, p[0].dest_path.as_str()),
+            ("INBOX", Some(7), "Trash")
+        );
+
+        // Geri al: sunucuya hiç gitmeden eski yerine döner.
+        let touched = s.move_local(&[id], "a:INBOX").unwrap();
+        assert!(touched.contains(&"a:INBOX".to_string()));
+        let loc = s.location(id).unwrap().unwrap();
+        assert_eq!(
+            (loc.role, loc.uid, loc.uidvalidity, loc.pending),
+            (MailboxRole::Inbox, Some(7), Some(5), false)
+        );
+        assert!(!s.has_pending_moves("a").unwrap());
+    }
+
+    #[test]
+    fn hedefteki_posta_tasinmaz() {
+        let s = setup();
+        let a = inbox_msg(&s, "Gelen", 1);
+        let mut t = msg("a", "a:Trash", "Çöpte", 10);
+        t.uid = Some(3);
+        let b = s.upsert_message(&t).unwrap().id;
+        // Çöpte Del, karışık seçim: yalnız gelen kutusundaki taşınır.
+        s.move_local(&[a, b], "a:Trash").unwrap();
+        let lb = s.location(b).unwrap().unwrap();
+        assert_eq!((lb.uid, lb.pending), (Some(3), false), "UID korunur");
+        assert!(s.location(a).unwrap().unwrap().pending);
+        assert_eq!(s.pending_moves("a").unwrap().len(), 1);
+        // Hiçbiri taşınmazsa hedef etkilenen sayılmaz.
+        assert_eq!(s.move_local(&[b], "a:Trash").unwrap(), vec!["a:Trash"]);
+        assert_eq!(
+            s.move_local_untracked(&[b], "a:Trash").unwrap(),
+            vec!["a:Trash"]
+        );
+    }
+
+    #[test]
+    fn bekleyen_tasima_hedefte_sahiplenilmez() {
+        let s = setup();
+        let id = inbox_msg(&s, "Taşınıyor", 7);
+        s.move_local(&[id], "a:Archive").unwrap();
+        // Arşivde aynı Message-ID ile başka bir kopya: ayrı satır olur.
+        let mut copy = msg("a", "a:Archive", "Taşınıyor", 10);
+        copy.uid = Some(3);
+        copy.message_id_header = Some("7@ornek".into());
+        let out = s.upsert_message(&copy).unwrap();
+        assert!(out.inserted && out.id != id);
+        // Kaynağın eşitlemesi bekleyen satırı UID'siyle bulur, yalnız bayrak yazar.
+        let mut src = msg("a", "a:INBOX", "Taşınıyor", 10);
+        src.uid = Some(7);
+        src.unread = false;
+        let again = s.upsert_message(&src).unwrap();
+        assert_eq!((again.id, again.inserted), (id, false));
+        let loc = s.location(id).unwrap().unwrap();
+        assert_eq!((loc.mailbox_id.as_str(), loc.pending), ("a:Archive", true));
+        assert!(!s.summary(id).unwrap().unwrap().unread);
+        // Kaynağın UIDVALIDITY'si değişti: eski UID unutulur, satır kalır.
+        s.clear_mailbox_uids("a:INBOX").unwrap();
+        let loc = s.location(id).unwrap().unwrap();
+        assert_eq!((loc.pending, loc.server_uid), (true, None));
+    }
+
+    #[test]
+    fn ucustayken_geri_alinan_tasima() {
+        let s = setup();
+        let id = inbox_msg(&s, "Uçuşta", 7);
+        s.move_local(&[id], "a:Archive").unwrap();
+        // Sunucu taşırken kullanıcı geri aldı: sunucudaki yeni yer kaynak olur.
+        s.move_local(&[id], "a:INBOX").unwrap();
+        assert!(s.confirm_move(id, "a:Archive", Some(12), Some(9)).unwrap());
+        let p = s.pending_moves("a").unwrap();
+        assert_eq!(p.len(), 1);
+        assert_eq!(
+            (p[0].src_path.as_str(), p[0].src_uid, p[0].dest_path.as_str()),
+            ("Archive", Some(12), "INBOX")
+        );
+        // İkinci taşıma onaylanınca UID bilinmez; eşitleme Message-ID ile bulur.
+        assert!(!s.confirm_move(id, "a:INBOX", None, None).unwrap());
+        let loc = s.location(id).unwrap().unwrap();
+        assert_eq!((loc.mailbox_id.as_str(), loc.uid, loc.pending), ("a:INBOX", None, false));
+    }
+
+    #[test]
+    fn reddedilen_tasima_geri_doner_ve_kopya_temizlenir() {
+        let s = setup();
+        let id = inbox_msg(&s, "Reddedilecek", 7);
+        s.move_local(&[id], "a:Archive").unwrap();
+        let touched = s.revert_move(id).unwrap();
+        assert_eq!(touched, vec!["a:Archive".to_string(), "a:INBOX".into()]);
+        let loc = s.location(id).unwrap().unwrap();
+        assert_eq!((loc.role, loc.uid, loc.pending), (MailboxRole::Inbox, Some(7), false));
+        assert!(s.revert_move(id).unwrap().is_empty(), "bekleyen yoksa bir şey yapılmaz");
+
+        // Yeni UID'si arşivde başka (yinelenen) bir satırdaysa o satır silinir.
+        s.move_local(&[id], "a:Archive").unwrap();
+        let mut dup = msg("a", "a:Archive", "Reddedilecek", 10);
+        dup.uid = Some(30);
+        let dup_id = s.upsert_message(&dup).unwrap().id;
+        assert!(!s.confirm_move(id, "a:Archive", Some(30), Some(1)).unwrap());
+        assert!(s.summary(dup_id).unwrap().is_none());
+        assert_eq!(s.local_uids("a:Archive").unwrap(), vec![(id, 30, true, false)]);
+
+        // Sunucuda hiç olmayan yerel kopya: bekleyen taşıma düşer, posta kalır.
+        s.move_local(&[id], "a:Trash").unwrap();
+        s.forget_server_copy(id).unwrap();
+        let loc = s.location(id).unwrap().unwrap();
+        assert_eq!((loc.role, loc.uid, loc.pending), (MailboxRole::Trash, None, false));
     }
 
     #[test]
