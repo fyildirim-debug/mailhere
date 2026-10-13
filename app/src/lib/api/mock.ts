@@ -182,7 +182,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       id, accountId: account.id, mailboxId: boxFor(account.id, 'drafts'), threadId: `draft-${id}`,
       from: { name: account.displayName, email: account.email }, to: msg.to, subject: msg.subject,
       snippet: msg.bodyText.replace(/\s+/g, ' ').slice(0, 200), date: now(), unread: false, starred: false,
-      hasAttachments: msg.attachments.length > 0, category: 'people', snoozedUntil: null, cc: msg.cc, replyTo: [],
+      hasAttachments: msg.attachments.length > 0, category: 'people', snoozedUntil: null, cc: msg.cc, bcc: msg.bcc, replyTo: [],
       messageIdHeader: null, references: [], bodyText: msg.bodyText, bodyHtml: null, hasRemoteContent: false,
       remoteAllowed: false, attachments: [], thread: [],
     };
@@ -303,7 +303,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
               id: nextId++, accountId: account.id, mailboxId: boxFor(account.id, 'sent'), threadId: `out-${id}`,
               from: { name: account.displayName, email: account.email }, to: msg.to, subject: msg.subject,
               snippet: msg.bodyText.replace(/\s+/g, ' ').slice(0, 200), date: now(), unread: false, starred: false,
-              hasAttachments: msg.attachments.length > 0, category: 'people', snoozedUntil: null, cc: msg.cc, replyTo: [],
+              hasAttachments: msg.attachments.length > 0, category: 'people', snoozedUntil: null, cc: msg.cc, bcc: [], replyTo: [],
               messageIdHeader: null, references: [], bodyText: msg.bodyText, bodyHtml: null, hasRemoteContent: false,
               remoteAllowed: false, attachments: [], thread: [],
             });

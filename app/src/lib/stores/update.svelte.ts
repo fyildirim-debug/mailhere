@@ -2,7 +2,6 @@
 // İmzayı arka uç doğrular; burada yalnız durum tutulur.
 
 import { call, EVENTS, on, toAppError, type UpdateInfo } from '../api';
-import { settings } from './settings.svelte';
 
 export const update = $state({
   info: null as UpdateInfo | null,
@@ -21,17 +20,14 @@ let started = false;
 export function initUpdate() {
   if (started) return;
   started = true;
+  // Kendiliğinden denetimi arka uç yapar (açılıştan 30 sn sonra, sonra 6 saatte bir).
   on(EVENTS.update, (info) => {
     update.info = info;
     update.dismissed = false;
   });
-  // Açılışı yavaşlatmamak için biraz bekle; kapalıysa hiç denetleme.
-  setTimeout(() => {
-    if (settings.value.autoUpdate && !update.info) void checkUpdate(true);
-  }, 8000);
 }
 
-export async function checkUpdate(quiet = false) {
+export async function checkUpdate() {
   if (update.checking) return;
   update.checking = true;
   update.error = null;
@@ -41,7 +37,7 @@ export async function checkUpdate(quiet = false) {
     update.upToDate = info == null;
     if (info) update.dismissed = false;
   } catch (e) {
-    if (!quiet) update.error = toAppError(e).message;
+    update.error = toAppError(e).message;
   } finally {
     update.checking = false;
   }

@@ -141,6 +141,8 @@ export interface ThreadEntry {
 
 export interface MessageDetail extends MessageSummary {
   cc: Address[];
+  /** Yalnız taslaklarda dolu (gönderilmiş postada Bcc başlığı yoktur). */
+  bcc: Address[];
   replyTo: Address[];
   messageIdHeader: string | null;
   references: string[];

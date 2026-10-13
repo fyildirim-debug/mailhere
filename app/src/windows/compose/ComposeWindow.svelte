@@ -151,7 +151,9 @@
     draftId = d.id;
     to = [...d.to];
     cc = [...d.cc];
+    bcc = [...d.bcc];
     showCc = cc.length > 0;
+    showBcc = bcc.length > 0;
     subject = d.subject;
     body = d.bodyText ?? '';
     if (d.attachments.length) {
@@ -215,8 +217,14 @@
           draftId = await call('draft_save', { msg });
         } catch (e) {
           // Taslak bu arada silinmiş olabilir (ör. gönderildi ve geri alındı): yenisini yaz.
+          // Ekler o taslaktan geliyorsa artık okunamaz; onlarsız kaydet.
           if (msg.draftId == null || toAppError(e).code !== 'notFound') throw e;
-          draftId = await call('draft_save', { msg: { ...msg, draftId: null } });
+          const lost = msg.forwardFrom != null && msg.forwardFrom === msg.draftId;
+          if (lost) {
+            forwardFrom = null;
+            carried = [];
+          }
+          draftId = await call('draft_save', { msg: { ...msg, draftId: null, forwardFrom: lost ? null : msg.forwardFrom } });
         }
         baseline = snap;
         draftState = 'saved';
