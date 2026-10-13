@@ -26,6 +26,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       - run: pnpm test
+      - name: Sürüm betikleri (latest.json)
+        run: node --test "scripts/*.test.mjs"
       - run: pnpm --filter app exec playwright install --with-deps chromium
       - run: pnpm e2e
       - uses: actions/upload-artifact@v4

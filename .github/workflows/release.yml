@@ -8,13 +8,16 @@ permissions:
   contents: write
 
 jobs:
-  yayin:
-    name: Yayın (${{ matrix.os }})
+  paket:
+    name: Paket (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-22.04, windows-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      # İmza anahtarı tanımlıysa uygulama içi güncelleme dosyaları (.sig) da üretilir.
+      IMZALI: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
     steps:
       - uses: actions/checkout@v4
       - name: Linux bağımlılıkları
@@ -30,13 +33,74 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm tauri build
+      - name: Paketle
+        if: env.IMZALI != 'true'
+        run: pnpm tauri build
+      - name: Paketle (imzalı güncelleme dosyalarıyla)
+        if: env.IMZALI == 'true'
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: pnpm tauri build --config '{"bundle":{"createUpdaterArtifacts":true}}'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: paket-${{ runner.os }}
+          path: |
+            target/release/bundle/deb/*.deb
+            target/release/bundle/rpm/*.rpm
+            target/release/bundle/appimage/*.AppImage
+            target/release/bundle/appimage/*.AppImage.sig
+            target/release/bundle/nsis/*.exe
+            target/release/bundle/nsis/*.exe.sig
+            target/release/bundle/msi/*.msi
+            target/release/bundle/msi/*.msi.sig
+          if-no-files-found: error
+          retention-days: 7
+
+  # Paketler tek işte toplanır: sürüm taslağı bir kez oluşur, latest.json
+  # iki işletim sisteminin imzalarını birlikte içerir.
+  yayin:
+    name: Sürüm taslağı
+    needs: paket
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: paket-*
+          path: paketler
+          merge-multiple: true
+      - name: Sürüm notları (etiket ya da commit mesajı)
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          git fetch --force --no-tags --depth=1 origin "refs/tags/${TAG}:refs/tags/${TAG}" || true
+          if [ "$(git cat-file -t "${TAG}")" = "tag" ]; then
+            git tag -l --format='%(contents:subject)%0a%0a%(contents:body)' "${TAG}" > notlar.md
+          else
+            git log -1 --format=%B "${TAG}" > notlar.md
+          fi
+          cat notlar.md
+      - name: latest.json
+        run: |
+          if find paketler -name '*.sig' | grep -q .; then
+            node scripts/latest-json.mjs --tag "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" \
+              --notes-file notlar.md --out paketler/latest.json paketler
+            cat paketler/latest.json
+          else
+            echo "İmza dosyası yok (TAURI_SIGNING_PRIVATE_KEY tanımlı değil); latest.json üretilmedi."
+          fi
       - uses: softprops/action-gh-release@v2
         with:
           draft: true
           files: |
-            target/release/bundle/deb/*.deb
-            target/release/bundle/rpm/*.rpm
-            target/release/bundle/appimage/*.AppImage
-            target/release/bundle/nsis/*.exe
-            target/release/bundle/msi/*.msi
+            paketler/**/*.deb
+            paketler/**/*.rpm
+            paketler/**/*.AppImage
+            paketler/**/*.exe
+            paketler/**/*.msi
+            paketler/**/*.sig
+            paketler/latest.json
