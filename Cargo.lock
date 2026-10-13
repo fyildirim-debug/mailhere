@@ -2619,6 +2619,7 @@ dependencies = [
  "mh-core",
  "mh-mime",
  "mh-notify",
+ "mh-oauth",
  "mh-send",
  "mh-store",
  "mh-sync",
@@ -2716,9 +2717,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "mh-oauth"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "mh-core",
+ "reqwest 0.12.28",
+ "ring",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "mh-send"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "chrono",
  "lettre",
  "mh-core",
@@ -2756,6 +2773,7 @@ dependencies = [
  "hickory-resolver",
  "mh-core",
  "mh-mime",
+ "mh-oauth",
  "mh-store",
  "quick-xml 0.38.4",
  "reqwest 0.12.28",
