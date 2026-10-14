@@ -2,7 +2,12 @@
   // Mobil posta listesi: sanal liste (lib/ui/virtual.ts), grup başlıkları ve
   // sıra masaüstüyle aynı (lib/mail/listing.ts). Satırda kaydırma eylemleri,
   // uzun basışla seçim, aşağı çekip yenileme.
-  import { onMount } from 'svelte';
+  //
+  // Büyük başlık (24 px) ve kategori çipleri listenin içinde, kaydırılan
+  // alanın başında durur: içerik akınca başlık uygulama çubuğuna çekilir
+  // (`onscrolled`), çipler sayfanın üstüne yapışır. Sanal yerleşim başlığın
+  // yüksekliği kadar kaydırılarak okunur.
+  import { onMount, untrack } from 'svelte';
   import { call, type Category } from '../../lib/api';
   import { t, type MessageKey } from '../../lib/i18n/index.svelte';
   import { emptyState, groupLabel, groupOf, isInboxView, orderRows } from '../../lib/mail/listing';
@@ -16,10 +21,14 @@
   import SwipeRow from './SwipeRow.svelte';
 
   interface Props {
+    title: string;
+    subtitle: string;
     onopen: (row: Row) => void;
+    /** Büyük başlık görünür alandan çıkınca true: uygulama çubuğu başlığı gösterir. */
+    onscrolled?: (scrolled: boolean) => void;
   }
 
-  let { onopen }: Props = $props();
+  let { title, subtitle, onopen, onscrolled }: Props = $props();
 
   const GROUP_H = 34;
   const OVERSCAN = 600;
@@ -29,6 +38,10 @@
   let scroller = $state<HTMLDivElement>();
   let scrollTop = $state(0);
   let viewport = $state(800);
+  /** Kaydırılan alanın başındaki başlık bloğu; sanal yerleşim bunun altından başlar. */
+  let headH = $state(0);
+  /** Yalnız büyük başlığın (çipler hariç) yüksekliği: çubuk başlığının eşiği. */
+  let titleH = $state(0);
   let now = $state(Date.now());
 
   onMount(() => {
@@ -45,23 +58,35 @@
   const empty = $derived(emptyState(mail));
 
   const layout = $derived(
-    buildLayout(rows, { rowH, groupH: GROUP_H, tail: 96, groupOf: (m) => groupOf(m, ctx), groupLabel, rowKey: (m) => `m-${m.id}` }),
+    buildLayout(rows, { rowH, groupH: GROUP_H, tail: 104, groupOf: (m) => groupOf(m, ctx), groupLabel, rowKey: (m) => `m-${m.id}` }),
   );
-  const visible = $derived(visibleEntries(layout.entries, scrollTop, viewport, OVERSCAN));
+  const visible = $derived(visibleEntries(layout.entries, scrollTop - headH, viewport, OVERSCAN));
+
+  let scrolled = $state(false);
 
   function onScroll() {
     if (!scroller) return;
     scrollTop = scroller.scrollTop;
-    if (scrollTop + viewport > layout.total - 800) void loadMore();
+    const past = scrollTop > Math.max(24, titleH - 8);
+    if (past !== scrolled) {
+      scrolled = past;
+      onscrolled?.(past);
+    }
+    if (scrollTop + viewport > headH + layout.total - 800) void loadMore();
   }
 
-  // Görünüm değişince başa dön.
+  // Görünüm değişince başa dön. Yerleşim ölçüleri (başlık yüksekliği, satır
+  // sayısı) izlenmez: onlar değişince kaydırma konumu korunur.
   $effect(() => {
     void mail.view;
     void mail.accountId;
     void mail.search;
     void mail.category;
-    if (scroller) scroller.scrollTop = 0;
+    untrack(() => {
+      if (!scroller) return;
+      scroller.scrollTop = 0;
+      onScroll();
+    });
   });
 
   const tabs: { key: Category | null; label: MessageKey }[] = [
@@ -174,16 +199,6 @@
 </script>
 
 <section class="list" aria-label={t('list.label')}>
-  {#if isInbox}
-    <div class="filters">
-      <div class="seg-track" role="group" aria-label={t('list.filter')}>
-        {#each tabs as tab (tab.label)}
-          <button class="seg" aria-pressed={mail.category === tab.key} onclick={() => setCategory(tab.key)}>{t(tab.label)}</button>
-        {/each}
-      </div>
-    </div>
-  {/if}
-
   <div class="pull" class:on={pull > 0} aria-live="polite" style:transform="translateY({pull - 48}px)">
     <span class="pull-icon" class:spin={refreshing} style:transform="rotate({refreshing ? 0 : Math.min(180, pull * 2.8)}deg)">
       <Icon name="refresh" size={18} />
@@ -205,6 +220,21 @@
     onpointercancel={mouseUp}
     style:transform={pull ? `translateY(${pull}px)` : undefined}
   >
+    <!-- Büyük başlık: seçim kipinde h1 uygulama çubuğundadır ("2 seçili"); burada yalnız metin kalır. -->
+    <div class="head" bind:clientHeight={headH}>
+      <div class="titles" bind:clientHeight={titleH}>
+        <svelte:element this={selecting ? 'div' : 'h1'} class="big">{title}</svelte:element>
+        <span class="sub num">{subtitle}</span>
+      </div>
+      {#if isInbox}
+        <div class="chips" role="group" aria-label={t('list.filter')}>
+          {#each tabs as tab (tab.label)}
+            <button class="m-chip" aria-pressed={mail.category === tab.key} onclick={() => setCategory(tab.key)}>{t(tab.label)}</button>
+          {/each}
+        </div>
+      {/if}
+    </div>
+
     {#if rows.length}
       <div class="inner" style:height="{layout.total}px">
         {#each visible as entry (entry.key)}
@@ -226,7 +256,7 @@
       </div>
     {:else}
       <div class="m-empty">
-        <span class="m-empty-icon"><Icon name="check" size={28} /></span>
+        <span class="m-empty-icon"><Icon name="check" size={26} /></span>
         <div class="m-empty-title">{t(empty.title)}</div>
         <div class="m-empty-body">{t(empty.body)}</div>
       </div>
@@ -243,16 +273,6 @@
     flex-direction: column;
     background: var(--surface);
     overflow: hidden;
-  }
-
-  .filters {
-    flex: none;
-    padding: 8px 12px 6px;
-  }
-
-  .filters .seg {
-    height: 34px;
-    padding: 0 6px;
   }
 
   .pull {
@@ -274,11 +294,6 @@
     transition:
       transform var(--t-state) var(--ease),
       opacity var(--t-fast);
-  }
-
-  /* Süzgeç satırı varken gösterge onun altında başlar. */
-  .filters + .pull {
-    top: 48px;
   }
 
   .pull.on {
@@ -304,6 +319,8 @@
     position: relative;
     flex: 1;
     min-height: 0;
+    display: flex;
+    flex-direction: column;
     overflow-y: auto;
     overscroll-behavior: contain;
     contain: strict;
@@ -314,8 +331,58 @@
     transition: none;
   }
 
+  /* ------------------------------------------------------------ büyük başlık */
+
+  .head {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .titles {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 4px var(--m-gutter) 12px;
+  }
+
+  .big {
+    font-size: var(--fs-title);
+    font-weight: 600;
+    line-height: 1.25;
+    letter-spacing: -0.02em;
+    overflow-wrap: anywhere;
+    text-wrap: balance;
+  }
+
+  .sub {
+    font-size: var(--fs-meta);
+    font-weight: 500;
+    color: var(--ink-3);
+  }
+
+  /* Çipler yatay kayar; içerik akınca sayfanın üstüne yapışır. */
+  .chips {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    display: flex;
+    gap: 8px;
+    padding: 2px var(--m-gutter) 10px;
+    background: var(--surface);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .chips::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* ------------------------------------------------------------------ liste */
+
   .inner {
     position: relative;
+    flex: none;
   }
 
   .slot {
@@ -330,7 +397,7 @@
   }
 
   .group {
-    padding: 14px 16px 6px;
+    padding: 14px var(--m-gutter) 6px;
     font-size: var(--fs-meta);
     font-weight: 600;
     color: var(--ink-3);

@@ -31,7 +31,8 @@ test.beforeEach(async ({ page }) => {
 });
 
 test('açılış: uygulama çubuğu, liste, yüzen düğme; kenar çubuğu ve okuma alanı yok', async ({ page }) => {
-  await expect(page.getByText('3 okunmamış')).toBeVisible();
+  // Okunmamış sayısı büyük başlığın altında (çubuktaki kopya yalnız kaydırınca görünür).
+  await expect(list(page).getByText('3 okunmamış')).toBeVisible();
   await expect(row(page, 'Re: Q4 bütçe taslağı')).toHaveCount(1);
   await expect(row(page, 'Cumartesi kahvaltı?')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Yeni posta' })).toBeVisible();
@@ -171,7 +172,7 @@ test('çok klasörlü hesapta çekmece satırları büzülmez; klasör simgeleri
       window.__mh.state.mailboxes.push({ id: `${acc}:${name}`, accountId: acc, path: name, name, role: 'other', unread: 0, total: 0, parentId: null, hidden: false });
     }
     // Arayüz klasörleri değişiklik olayıyla yeniden okur.
-    window.__mh.emit('mh:changed', []);
+    window.__mh.emit('mh:changed', { mailboxIds: [] });
   });
   // İş kapsamında hesabın klasörleri açık listelenir.
   await openDrawer(page);

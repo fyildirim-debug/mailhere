@@ -54,7 +54,7 @@ test('satır okuma ekranını açar: konu, alt çubuk, hızlı yanıt; arşivle 
 });
 
 test('yıldız ekranda kalır; okunmadı say listeye döner ve sayıyı artırır', async ({ page }) => {
-  await expect(page.getByText('3 okunmamış')).toBeVisible();
+  await expect(list(page).getByText('3 okunmamış')).toBeVisible();
   await row(page, 'Sözleşme imzaya hazır').click();
   const star = appbar(page).getByRole('button', { name: 'Yıldızı kaldır' });
   await expect(star).toHaveAttribute('aria-pressed', 'true');
@@ -66,7 +66,7 @@ test('yıldız ekranda kalır; okunmadı say listeye döner ve sayıyı artırı
 
   await appbar(page).getByRole('button', { name: 'Okunmadı say' }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'Gelen Kutusu' })).toBeVisible();
-  await expect(page.getByText('4 okunmamış')).toBeVisible();
+  await expect(list(page).getByText('4 okunmamış')).toBeVisible();
 });
 
 test('diğer eylemler alt sayfası: yazdırma yok; etiket işaretlenir, klasöre taşı listeye döner', async ({ page }) => {

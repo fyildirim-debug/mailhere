@@ -46,6 +46,8 @@
   );
   const unread = $derived(rowsOf(mail.items, mail.search == null).filter((r) => r.unread).length);
   const subtitle = $derived(unread ? t('list.unread', { n: unread }) : t('list.allRead'));
+  /** Listenin büyük başlığı kaydırılıp gitti mi: uygulama çubuğu başlığı o zaman gösterir. */
+  let listScrolled = $state(false);
 
   onMount(() => {
     void initMail();
@@ -221,7 +223,7 @@
           {/snippet}
         </AppBar>
       {:else}
-        <AppBar leading="menu" {title} {subtitle} onleading={() => nav.open('drawer')}>
+        <AppBar leading="menu" {title} {subtitle} heading={false} titleVisible={listScrolled} tone="surface" divided={listScrolled} onleading={() => nav.open('drawer')}>
           {#snippet actions()}
             {#if mail.search != null}
               <button class="btn-icon" aria-label={t('list.clearSearch')} title={t('list.clearSearch')} onclick={() => setView(mail.view, mail.accountId)}>
@@ -238,13 +240,14 @@
         </AppBar>
       {/if}
 
-      <MobileList onopen={openRow} />
+      <MobileList {title} {subtitle} onopen={openRow} onscrolled={(v) => (listScrolled = v)} />
 
       {#if selecting}
         <MobileBulkBar />
       {:else}
         <button class="btn-primary m-fab" aria-label={t('act.compose')} title={t('act.compose')} onclick={() => openCompose({ name: 'compose', mode: 'new', id: null, to: [], from: null })}>
-          <Icon name="pen" size={24} />
+          <Icon name="pen" size={22} />
+          <span>{t('act.compose')}</span>
         </button>
       {/if}
       <!-- Sol kenardan sağa kaydırma çekmeceyi açar. -->

@@ -11,8 +11,12 @@
   --m-row-compact: 60px;
   --m-touch: 44px;
   --m-touch-lg: 48px;
+  /* Gezinme satırı (çekmece, ayar listesi) ve ekran kenar boşluğu. */
+  --m-nav-row: 48px;
+  --m-gutter: 16px;
   --m-drawer: 300px;
   --m-fab: 56px;
+  --m-chip: 32px;
 
   /* Güvenli alan (çentik, gezinme çubuğu). */
   --sat: env(safe-area-inset-top, 0px);
@@ -70,7 +74,7 @@ body {
 }
 
 .m-shell .menu-item {
-  height: 48px;
+  height: var(--m-nav-row);
 }
 
 .m-shell .btn-soft,
@@ -105,6 +109,57 @@ body {
   inset: -10px -8px;
 }
 
+/* ------------------------------------------------------------ süzgeç çipi */
+/* Liste başlığındaki kategori çipleri: 32 px, etiket köşesi; seçili olan
+   vurgu zemininde (seçim rengi). Dokunma alanı görünmez kenarla 44'e çıkar. */
+.m-chip {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: var(--m-chip);
+  padding: 0 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-2);
+  font-weight: 500;
+  white-space: nowrap;
+  transition:
+    background var(--t-fast),
+    border-color var(--t-fast),
+    color var(--t-fast);
+}
+
+.m-chip::before {
+  content: '';
+  position: absolute;
+  inset: -6px 0;
+}
+
+.m-chip:active {
+  background: var(--hover);
+}
+
+.m-chip[aria-pressed='true'] {
+  border-color: transparent;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+/* ------------------------------------------------------------ bölüm başlığı */
+/* Gezinme ve ayar listelerinde bölüm adı: 12/600, sessiz mürekkep. */
+.m-section {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 36px;
+  padding: 10px 0 0 var(--m-gutter);
+  font-size: var(--fs-meta);
+  font-weight: 600;
+  color: var(--ink-3);
+}
+
 /* Boş durum ve yer tutucu: ne oldu + ne yapılabilir. */
 .m-empty {
   flex: 1;
@@ -112,19 +167,30 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 6px;
   padding: 48px 32px;
   color: var(--ink-3);
   text-align: center;
 }
 
+/* Simge yumuşak vurgu diskinde: boş durum sakin bir varış noktasıdır, uyarı değil. */
 .m-empty .m-empty-icon {
-  color: var(--accent);
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  margin-bottom: 10px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-text);
 }
 
 .m-empty-title {
   color: var(--ink);
+  font-size: var(--fs-section);
   font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.3;
   text-wrap: balance;
 }
 
@@ -134,15 +200,20 @@ body {
   text-wrap: pretty;
 }
 
-/* Yüzen birincil eylem: 56 px, sağ alt, güvenli alanın üstünde. */
+.m-empty .btn-soft {
+  margin-top: 12px;
+}
+
+/* Yüzen birincil eylem: 56 px, sağ alt, güvenli alanın üstünde; adı yanında. */
 .m-fab {
   position: absolute;
-  right: calc(16px + var(--sar));
-  bottom: calc(16px + var(--sab));
+  right: calc(var(--m-gutter) + var(--sar));
+  bottom: calc(var(--m-gutter) + var(--sab));
   z-index: 5;
-  width: var(--m-fab);
   height: var(--m-fab);
-  padding: 0;
+  min-width: var(--m-fab);
+  padding: 0 20px 0 16px;
+  gap: 10px;
   border-radius: 16px;
   box-shadow: var(--shadow);
   transition:
