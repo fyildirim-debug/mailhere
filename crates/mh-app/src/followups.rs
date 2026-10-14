@@ -190,10 +190,10 @@ pub fn check(app: &AppHandle) {
         if !account.notify {
             continue;
         }
-        crate::notify::show_card(
+        state.platform.notify(
             app,
             card_event(message, &account, settings.language),
-            settings.native_notifications,
+            &settings,
         );
     }
 }

@@ -2,13 +2,14 @@
 
 use std::sync::atomic::Ordering;
 
+use mh_app::state::{now_ms, AppState};
 use mh_core::{ComposeMode, ComposePrefill};
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager};
 
-use crate::state::{now_ms, AppState};
+use crate::platform::DesktopState;
 
 const TRAY_ID: &str = "main";
 
@@ -61,7 +62,7 @@ fn on_menu(app: &AppHandle, event: MenuEvent) {
             let _ = crate::windows::notify_hide(app);
         }
         "quit" => {
-            if let Some(s) = app.try_state::<AppState>() {
+            if let Some(s) = app.try_state::<DesktopState>() {
                 s.quitting.store(true, Ordering::SeqCst);
             }
             app.exit(0);

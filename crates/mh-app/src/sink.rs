@@ -29,10 +29,17 @@ fn emit<S: serde::Serialize + Clone>(app: &AppHandle, event: &str, payload: S) {
     }
 }
 
+/// Okunmamış sayısı değişmiş olabilir: kabuk sayacını (tepsi ipucu) yeniler.
+fn counts_changed(app: &AppHandle) {
+    if let Some(state) = app.try_state::<AppState>() {
+        state.platform.counts_changed(app);
+    }
+}
+
 /// Kutular değişti: listeler yenilenir, tepsi sayacı güncellenir.
 pub fn changed(app: &AppHandle, mailbox_ids: Vec<String>) {
     emit(app, events::CHANGED, ChangedEvent { mailbox_ids });
-    crate::tray::refresh(app);
+    counts_changed(app);
 }
 
 impl EventSink for TauriSink {
@@ -64,7 +71,7 @@ impl EventSink for TauriSink {
         // Bu hesap için bildirim kapalı: kart ve sistem bildirimi yok, yalnız
         // tepsi sayacı güncellenir.
         if !account.notify {
-            crate::tray::refresh(&self.app);
+            state.platform.counts_changed(&self.app);
             return;
         }
         let settings = match state.store.settings() {
@@ -84,18 +91,18 @@ impl EventSink for TauriSink {
                 .decide(&settings, &message, now, minutes, fullscreen)
                 == Decision::Card
             {
-                crate::notify::show_card(
+                state.platform.notify(
                     &self.app,
                     NotifyEvent {
                         message,
                         account_name: account.name.clone(),
                         account_color: account.color.clone(),
                     },
-                    settings.native_notifications,
+                    &settings,
                 );
             }
         }
-        crate::tray::refresh(&self.app);
+        state.platform.counts_changed(&self.app);
     }
 
     fn outbox(&self, event: OutboxEvent) {

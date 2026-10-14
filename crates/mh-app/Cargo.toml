@@ -1,0 +1,30 @@
+[package]
+name = "mh-app"
+description = "Mailhere ortak uygulama katmanı: komutlar, durum, olay köprüsü, platform sözleşmesi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+mh-core.workspace = true
+mh-store.workspace = true
+mh-mime.workspace = true
+mh-sync.workspace = true
+mh-send.workspace = true
+mh-notify.workspace = true
+mh-oauth.workspace = true
+mh-jmap.workspace = true
+serde.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+chrono.workspace = true
+rustls.workspace = true
+uuid.workspace = true
+# Kabuğa değil Tauri'ye bağlı: yalnız webview çalışma zamanı (kök Cargo.toml).
+# Tepsi, görüntü kodekleri ve diğer masaüstü özellikleri kabuk crate'inde açılır.
+tauri.workspace = true
+tauri-plugin-notification.workspace = true
+tauri-plugin-opener.workspace = true

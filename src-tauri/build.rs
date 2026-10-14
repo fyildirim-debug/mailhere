@@ -1,85 +1,32 @@
+/// Ortak komutlar (mh-app) ve yalnız masaüstü komutları; satır başına bir ad,
+/// `#` ile başlayan satırlar yorum.
+const SHARED: &str = include_str!("../crates/mh-app/commands.txt");
+const DESKTOP: &str = include_str!("commands.txt");
+
+fn names(list: &str) -> impl Iterator<Item = &str> {
+    list.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+}
+
 fn main() {
+    println!("cargo:rerun-if-changed=../crates/mh-app/commands.txt");
+    println!("cargo:rerun-if-changed=commands.txt");
     // Uygulama komutları için izin tanımları: her pencere yalnız kendi
     // yetenek dosyasında (`capabilities/*.json`) izin verilen komutları
-    // çağırabilir. Yeni bir komut buraya ve ilgili pencerenin dosyasına eklenir.
-    const COMMANDS: &[&str] = &[
-        "accounts_list",
-        "account_discover",
-        "account_add",
-        "account_remove",
-        "mailboxes_list",
-        "counts",
-        "messages_list",
-        "message_get",
-        "messages_flag",
-        "messages_move",
-        "messages_snooze",
-        "search",
-        "remote_allow",
-        "attachment_open",
-        "send",
-        "send_cancel",
-        "settings_get",
-        "settings_set",
-        "sync_now",
-        "open_main",
-        "open_quick",
-        "open_compose",
-        "notify_layout",
-        "notify_hide",
-        "notify_pending",
-        "notify_snooze",
-        "demo_notify",
-        "jmap_discover",
-        "account_add_jmap",
-        "account_update",
-        "draft_save",
-        "draft_delete",
-        "attachments_pick",
-        "update_check",
-        "update_install",
-        "oauth_providers",
-        "oauth_sign_in",
-        "account_add_oauth",
-        "cert_inspect",
-        "cert_trust",
-        "account_update_server",
-        "account_set_password",
-        "mailbox_set_hidden",
-        "mailbox_set_role",
-        "mailbox_roles_reset",
-        "quick_replies_set",
-        "unsubscribe",
-        "vacation_get",
-        "vacation_set",
-        "rules_list",
-        "rule_save",
-        "rule_delete",
-        "rules_reorder",
-        "rule_run",
-        "messages_move_to",
-        "outbox_list",
-        "outbox_send_now",
-        "outbox_to_draft",
-        "thread_get",
-        "contact_get",
-        "message_save_eml",
-        "invite_reply",
-        "invite_open",
-        "followup_set",
-        "followups_list",
-        "screener_list",
-        "screener_decide",
-        "messages_by_sender",
-        "messages_pin",
-        "tags_list",
-        "tag_save",
-        "tag_delete",
-        "messages_tag",
-    ];
+    // çağırabilir. Yeni ortak komut `crates/mh-app/commands.txt`e (ve
+    // `shared_commands!` listesine), masaüstü komutu `commands.txt`e ve
+    // ilgili pencerenin yetenek dosyasına eklenir.
+    // `commands` dilim ömrünü `'static` ister; liste derleme boyunca yaşar.
+    let commands: &'static [&'static str] = Box::leak(
+        names(SHARED)
+            .chain(names(DESKTOP))
+            .collect::<Vec<_>>()
+            .into_boxed_slice(),
+    );
     tauri_build::try_build(
         tauri_build::Attributes::new()
-            .app_manifest(tauri_build::AppManifest::new().commands(COMMANDS)),
+            .app_manifest(tauri_build::AppManifest::new().commands(commands)),
     )
     .expect("Tauri derleme adımı başarısız");
 }

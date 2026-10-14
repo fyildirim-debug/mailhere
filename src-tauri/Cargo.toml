@@ -16,23 +16,15 @@ path = "src/main.rs"
 tauri-build.workspace = true
 
 [dependencies]
+mh-app.workspace = true
 mh-core.workspace = true
-mh-store.workspace = true
-mh-mime.workspace = true
 mh-sync.workspace = true
-mh-send.workspace = true
-mh-notify.workspace = true
-mh-oauth.workspace = true
-mh-jmap.workspace = true
-serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-chrono.workspace = true
-rustls.workspace = true
-uuid.workspace = true
-tauri.workspace = true
+# Masaüstü: varsayılan özellikler (sıkıştırma, X11, D-Bus...) + tepsi simgesi.
+tauri = { workspace = true, default-features = true, features = ["tray-icon", "image-png"] }
 tauri-plugin-single-instance.workspace = true
 tauri-plugin-notification.workspace = true
 tauri-plugin-opener.workspace = true

@@ -9,8 +9,6 @@ use mh_core::{
     MessageId,
 };
 use tauri::{AppHandle, State, WebviewWindow};
-use tauri_plugin_dialog::DialogExt;
-use tauri_plugin_opener::OpenerExt;
 
 use crate::commands::{ensure_body, private_dir, sanitize_filename, write_private};
 use crate::state::{internal, now_ms, AppState};
@@ -100,27 +98,8 @@ pub fn eml_name(subject: &str) -> String {
     }
 }
 
-/// Kullanıcının seçtiği yol `.eml` ile bitmiyorsa uzantı eklenir (dosya
-/// başka bir türle açılmasın).
-pub fn with_eml_extension(path: PathBuf) -> PathBuf {
-    let has = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| e.eq_ignore_ascii_case("eml"));
-    if has {
-        path
-    } else {
-        let mut name = path
-            .file_name()
-            .map(|n| n.to_os_string())
-            .unwrap_or_else(|| "posta".into());
-        name.push(".eml");
-        path.with_file_name(name)
-    }
-}
-
-/// Ham postayı işletim sisteminin kaydet penceresiyle `.eml` olarak yazar
-/// (yalnız kullanıcıya okunur); vazgeçilirse `None`.
+/// Ham postayı kabuğun kaydet penceresiyle `.eml` olarak yazar (yalnız
+/// kullanıcıya okunur; uzantı korunur); vazgeçilirse `None`.
 #[tauri::command]
 pub async fn message_save_eml(
     window: WebviewWindow,
@@ -130,37 +109,8 @@ pub async fn message_save_eml(
     ensure_body(&state, id).await?;
     let summary = state.store.summary(id)?.ok_or_else(not_found)?;
     let raw = state.store.raw(id)?.ok_or_else(no_body)?;
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    window
-        .dialog()
-        .file()
-        .set_parent(&window)
-        .set_file_name(eml_name(&summary.subject))
-        .add_filter("E-posta (.eml)", &["eml"])
-        .save_file(move |path| {
-            let _ = tx.send(path);
-        });
-    let Some(picked) = rx.await.map_err(internal)? else {
-        return Ok(None);
-    };
-    let path = picked.into_path().map_err(|_| {
-        AppError::new(
-            ErrorCode::Invalid,
-            "Seçilen konum bir dosya yolu değil. Bilgisayarında bir klasör seç.",
-        )
-    })?;
-    let path = with_eml_extension(path);
-    let written = tokio::task::spawn_blocking(move || write_private(&path, &raw).map(|_| path))
-        .await
-        .map_err(internal)?
-        .map_err(|e| {
-            tracing::warn!(error = %e, ".eml yazılamadı");
-            AppError::new(
-                ErrorCode::Storage,
-                "Dosya yazılamadı. Klasörün yazılabilir olduğunu ve boş alanı denetle.",
-            )
-        })?;
-    Ok(Some(written.to_string_lossy().into_owned()))
+    let name = eml_name(&summary.subject);
+    state.platform.save_file(&window, &name, raw).await
 }
 
 /// Davetin ham takvimi ve özeti.
@@ -242,10 +192,11 @@ pub async fn invite_open(app: AppHandle, state: State<'_, AppState>, id: Message
         )
     })?;
     let path_str = path.to_string_lossy().into_owned();
-    app.opener()
-        .open_path(path_str.clone(), None::<&str>)
+    state
+        .platform
+        .open_file(&app, &path, "text/calendar", true)
         .map_err(|e| {
-            tracing::warn!(error = %e, "davet dosyası açılamadı");
+            tracing::warn!(error = %e.message, "davet dosyası açılamadı");
             AppError::new(
                 ErrorCode::Internal,
                 format!("Takvim uygulaması açılamadı. Dosya şurada: {path_str}"),
@@ -271,21 +222,5 @@ mod tests {
         assert_eq!(ics_name(""), "davet.ics");
         assert_eq!(ics_name("fatura\u{202E}sci.exe"), "faturasci.exe.ics");
         assert!(eml_name(&"a".repeat(300)).chars().count() <= 124);
-    }
-
-    #[test]
-    fn eml_uzantisi_eklenir() {
-        assert_eq!(
-            with_eml_extension(PathBuf::from("/ev/furkan/posta")),
-            PathBuf::from("/ev/furkan/posta.eml")
-        );
-        assert_eq!(
-            with_eml_extension(PathBuf::from("/ev/furkan/posta.txt")),
-            PathBuf::from("/ev/furkan/posta.txt.eml")
-        );
-        assert_eq!(
-            with_eml_extension(PathBuf::from("/ev/furkan/Posta.EML")),
-            PathBuf::from("/ev/furkan/Posta.EML")
-        );
     }
 }

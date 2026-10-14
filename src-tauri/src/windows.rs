@@ -4,13 +4,15 @@
 
 use std::sync::atomic::Ordering;
 
-use mh_core::{events, CardPosition, ComposeMode, ComposePrefill, MessageId, OpenEvent};
+use mh_app::routes::{compose_route, is_app_url};
+use mh_app::AppState;
+use mh_core::{events, AppError, CardPosition, ComposePrefill, MessageId, OpenEvent};
 use tauri::{
     AppHandle, Emitter, LogicalSize, Manager, Monitor, PhysicalPosition, WebviewUrl, WebviewWindow,
     WebviewWindowBuilder, Window, WindowEvent,
 };
 
-use crate::state::AppState;
+use crate::platform::DesktopState;
 
 pub const MAIN: &str = "main";
 pub const NOTIFY: &str = "notify";
@@ -27,28 +29,27 @@ fn url(route: &str) -> WebviewUrl {
 /// Aynı anda açık olabilecek en çok yazma penceresi.
 const MAX_COMPOSE: usize = 12;
 
-/// Pencere yalnız uygulamanın kendi sayfalarında kalabilir: posta içindeki
-/// ya da bir betiğin açtığı dış adres (oltalama sayfası, `file://`) uygulama
-/// penceresinde açılmaz. Dış bağlantılar varsayılan tarayıcıya gider.
-pub fn is_app_url(url: &tauri::Url) -> bool {
-    match url.scheme() {
-        "tauri" | "about" | "data" | "blob" => true,
-        "http" | "https" => match url.host_str() {
-            Some("tauri.localhost") => true,
-            // Geliştirme sunucusu (`pnpm tauri dev`).
-            Some("localhost") => cfg!(debug_assertions),
-            _ => false,
-        },
-        _ => false,
-    }
+/// Geliştirme sunucusunun ana makinesi (`tauri.conf.json` → `devUrl`);
+/// `is_app_url` yalnız geliştirme derlemesinde ona izin verir.
+fn dev_host(app: &AppHandle) -> Option<String> {
+    app.config()
+        .build
+        .dev_url
+        .as_ref()
+        .and_then(|u| u.host_str())
+        .map(str::to_owned)
 }
 
-fn guard(url: &tauri::Url) -> bool {
-    let ok = is_app_url(url);
-    if !ok {
-        tracing::warn!(scheme = url.scheme(), host = ?url.host_str(), "uygulama dışı adrese yönlendirme engellendi");
+/// Yönlendirme bekçisi: pencere uygulama dışı adrese gidemez.
+fn guard(app: &AppHandle) -> impl Fn(&tauri::Url) -> bool + Send + 'static {
+    let dev = dev_host(app);
+    move |url| {
+        let ok = is_app_url(url, dev.as_deref());
+        if !ok {
+            tracing::warn!(scheme = url.scheme(), host = ?url.host_str(), "uygulama dışı adrese yönlendirme engellendi");
+        }
+        ok
     }
-    ok
 }
 
 pub fn create_main(app: &AppHandle) -> tauri::Result<WebviewWindow> {
@@ -56,7 +57,7 @@ pub fn create_main(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         return Ok(w);
     }
     WebviewWindowBuilder::new(app, MAIN, url("main"))
-        .on_navigation(guard)
+        .on_navigation(guard(app))
         .title("Mailhere")
         .inner_size(1280.0, 820.0)
         .min_inner_size(900.0, 600.0)
@@ -91,15 +92,16 @@ pub fn open_main(app: &AppHandle, id: Option<MessageId>) {
     }
 }
 
+fn quitting(app: &AppHandle) -> bool {
+    app.try_state::<DesktopState>()
+        .is_some_and(|s| s.quitting.load(Ordering::SeqCst))
+}
+
 /// Ana pencere kapatılınca tepsiye gizlenir (tepsiden "Çık" hariç); bildirim
 /// penceresi de kapanmaz, gizlenir.
 pub fn on_window_event(window: &Window, event: &WindowEvent) {
     if let WindowEvent::CloseRequested { api, .. } = event {
-        let quitting = window
-            .app_handle()
-            .try_state::<AppState>()
-            .is_some_and(|s| s.quitting.load(Ordering::SeqCst));
-        if quitting {
+        if quitting(window.app_handle()) {
             return;
         }
         if window.label() == MAIN || window.label() == NOTIFY {
@@ -115,7 +117,7 @@ pub fn ensure_notify(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         return Ok(w);
     }
     WebviewWindowBuilder::new(app, NOTIFY, url("notify"))
-        .on_navigation(guard)
+        .on_navigation(guard(app))
         .title("Mailhere bildirimi")
         .inner_size(NOTIFY_WIDTH, 160.0)
         .decorations(false)
@@ -228,7 +230,7 @@ pub fn notify_hide(app: &AppHandle) -> tauri::Result<()> {
 }
 
 /// Hızlı okuma penceresi (aynı posta için açıksa öne alınır).
-pub fn open_quick(app: &AppHandle, id: MessageId) -> tauri::Result<()> {
+pub fn show_quick(app: &AppHandle, id: MessageId) -> tauri::Result<()> {
     let label = format!("quick-{id}");
     if let Some(w) = app.get_webview_window(&label) {
         let _ = w.unminimize();
@@ -238,7 +240,7 @@ pub fn open_quick(app: &AppHandle, id: MessageId) -> tauri::Result<()> {
     }
     let (width, height) = (440.0, 700.0);
     let w = WebviewWindowBuilder::new(app, &label, url(&format!("quick/{id}")))
-        .on_navigation(guard)
+        .on_navigation(guard(app))
         .title("Mailhere")
         .inner_size(width, height)
         .min_inner_size(380.0, 480.0)
@@ -267,75 +269,18 @@ pub fn open_quick(app: &AppHandle, id: MessageId) -> tauri::Result<()> {
     Ok(())
 }
 
-fn mode_route(mode: ComposeMode) -> &'static str {
-    match mode {
-        ComposeMode::New => "new",
-        ComposeMode::Reply => "reply",
-        ComposeMode::ReplyAll => "replyAll",
-        ComposeMode::Forward => "forward",
-        ComposeMode::Draft => "draft",
-    }
-}
-
-/// Önceden doldurulan en çok alıcı.
-const MAX_PREFILL_TO: usize = 20;
-
-/// Yazma penceresinin rotası: `compose/<kip>/<posta>`; alıcılar varsa
-/// `?to=Ad <adres>`, hesap verilmişse `from=<hesap>` sorgu parametreleri
-/// (arayüz çözer).
-fn compose_route(prefill: &ComposePrefill) -> String {
-    let mut route = format!(
-        "compose/{}/{}",
-        mode_route(prefill.mode),
-        prefill.message_id.unwrap_or(0)
-    );
-    let to: Vec<&mh_core::Address> = prefill
-        .to
-        .iter()
-        .filter(|a| a.email.contains('@') && !a.email.chars().any(char::is_whitespace))
-        .take(MAX_PREFILL_TO)
-        .collect();
-    // Hesap kimliği yalnız güvenli karakterlerden oluşuyorsa taşınır.
-    let from = prefill.account_id.as_deref().filter(|id| {
-        !id.is_empty()
-            && id.len() <= 64
-            && id
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | ':'))
-    });
-    if to.is_empty() && from.is_none() {
-        return route;
-    }
-    let mut url = tauri::Url::parse("mailhere://compose/").expect("sabit adres");
-    {
-        let mut q = url.query_pairs_mut();
-        if let Some(id) = from {
-            q.append_pair("from", id);
-        }
-        for a in to {
-            let value = match a
-                .name
-                .as_deref()
-                .map(mh_send::clean_name)
-                .filter(|n| !n.is_empty())
-            {
-                Some(name) => format!("{name} <{}>", a.email.trim()),
-                None => a.email.trim().to_owned(),
-            };
-            q.append_pair("to", &value);
-        }
-    }
-    if let Some(q) = url.query() {
-        route.push('?');
-        route.push_str(q);
-    }
-    route
+/// Hızlı okuma penceresini açan komut (yalnız masaüstü). Pencere açan
+/// komutlar `async`tır: eşzamanlı komutta pencere oluşturmak Windows'ta
+/// (WebView2) kilitlenmeye yol açar.
+#[tauri::command]
+pub async fn open_quick(app: AppHandle, id: MessageId) -> Result<(), AppError> {
+    show_quick(&app, id).map_err(mh_app::state::internal)
 }
 
 /// Yeni bir yazma penceresi.
 pub fn open_compose(app: &AppHandle, prefill: &ComposePrefill) -> tauri::Result<()> {
     let n = app
-        .try_state::<AppState>()
+        .try_state::<DesktopState>()
         .map(|s| s.compose_counter.fetch_add(1, Ordering::SeqCst) + 1)
         .unwrap_or(1);
     let route = compose_route(prefill);
@@ -349,7 +294,7 @@ pub fn open_compose(app: &AppHandle, prefill: &ComposePrefill) -> tauri::Result<
         return Ok(());
     }
     let w = WebviewWindowBuilder::new(app, format!("compose-{n}"), url(&route))
-        .on_navigation(guard)
+        .on_navigation(guard(app))
         .title("Yeni posta · Mailhere")
         .inner_size(820.0, 660.0)
         .min_inner_size(600.0, 480.0)
@@ -363,17 +308,6 @@ pub fn open_compose(app: &AppHandle, prefill: &ComposePrefill) -> tauri::Result<
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn yalniz_uygulama_adresleri() {
-        let ok = |u: &str| is_app_url(&tauri::Url::parse(u).unwrap());
-        assert!(ok("tauri://localhost/index.html#/main"));
-        assert!(ok("http://tauri.localhost/index.html#/quick/3"));
-        assert!(ok("about:srcdoc"));
-        assert!(!ok("https://banka-giris.example/"));
-        assert!(!ok("file:///etc/passwd"));
-        assert!(!ok("http://tauri.localhost.evil.example/"));
-    }
 
     #[test]
     fn kart_koseye_yerlesir() {
@@ -393,50 +327,5 @@ mod tests {
         assert_eq!((p.x, p.y), (1920 + 1920 - 600 - 24, 24));
         let p = corner(area, CardPosition::BottomLeft, 400.0, 200.0, 0.0);
         assert_eq!((p.x, p.y), (1920, 740));
-    }
-
-    #[test]
-    fn yazma_rotasi() {
-        assert_eq!(mode_route(ComposeMode::ReplyAll), "replyAll");
-        assert_eq!(mode_route(ComposeMode::New), "new");
-        let plain = ComposePrefill {
-            mode: ComposeMode::Reply,
-            message_id: Some(7),
-            to: Vec::new(),
-            account_id: None,
-        };
-        assert_eq!(compose_route(&plain), "compose/reply/7");
-        let with_to = ComposePrefill {
-            mode: ComposeMode::New,
-            message_id: None,
-            to: vec![
-                mh_core::Address::new(Some("Ayşe Demir"), "ayse@ornek.com"),
-                mh_core::Address::new(None, "bozuk adres"),
-                mh_core::Address::new(Some("Evil\r\nX"), "e@ornek.com"),
-            ],
-            account_id: None,
-        };
-        let route = compose_route(&with_to);
-        assert!(route.starts_with("compose/new/0?to="), "{route}");
-        assert!(
-            route.contains("Ay%C5%9Fe+Demir+%3Cayse%40ornek.com%3E"),
-            "{route}"
-        );
-        assert!(!route.contains("bozuk"), "boşluklu adres atılır");
-        assert!(route.contains("to=Evil+X+%3Ce%40ornek.com%3E"), "{route}");
-        assert!(!route.contains('\n'));
-        // Hesap kimliği taşınır; güvensiz kimlik atılır.
-        let from = ComposePrefill {
-            mode: ComposeMode::New,
-            message_id: None,
-            to: Vec::new(),
-            account_id: Some("demo-is".into()),
-        };
-        assert_eq!(compose_route(&from), "compose/new/0?from=demo-is");
-        let bad = ComposePrefill {
-            account_id: Some("a&to=x@y.z".into()),
-            ..from
-        };
-        assert_eq!(compose_route(&bad), "compose/new/0");
     }
 }

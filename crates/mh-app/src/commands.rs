@@ -3,13 +3,11 @@
 use std::path::{Path, PathBuf};
 
 use mh_core::{
-    events, Account, AccountKind, AppError, AppResult, Category, ComposePrefill, Counts,
-    DiscoveredConfig, ErrorCode, ListQuery, Mailbox, MessageDetail, MessageId, MessageSummary,
-    Millis, MoveTarget, NewAccount, NotifyEvent, OutboxItem, OutgoingMessage, Page, Settings,
-    SyncState, SyncStatus,
+    events, Account, AccountKind, AppError, AppResult, ComposePrefill, Counts, DiscoveredConfig,
+    ErrorCode, ListQuery, Mailbox, MessageDetail, MessageId, MessageSummary, Millis, MoveTarget,
+    NewAccount, OutboxItem, OutgoingMessage, Page, Settings, SyncState, SyncStatus,
 };
-use tauri::{AppHandle, Emitter, Manager, State};
-use tauri_plugin_opener::OpenerExt;
+use tauri::{AppHandle, Emitter, State};
 
 use crate::state::{internal, now_ms, AppState};
 
@@ -19,10 +17,6 @@ type Res<T> = Result<T, AppError>;
 pub(crate) const PALETTE: [&str; 6] = [
     "#4C6FD8", "#2E9A61", "#D08A1E", "#B4508C", "#2A8C9A", "#7A5BC8",
 ];
-
-fn win(e: tauri::Error) -> AppError {
-    internal(e)
-}
 
 // ------------------------------------------------------------------ hesaplar
 
@@ -362,7 +356,7 @@ const ATTACHMENT_TTL: std::time::Duration = std::time::Duration::from_secs(24 * 
 
 /// Yalnız kullanıcının erişebildiği klasör (Unix'te 0700; Windows'ta kullanıcı
 /// profilinin varsayılan izinleri).
-pub(crate) fn private_dir(dir: &Path) -> std::io::Result<()> {
+pub fn private_dir(dir: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
@@ -379,7 +373,7 @@ pub(crate) fn private_dir(dir: &Path) -> std::io::Result<()> {
 }
 
 /// Dosyayı yalnız kullanıcının okuyabileceği biçimde yazar (Unix'te 0600).
-pub(crate) fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+pub fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
     let mut opts = std::fs::OpenOptions::new();
     opts.write(true).create(true).truncate(true);
@@ -446,19 +440,16 @@ pub async fn attachment_open(
     })?;
     mark_from_internet(&path);
     let path_str = path.to_string_lossy().into_owned();
-    let opener = app.opener();
-    let res = if opens_directly(&name) {
-        opener.open_path(path_str.clone(), None::<&str>)
-    } else {
-        opener.reveal_item_in_dir(&path)
-    };
-    res.map_err(|e| {
-        tracing::warn!(error = %e, "ek açılamadı");
-        AppError::new(
-            ErrorCode::Internal,
-            format!("Ek açılamadı. Dosya şurada: {path_str}"),
-        )
-    })?;
+    state
+        .platform
+        .open_file(&app, &path, &att.mime, opens_directly(&name))
+        .map_err(|e| {
+            tracing::warn!(error = %e.message, "ek açılamadı");
+            AppError::new(
+                ErrorCode::Internal,
+                format!("Ek açılamadı. Dosya şurada: {path_str}"),
+            )
+        })?;
     Ok(path_str)
 }
 
@@ -470,7 +461,7 @@ pub async fn attachment_open(
 #[tauri::command]
 pub async fn send(
     state: State<'_, AppState>,
-    picked: State<'_, crate::cmd_files::Picked>,
+    picked: State<'_, crate::files::Picked>,
     msg: OutgoingMessage,
 ) -> Res<OutboxItem> {
     picked.ensure(&msg.attachments)?;
@@ -629,86 +620,32 @@ pub fn sync_now(app: AppHandle, state: State<'_, AppState>) -> Res<()> {
 // ------------------------------------------------------------------ pencereler
 //
 // Pencere açan komutlar `async`tır: eşzamanlı komutta pencere oluşturmak
-// Windows'ta (WebView2) kilitlenmeye yol açar.
+// Windows'ta (WebView2) kilitlenmeye yol açar. Pencerenin kendisi kabuğundur
+// (`Platform`); hızlı okuma ve bildirim kartı komutları yalnız masaüstündedir.
 
 #[tauri::command]
-pub async fn open_main(app: AppHandle, id: Option<MessageId>) -> Res<()> {
-    crate::windows::open_main(&app, id);
+pub async fn open_main(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: Option<MessageId>,
+) -> Res<()> {
+    state.platform.open_main(&app, id);
     Ok(())
 }
 
 #[tauri::command]
-pub async fn open_quick(app: AppHandle, id: MessageId) -> Res<()> {
-    crate::windows::open_quick(&app, id).map_err(win)
-}
-
-#[tauri::command]
-pub async fn open_compose(app: AppHandle, prefill: ComposePrefill) -> Res<()> {
-    crate::windows::open_compose(&app, &prefill).map_err(win)
-}
-
-#[tauri::command]
-pub async fn notify_layout(app: AppHandle, height: f64) -> Res<()> {
-    crate::windows::notify_layout(&app, height).map_err(win)
-}
-
-#[tauri::command]
-pub async fn notify_hide(app: AppHandle) -> Res<()> {
-    crate::windows::notify_hide(&app).map_err(win)
-}
-
-#[tauri::command]
-pub fn notify_pending(app: AppHandle) -> Res<Vec<NotifyEvent>> {
-    Ok(crate::notify::take_pending(&app))
+pub async fn open_compose(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    prefill: ComposePrefill,
+) -> Res<()> {
+    state.platform.open_compose(&app, &prefill)
 }
 
 #[tauri::command]
 pub async fn notify_snooze(app: AppHandle, state: State<'_, AppState>, minutes: u32) -> Res<()> {
     state.mute.mute_for(now_ms(), minutes);
-    crate::windows::notify_hide(&app).map_err(win)
-}
-
-/// Ekran görüntüsü için: "Cumartesi kahvaltı?" postasıyla bir kart açar.
-#[tauri::command]
-pub async fn demo_notify(app: AppHandle) -> Res<()> {
-    show_demo_card(&app)
-}
-
-pub fn show_demo_card(app: &AppHandle) -> AppResult<()> {
-    const SUBJECT: &str = "Cumartesi kahvaltı?";
-    let state = app.state::<AppState>();
-    let message = match state.store.find_by_subject(SUBJECT)? {
-        Some(m) => m,
-        None => MessageSummary {
-            id: 0,
-            account_id: String::new(),
-            mailbox_id: String::new(),
-            thread_id: String::new(),
-            from: mh_core::Address::new(Some("Ayşe Demir"), "ayse.demir@eposta.com"),
-            to: vec![],
-            subject: SUBJECT.into(),
-            snippet: "Moda'daki yeni yere gidelim mi? Saat 10 gibi buluşursak kalabalığa kalmayız."
-                .into(),
-            date: now_ms(),
-            unread: true,
-            starred: false,
-            has_attachments: false,
-            category: Category::People,
-            snoozed_until: None,
-            follow_up: None,
-            pinned: false,
-            tags: Vec::new(),
-        },
-    };
-    let account = state.store.account(&message.account_id)?;
-    let ev = NotifyEvent {
-        account_name: account
-            .as_ref()
-            .map_or_else(|| "Kişisel".into(), |a| a.name.clone()),
-        account_color: account.map_or_else(|| "#2E9A61".into(), |a| a.color),
-        message,
-    };
-    crate::notify::show_card(app, ev, false);
+    state.platform.muted(&app);
     Ok(())
 }
 

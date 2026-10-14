@@ -9,6 +9,7 @@ members = [
   "crates/mh-notify",
   "crates/mh-oauth",
   "crates/mh-jmap",
+  "crates/mh-app",
   "src-tauri",
 ]
 
@@ -30,6 +31,7 @@ mh-send = { path = "crates/mh-send" }
 mh-notify = { path = "crates/mh-notify" }
 mh-oauth = { path = "crates/mh-oauth" }
 mh-jmap = { path = "crates/mh-jmap" }
+mh-app = { path = "crates/mh-app" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
@@ -81,8 +83,9 @@ hyper-util = { version = "0.1.21", features = ["tokio"] }
 http-body-util = "0.1.5"
 bytes = "1.12.1"
 
-# Masaüstü kabuğu (kararlı Tauri 2.x)
-tauri = { version = "2.12.3", features = ["tray-icon", "image-png"] }
+# Tauri 2.x. Ortak katman (mh-app) yalnız webview çalışma zamanını ister;
+# masaüstü kabuğu varsayılan özellikleri ve tepsiyi kendi Cargo.toml'unda açar.
+tauri = { version = "2.12.3", default-features = false, features = ["wry"] }
 tauri-build = { version = "2.7.2", features = [] }
 tauri-plugin-single-instance = "2.5.3"
 tauri-plugin-notification = "2.6.0"

@@ -6,9 +6,9 @@ use std::time::{Duration, Instant};
 
 use mh_core::{events, AppError, CertInfo, ErrorCode, Security, Settings, TrustedCert};
 use tauri::{AppHandle, Emitter, State, WebviewWindow};
-use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
-use crate::state::{internal, AppState};
+use crate::platform::Confirm;
+use crate::state::AppState;
 
 type Res<T> = Result<T, AppError>;
 
@@ -120,26 +120,17 @@ pub fn check_trust_request(host: &str, port: u16, sha256: &str) -> Res<String> {
     Ok(fp)
 }
 
-/// Son onayı işletim sisteminin kendi penceresinde ister: arayüzde çalışan
-/// bir betik bu adımı atlayamaz.
-async fn native_confirm(window: &WebviewWindow, host: &str, port: u16, fp: &str) -> Res<bool> {
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    window
-        .dialog()
-        .message(format!(
+/// Son onay işletim sisteminin kendi penceresinde istenir (`Platform::confirm`):
+/// arayüzde çalışan bir betik bu adımı atlayamaz.
+fn confirm_request(host: &str, port: u16, fp: &str) -> Confirm {
+    Confirm {
+        title: "Sertifika onayı",
+        message: format!(
             "{host}:{port} sunucusunun sertifikasına güvenilsin mi?\n\nSHA-256 parmak izi:\n{fp}\n\nParmak izi sunucu yöneticinin verdiğiyle aynı değilse Vazgeç'i seç."
-        ))
-        .title("Sertifika onayı")
-        .kind(MessageDialogKind::Warning)
-        .buttons(MessageDialogButtons::OkCancelCustom(
-            "Güven".into(),
-            "Vazgeç".into(),
-        ))
-        .parent(window)
-        .show(move |ok| {
-            let _ = tx.send(ok);
-        });
-    rx.await.map_err(internal)
+        ),
+        ok: "Güven",
+        cancel: "Vazgeç",
+    }
 }
 
 /// Kullanıcı sertifikaya güvendi: parmak izi bu sunucu + kapı için kalıcı
@@ -155,7 +146,8 @@ pub async fn cert_trust(
     sha256: String,
 ) -> Res<()> {
     let fp = check_trust_request(&host, port, &sha256)?;
-    if !native_confirm(&window, &host_key(&host), port, &fp).await? {
+    let req = confirm_request(&host_key(&host), port, &fp);
+    if !state.platform.confirm(&window, req).await? {
         return Err(AppError::new(ErrorCode::Invalid, "Sertifika onaylanmadı."));
     }
     let settings = with_trust(state.store.settings()?, &host, port, &fp)?;

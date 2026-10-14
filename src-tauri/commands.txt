@@ -1,0 +1,11 @@
+# Yalnız masaüstü kabuğunun komutları (ortak liste: crates/mh-app/commands.txt).
+# build.rs ikisini birleştirir; main.rs'teki birim testi bu adların
+# shared_commands! çağrısına eklendiğini ve capabilities/*.json'da izinli
+# olduğunu denetler.
+open_quick
+notify_layout
+notify_hide
+notify_pending
+demo_notify
+update_check
+update_install

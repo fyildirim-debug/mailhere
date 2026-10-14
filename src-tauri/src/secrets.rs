@@ -1,5 +1,7 @@
 //! İşletim sistemi anahtar zinciri (Linux: Secret Service, Windows: Kimlik
 //! Bilgisi Yöneticisi). Hizmet adı "Mailhere", kullanıcı adı hesap kimliği.
+//! Veritabanı anahtarı da aynı depoda, `db-key` adıyla durur
+//! (`mh_app::state::DbKeyVault`).
 
 use mh_core::{AppError, AppResult, ErrorCode};
 use mh_sync::SecretStore;
@@ -19,36 +21,6 @@ fn keyring_err(e: keyring::Error) -> AppError {
         ErrorCode::Keyring,
         "İşletim sisteminin anahtar zincirine erişilemedi. Anahtar zinciri hizmetinin açık olduğunu denetle.",
     )
-}
-
-/// Veritabanı şifreleme anahtarının kasası: parolalarla aynı depo (anahtar
-/// zinciri ya da bellek kipinde süreç belleği), kullanıcı adı `db-key`.
-pub struct DbKeyVault<'a> {
-    secrets: &'a dyn SecretStore,
-    persistent: bool,
-}
-
-impl<'a> DbKeyVault<'a> {
-    pub fn new(secrets: &'a dyn SecretStore, persistent: bool) -> Self {
-        Self {
-            secrets,
-            persistent,
-        }
-    }
-}
-
-impl mh_store::KeyVault for DbKeyVault<'_> {
-    fn load(&self) -> AppResult<Option<String>> {
-        self.secrets.get(mh_store::DB_KEY_SECRET)
-    }
-
-    fn save(&self, secret: &str) -> AppResult<()> {
-        self.secrets.set(mh_store::DB_KEY_SECRET, secret)
-    }
-
-    fn persistent(&self) -> bool {
-        self.persistent
-    }
 }
 
 impl SecretStore for KeyringSecrets {

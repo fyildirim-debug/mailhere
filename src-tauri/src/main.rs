@@ -1,92 +1,86 @@
-//! Mailhere masaüstü kabuğu: pencereler, tepsi, komutlar ve olaylar.
+//! Mailhere masaüstü kabuğu: pencereler, tepsi, bildirim kartı, anahtar
+//! zinciri, güncelleme. Komutlar ve çekirdek `mh-app`tedir.
 
 // Windows'ta sürüm derlemesinde konsol penceresi açılmasın.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod cmd_account;
-mod cmd_cert;
-mod cmd_drafts;
-mod cmd_files;
-mod cmd_jmap;
-mod cmd_list;
-mod cmd_mailbox;
-mod cmd_oauth;
-mod cmd_outbox;
-mod cmd_reading;
-mod cmd_rules;
-mod cmd_unsubscribe;
-mod cmd_vacation;
-mod commands;
-mod followups;
-mod notify;
-mod rules;
-mod screener;
+mod files;
+mod notify_card;
+mod platform;
 mod secrets;
-mod signatures;
-mod sink;
-mod state;
 mod tray;
 mod updater;
 mod windows;
 
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
-use tauri::{Manager, RunEvent};
-use tracing::Level;
-use tracing_subscriber::filter::{filter_fn, FilterExt};
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::{EnvFilter, Layer};
+use mh_app::state::{demo_mode, dev_env, memory_mode};
+use mh_app::Dirs;
+use mh_sync::{MemorySecrets, SecretStore};
+use tauri::{App, AppHandle, Manager, RunEvent};
 
-/// Ayrıntılı (debug/trace) günlükte ham protokol trafiğini yazan kitaplıklar:
-/// `LOGIN kullanıcı "parola"`, `AUTH PLAIN …`, jeton gövdeleri. RUST_LOG ne
-/// derse desin bunlarda info altı kapalıdır.
-const PROTOCOL_CRATES: &[&str] = &[
-    "async_imap",
-    "imap_proto",
-    "lettre",
-    "rustls",
-    "tokio_rustls",
-    "reqwest",
-    "hyper",
-    "hyper_util",
-    "h2",
-];
+use crate::platform::{DesktopPlatform, DesktopState};
 
-/// Bu hedef ve düzeydeki kayıt yazılabilir mi (gizli bilgi sızdırmasın)?
-fn log_allowed(target: &str, level: Level) -> bool {
-    let protocol = PROTOCOL_CRATES.iter().any(|c| {
-        target
-            .strip_prefix(c)
-            .is_some_and(|rest| rest.is_empty() || rest.starts_with("::"))
-    });
-    !protocol || level <= Level::INFO
+/// İşletim sisteminin *yerel* uygulama veri klasörü. Windows'ta
+/// `app_data_dir` dolaşan profildir (Roaming): posta veritabanı profil
+/// sunucusuna kopyalanmasın diye `app_local_data_dir` kullanılır. Linux ve
+/// macOS'ta ikisi aynı klasördür. Önceki sürümlerin dolaşan profildeki
+/// veritabanı açılışta taşınır.
+fn os_dirs(app: &AppHandle) -> Result<Dirs, Box<dyn std::error::Error>> {
+    let data = app.path().app_local_data_dir()?;
+    Ok(Dirs {
+        // Windows'ta da yerel klasör (%LOCALAPPDATA%).
+        cache: app
+            .path()
+            .app_cache_dir()
+            .unwrap_or_else(|_| data.join("cache")),
+        legacy_db: Some(app.path().app_data_dir()?.join("mailhere.db")),
+        data,
+    })
 }
 
-fn init_logging() {
-    let env =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,html5ever=warn"));
-    let cap = filter_fn(|meta| log_allowed(meta.target(), *meta.level()));
-    let _ = tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::fmt::layer()
-                .with_target(false)
-                .with_filter(env.and(cap)),
-        )
-        .try_init();
+fn setup(app: &mut App, rt: tokio::runtime::Handle) -> Result<(), Box<dyn std::error::Error>> {
+    let handle = app.handle().clone();
+    // Tanıtım ve deneme kipi: parolalar ve veritabanı anahtarı bellekte.
+    let memory = memory_mode();
+    let secrets: Arc<dyn SecretStore> = if memory {
+        tracing::info!("parolalar ve veritabanı anahtarı bellekte (tanıtım ya da test kipi)");
+        Arc::new(MemorySecrets::new())
+    } else {
+        Arc::new(secrets::KeyringSecrets)
+    };
+    let dirs = Dirs::resolve(memory, || os_dirs(&handle))?;
+    let platform = Arc::new(DesktopPlatform);
+    // Hata iletişim kutusu gösterildi; pencere açılmaz, kutu kapanınca çıkılır.
+    if mh_app::setup_core(app, rt.clone(), dirs, secrets, platform).is_err() {
+        return Ok(());
+    }
+
+    windows::create_main(&handle)?;
+    if let Err(e) = tray::create(&handle) {
+        tracing::warn!(error = %e, "tepsi simgesi oluşturulamadı");
+    }
+    updater::start(&handle, &rt);
+    tray::refresh(&handle);
+
+    // Tanıtım kipinde ekran görüntüsü otomasyonu: N saniye sonra örnek kart.
+    let demo_card = dev_env("MAILHERE_DEMO_NOTIFY").and_then(|v| v.trim().parse::<u64>().ok());
+    if let (true, Some(secs)) = (demo_mode(), demo_card) {
+        let app = handle.clone();
+        rt.spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(secs)).await;
+            if let Err(e) = notify_card::show_demo_card(&app) {
+                tracing::warn!(error = %e.message, "tanıtım kartı açılamadı");
+            }
+        });
+    }
+    Ok(())
 }
 
 fn main() {
-    init_logging();
-    // Tüm TLS istemcileri ring kullanır; yine de varsayılan sağlayıcıyı sabitle.
-    let _ = rustls::crypto::ring::default_provider().install_default();
-
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .thread_name("mailhere")
-        .build()
-        .expect("eşzamansız çalışma ortamı kurulamadı");
-    tauri::async_runtime::set(runtime.handle().clone());
+    mh_app::logging::init(tracing_subscriber::fmt::layer().with_target(false));
+    let runtime = mh_app::logging::runtime();
     let rt = runtime.handle().clone();
 
     let app = tauri::Builder::default()
@@ -98,84 +92,18 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .manage(cmd_oauth::OAuthState::default())
-        .manage(cmd_files::Picked::default())
-        .setup(move |app| state::setup(app, rt.clone()))
+        .manage(DesktopState::default())
+        .setup(move |app| setup(app, rt.clone()))
         .on_window_event(windows::on_window_event)
-        .invoke_handler(tauri::generate_handler![
-            commands::accounts_list,
-            commands::account_discover,
-            commands::account_add,
-            commands::account_remove,
-            commands::mailboxes_list,
-            commands::counts,
-            commands::messages_list,
-            commands::message_get,
-            commands::messages_flag,
-            commands::messages_move,
-            commands::messages_snooze,
-            commands::search,
-            commands::remote_allow,
-            commands::attachment_open,
-            commands::send,
-            commands::send_cancel,
-            commands::settings_get,
-            commands::settings_set,
-            commands::quick_replies_set,
-            commands::sync_now,
-            commands::open_main,
-            commands::open_quick,
-            commands::open_compose,
-            commands::notify_layout,
-            commands::notify_hide,
-            commands::notify_pending,
-            commands::notify_snooze,
-            commands::demo_notify,
-            cmd_jmap::jmap_discover,
-            cmd_jmap::account_add_jmap,
-            cmd_account::account_update,
-            cmd_account::account_update_server,
-            cmd_account::account_set_password,
-            cmd_mailbox::mailbox_set_hidden,
-            cmd_mailbox::mailbox_set_role,
-            cmd_mailbox::mailbox_roles_reset,
-            cmd_drafts::draft_save,
-            cmd_drafts::draft_delete,
-            cmd_files::attachments_pick,
+        // Ortak komutlar + yalnız masaüstü komutları (`commands.txt`).
+        .invoke_handler(mh_app::shared_commands![
+            windows::open_quick,
+            notify_card::notify_layout,
+            notify_card::notify_hide,
+            notify_card::notify_pending,
+            notify_card::demo_notify,
             updater::update_check,
             updater::update_install,
-            cmd_oauth::oauth_providers,
-            cmd_oauth::oauth_sign_in,
-            cmd_oauth::account_add_oauth,
-            cmd_cert::cert_inspect,
-            cmd_cert::cert_trust,
-            cmd_unsubscribe::unsubscribe,
-            cmd_vacation::vacation_get,
-            cmd_vacation::vacation_set,
-            cmd_rules::rules_list,
-            cmd_rules::rule_save,
-            cmd_rules::rule_delete,
-            cmd_rules::rules_reorder,
-            cmd_rules::rule_run,
-            cmd_rules::messages_move_to,
-            cmd_outbox::outbox_list,
-            cmd_outbox::outbox_send_now,
-            cmd_outbox::outbox_to_draft,
-            cmd_reading::thread_get,
-            cmd_reading::contact_get,
-            cmd_reading::message_save_eml,
-            cmd_reading::invite_reply,
-            cmd_reading::invite_open,
-            followups::followup_set,
-            followups::followups_list,
-            screener::screener_list,
-            screener::screener_decide,
-            cmd_list::messages_by_sender,
-            cmd_list::messages_pin,
-            cmd_list::tags_list,
-            cmd_list::tag_save,
-            cmd_list::tag_delete,
-            cmd_list::messages_tag,
         ])
         .build(tauri::generate_context!())
         .expect("Mailhere başlatılamadı");
@@ -187,7 +115,7 @@ fn main() {
         } = event
         {
             let quitting = app
-                .try_state::<state::AppState>()
+                .try_state::<DesktopState>()
                 .is_some_and(|s| s.quitting.load(Ordering::SeqCst));
             if !quitting {
                 api.prevent_exit();
@@ -199,24 +127,70 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::collections::BTreeSet;
+
+    /// Yalnız masaüstü komutları (`commands.txt`).
+    fn desktop_commands() -> Vec<&'static str> {
+        include_str!("../commands.txt")
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+            .collect()
+    }
+
+    /// `capabilities/*.json` dosyalarındaki uygulama komutu izinleri
+    /// (`allow-<ad>`; eklenti izinleri `:` taşır ve sayılmaz).
+    fn allowed() -> BTreeSet<String> {
+        let mut out = BTreeSet::new();
+        for file in [
+            include_str!("../capabilities/main.json"),
+            include_str!("../capabilities/notify.json"),
+            include_str!("../capabilities/quick.json"),
+            include_str!("../capabilities/compose.json"),
+        ] {
+            let cap: serde_json::Value = serde_json::from_str(file).expect("yetenek dosyası JSON");
+            for p in cap["permissions"].as_array().expect("permissions dizisi") {
+                let p = p.as_str().expect("izin adı");
+                if let Some(name) = p.strip_prefix("allow-").filter(|_| !p.contains(':')) {
+                    out.insert(name.replace('-', "_"));
+                }
+            }
+        }
+        out
+    }
 
     #[test]
-    fn protokol_kitapliklari_ayrintili_yazmaz() {
-        for t in [
-            "async_imap",
-            "async_imap::imap_stream",
-            "lettre::transport::smtp",
-        ] {
-            assert!(!log_allowed(t, Level::TRACE), "{t}");
-            assert!(!log_allowed(t, Level::DEBUG), "{t}");
-            assert!(log_allowed(t, Level::INFO), "{t}");
-            assert!(log_allowed(t, Level::WARN), "{t}");
+    fn masaustu_komutlari_ortaklarla_cakismaz_ve_bagli() {
+        let desktop = desktop_commands();
+        for name in &desktop {
+            assert!(
+                !mh_app::SHARED_COMMANDS.contains(name),
+                "{name}: hem ortak hem masaüstü listesinde"
+            );
+            // Ad `shared_commands!` çağrısına `modül::ad,` biçiminde eklenmiş olmalı.
+            assert!(
+                include_str!("main.rs").contains(&format!("::{name},")),
+                "{name}: main.rs'teki shared_commands! çağrısında yok"
+            );
         }
-        assert!(log_allowed("mh_sync::engine", Level::TRACE));
-        assert!(
-            log_allowed("async_imapx", Level::TRACE),
-            "yalnız tam ad eşleşir"
-        );
+    }
+
+    #[test]
+    fn her_komut_bir_pencerede_izinli_ve_her_izin_bir_komut() {
+        let allowed = allowed();
+        let known: BTreeSet<String> = mh_app::SHARED_COMMANDS
+            .iter()
+            .chain(desktop_commands().iter())
+            .map(|s| s.to_string())
+            .collect();
+        for name in &known {
+            assert!(
+                allowed.contains(name),
+                "{name}: hiçbir capabilities/*.json'da allow-* yok"
+            );
+        }
+        for name in &allowed {
+            assert!(known.contains(name), "allow-{name}: böyle bir komut yok");
+        }
     }
 }

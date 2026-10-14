@@ -2678,18 +2678,10 @@ dependencies = [
 name = "mailhere"
 version = "0.3.1"
 dependencies = [
- "chrono",
  "keyring",
+ "mh-app",
  "mh-core",
- "mh-jmap",
- "mh-mime",
- "mh-notify",
- "mh-oauth",
- "mh-send",
- "mh-store",
  "mh-sync",
- "rustls",
- "serde",
  "serde_json",
  "tauri",
  "tauri-build",
@@ -2701,7 +2693,6 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
- "uuid",
 ]
 
 [[package]]
@@ -2754,6 +2745,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "488016bfae457b036d996092f6cb448677611ce4449e970ceaf42695203f218a"
 dependencies = [
  "autocfg",
+]
+
+[[package]]
+name = "mh-app"
+version = "0.3.1"
+dependencies = [
+ "chrono",
+ "mh-core",
+ "mh-jmap",
+ "mh-mime",
+ "mh-notify",
+ "mh-oauth",
+ "mh-send",
+ "mh-store",
+ "mh-sync",
+ "rustls",
+ "serde",
+ "tauri",
+ "tauri-plugin-notification",
+ "tauri-plugin-opener",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]

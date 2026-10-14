@@ -16,7 +16,7 @@ type Res<T> = Result<T, AppError>;
 #[tauri::command]
 pub async fn draft_save(
     state: State<'_, AppState>,
-    picked: State<'_, crate::cmd_files::Picked>,
+    picked: State<'_, crate::files::Picked>,
     msg: OutgoingMessage,
 ) -> Res<MessageId> {
     picked.ensure(&msg.attachments)?;

@@ -9,12 +9,13 @@ use std::sync::atomic::Ordering;
 use std::sync::Mutex;
 use std::time::Duration;
 
+use mh_app::AppState;
 use mh_core::{events, AppError, ErrorCode, UpdateInfo};
 use tauri::utils::config::BundleType;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_updater::{Error as UpdaterError, Update, UpdaterExt};
 
-use crate::state::AppState;
+use crate::platform::DesktopState;
 
 type Res<T> = Result<T, AppError>;
 
@@ -139,7 +140,7 @@ pub async fn update_check(app: AppHandle) -> Res<Option<UpdateInfo>> {
 /// Yeni sürümü indirir, imzasını doğrular, kurar ve uygulamayı yeniden başlatır.
 /// Windows'ta kurulum programı uygulamayı kendisi kapatıp yeniden açar.
 #[tauri::command]
-pub async fn update_install(app: AppHandle, state: State<'_, AppState>) -> Res<()> {
+pub async fn update_install(app: AppHandle, desktop: State<'_, DesktopState>) -> Res<()> {
     if let Some(reason) = install_blocker(tauri::utils::platform::bundle_type()) {
         return Err(AppError::new(ErrorCode::Invalid, reason));
     }
@@ -173,7 +174,7 @@ pub async fn update_install(app: AppHandle, state: State<'_, AppState>) -> Res<(
         )
     })?;
     tracing::info!(version = %update.version, "güncelleme kuruldu, yeniden başlatılıyor");
-    state.quitting.store(true, Ordering::SeqCst);
+    desktop.quitting.store(true, Ordering::SeqCst);
     app.request_restart();
     Ok(())
 }
@@ -213,7 +214,7 @@ async fn background_check(app: &AppHandle) {
 /// sonra, ardından 6 saatte bir). Tanıtım kipinde denetim yapılmaz.
 pub fn start(app: &AppHandle, rt: &tokio::runtime::Handle) {
     app.manage(UpdateState::default());
-    if crate::state::demo_mode() {
+    if mh_app::state::demo_mode() {
         return;
     }
     let app = app.clone();
