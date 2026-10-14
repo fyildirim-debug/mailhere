@@ -340,6 +340,8 @@
   </aside>
 
   <section class="form">
+    <!-- Mobil kabukta marka panosu gizlidir; işaret formun üstünde durur (kapsayıcı sorgusu). -->
+    <div class="mark" aria-hidden="true"><Logo size={32} /><span>{t('app.name')}</span></div>
     {#if hasAccounts && step !== 'ready'}
       <button class="btn-icon close" aria-label={t('act.close')} onclick={openInbox}><Icon name="x" /></button>
     {/if}
@@ -611,6 +613,10 @@
     position: absolute;
     top: 14px;
     right: 14px;
+  }
+
+  .mark {
+    display: none;
   }
 
   .step {
@@ -932,7 +938,18 @@
      Adım üstten başlar; klavye açılınca odaklı alan kayarak görünür kalır. */
   @container onboarding (max-width: 600px) {
     .form {
+      flex-direction: column;
+      align-items: stretch;
       padding: 20px 16px 32px;
+    }
+
+    .mark {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 28px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
     }
 
     .step {

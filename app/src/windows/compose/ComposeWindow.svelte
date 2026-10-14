@@ -867,6 +867,7 @@
     height: 30px;
     font-size: var(--fs-meta);
     color: var(--ink-2);
+    white-space: nowrap;
   }
 
   .vsep {
