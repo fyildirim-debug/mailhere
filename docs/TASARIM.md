@@ -115,7 +115,7 @@ Avatar; gönderici adresinden deterministik seçilen 9 tonlu paletten gelir (zem
 | Yumuşak düğme | `--paper` zemin, `--line-strong` kenar, 34 px. |
 | İkon düğme | 34×34 (satır içinde 28×28), saydam zemin, `--ink-2` ikon; üzerine gelince `--hover` ve `--ink`. Her ikon düğmede `aria-label` ve kısayollu `title`. |
 | Segment (akıllı süzgeç) | `--ground` iz, 3 px iç boşluk; seçili segment `--paper` + `--shadow-sm`. |
-| Kenar çubuğu | Sıra: Yeni posta (kısayol harfi düğmenin içinde, çipsiz) · çok hesapta **hesap kapsamı** ("Tüm hesaplar" + her hesap; 40 px iki satırlı: ad / alan adı, sağda okunmamış) · kapsama göre daralan görünümler · her hesabın başlığı altında yalnız **istenmeyen + özel klasörler** (rol klasörleri görünümlerle sunulduğu için yinelenmez; "Tüm hesaplar"da hesap grupları katlanır) · etiketler · kayıtlı aramalar; tek hesapta kapsam bölümü yoktur, "Hesap ekle" listenin sonunda. Kaydırma çubuğu ince ve sessizdir (`.scroll-quiet`: yalnız üzerine gelince ya da kaydırırken). |
+| Kenar çubuğu | 248 px, `--ground`. Sıra: Yeni posta (kısayol harfi düğmenin içinde, çipsiz) · çok hesapta **hesap kapsamı** ("Tüm hesaplar" + her hesap; 40 px iki satırlı: ad / alan adı, sağda okunmamış) · kapsama göre daralan görünümler · her hesabın başlığı altında yalnız **istenmeyen + özel klasörler** (rol klasörleri görünümlerle sunulduğu için yinelenmez; "Tüm hesaplar"da hesap grupları katlanır) · etiketler · kayıtlı aramalar; tek hesapta kapsam bölümü yoktur, hesap başlığı ad + alan adı taşır (ad kısalır, alan adı hiç kesilmez), "Hesap ekle" listenin sonunda. Kaydırma çubuğu ince ve sessizdir (`.scroll-quiet`: yalnız üzerine gelince ya da kaydırırken). |
 | Kenar çubuğu öğesi | 34 px, köşe 8; etkin öğe `--paper` zemin (koyuda `--raised`). Sayaç 12/500 sağda, `tabular-nums`, tek sütunda hizalı. |
 | Liste satırı | 3 satır (gönderen+saat, konu, önizleme), 8 px okunmamış noktası, 34 px avatar; seçili `--sel`; üzerine gelince sağ üstte Arşivle / Ertele / Sil eylemleri saati örter. |
 | Okuma alanı | araç çubuğu 52 px; konu 24/600; önceki iletiler tek satıra katlanır; gövde 68ch; ekler 252 px kartlar; altta hızlı yanıt kutusu. |
@@ -128,6 +128,7 @@ Avatar; gönderici adresinden deterministik seçilen 9 tonlu paletten gelir (zem
 | Komut paleti | 620 px, üstte 19 px arama girdisi; bölümler Arama · Eylemler · Postalar · Kişiler; ok tuşları + Enter. |
 | Girdi | 44 px (form) / 32 px (satır içi), `--line-strong` kenar; odakta `--accent` kenar + 3 px `--accent-soft` halka. |
 | Kısayol çipi | 20–22 px, köşe 5, `--line-strong` kenar, 12/500. |
+| Boş durum | ikon 56 px `--accent-soft` disk içinde (`--accent-text`, 26 px), başlık 19/600, gövde `--ink-3` en çok 32ch; liste ve mobil ekranlarda aynı. |
 
 Boş durumlar ve hatalar her zaman iki şey söyler: **ne oldu** ve **ne yapılabilir**.
 
@@ -208,18 +209,24 @@ Android sürümü aynı arayüz kodundan (`app/`) derlenir; kabuk `mobile` olunc
 | Öğe | Mobil |
 | --- | --- |
 | Dokunma hedefi | en az 44×44, birincil eylem 48 |
-| Liste satırı | 72 px (sıkı görünüm 60) |
-| Uygulama çubuğu | 56 px |
+| Liste satırı | 72 px (sıkı görünüm 60); sol oluk 8 px: okunmamış noktası (8 px) + 40 px avatar, metin 78 px'ten başlar |
+| Uygulama çubuğu | 56 px; listede `--surface` zemin, başlık içerikte (aşağıda) |
+| Liste başlığı | **büyük başlık**: 24/600 görünüm adı + 12/500 `--ink-3` okunmamış sayısı, kaydırılan alanın başında; içerik akınca uygulama çubuğuna 19/600 kopyası belirir (120 ms saydamlık), alt çizgi o zaman çıkar |
+| Kategori çipleri | gelen kutusunda büyük başlığın altında, 32 px, köşe 999, `--line-strong` kenar; seçili `--accent-soft` zemin + `--accent-text`; satır yatay kayar ve içerik akınca üste **yapışır** (`position: sticky`); dokunma alanı görünmez kenarla 44 |
 | Alt eylem çubuğu (okuma) | 56 px; düğme hedefleri 44 |
-| Yüzen "Yeni posta" düğmesi | 56 px, sağ alt, `--accent` + `--shadow`; ekranda tek birincil |
+| Yüzen "Yeni posta" düğmesi | **genişletilmiş**: 56 px yükseklik, kalem ikonu + "Yeni posta" etiketi, köşe 16, sağ alt, `--accent` + `--shadow`; ekranda tek birincil |
+| Gezinme satırı | 48 px (çekmece, alt sayfa menüsü); köşe 10 |
+| Bölüm başlığı | 12/600 `--ink-3`, üstte 10 px boşluk (`.m-section`) |
 | İkon | masaüstü boyutlarına 22 eklenir (çubuk ve satır eylemleri) |
-| Yazı | ölçek 12 / 15 / 19 / 24 / 30 değişmez; okumada konu **19** (masaüstünde 24) |
-| Alt sayfa satırı | 48 px, köşe 14, `--raised` + `--shadow-lg` |
-| Çekmece | sol, 300 px, `--ground` |
+| Yazı | ölçek 12 / 15 / 19 / 24 / 30 değişmez; okumada konu **19** (masaüstünde 24); liste başlığı 24 |
+| Alt sayfa satırı | 48 px, köşe 16 (`--r-palette`), `--raised` + `--shadow-lg` |
+| Çekmece | sol, 300 px, `--ground`; başlıkta **hesap kimliği** (36 px renkli rozet, ad 15/600, adres 12 `--ink-2`; dokununca hesap ayarları), çok hesapta marka satırı |
+| Boş durum | 56 px `--accent-soft` disk içinde 26 px `--accent-text` ikon, başlık 19/600, gövde `--ink-3` 32ch |
+| Ayar listesi | 56 px satır (hesap 64), satırlar etiket hizasından başlayan `--line` çizgiyle ayrılır (tam genişlik değil), gruplar 20 px boşlukla |
 
 **Gezinme**
 
-- Alt sekme çubuğu yok. Sol çekmece kenar çubuğunun karşılığıdır: gelen kutusu, elek, ertelenen, bekleyen, yıldızlı, taslak, gönderilen, arşiv, çöp; hesaplar ve klasör ağacı; etiketler; kayıtlı aramalar; Ayarlar.
+- Alt sekme çubuğu yok. Sol çekmece kenar çubuğunun karşılığıdır: başlıkta hesap kimliği (tek hesap) ya da marka (çok hesap); görünümler (gelen kutusu, elek, ertelenen, bekleyen, yıldızlı, taslak, gönderilen, arşiv, çöp; 15/500, etkin 600 `--paper`/`--raised`); "Klasörler" bölümü (tek hesapta bölüm adı, çok hesapta katlanır hesap başlıkları; klasör satırı 15/400, ikon `--ink-3`); etiketler; kayıtlı aramalar; altta eşitleme durumu, Şimdi eşitle, tema ve Ayarlar.
 - Yığın: liste → okuma → yazma; ayarlar yığına itilir. Her itme `history.pushState`; geri tuşu önce açık çekmece / alt sayfa / menüyü kapatır, sonra yığından çıkar, kökte uygulamayı kapatır.
 - Menüler mobilde alt sayfa (`Sheet`) olarak açılır. Toast aynı kalır, alt çubuğun üstünde durur.
 - Kaydırma: sola **Arşivle** (`--accent` zemin + ikon), sağa **Ertele** (`--amber`); eşik %40, 200 ms dönüş, yalnız `transform`; `prefers-reduced-motion` iken anlık. Uzun basış çoklu seçimi açar. Aşağı çekme eşitler.
@@ -231,6 +238,7 @@ Android sürümü aynı arayüz kodundan (`app/`) derlenir; kabuk `mobile` olunc
 - `index.html` görünüm alanı: `width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content`; güvenli alan `env(safe-area-inset-*)`.
 - Koyu tema aynı `data-theme`; mobil i18n anahtarları `mob.*` önekiyle.
 - Geçişler yalnız `transform` / `opacity`, 200–280 ms; mobil kabuk tembel yüklenir, listeler sanallaştırılır, Geist önyüklenir.
-- Ölçüler `app/src/styles/mobile.css` değişkenlerinde tek yerde tutulur: `--m-appbar` 56, `--m-bar` 56, `--m-row` 72 / `--m-row-compact` 60, `--m-touch` 44 / `--m-touch-lg` 48, `--m-drawer` 300, `--m-fab` 56 (köşe 16); güvenli alan `--sat/--sab/--sal/--sar`. İkon boyutu çubuklarda 22, yüzen düğmede 24.
+- Ölçüler `app/src/styles/mobile.css` değişkenlerinde tek yerde tutulur: `--m-appbar` 56, `--m-bar` 56, `--m-row` 72 / `--m-row-compact` 60, `--m-touch` 44 / `--m-touch-lg` 48, `--m-nav-row` 48, `--m-gutter` 16, `--m-chip` 32, `--m-drawer` 300, `--m-fab` 56 (köşe 16); güvenli alan `--sat/--sab/--sal/--sar`. Paylaşılan sınıflar: `.m-chip` (kategori çipi), `.m-section` (bölüm başlığı), `.m-empty` (boş durum), `.m-fab`. İkon boyutu çubuklarda 22, yüzen düğmede 22.
+- Liste sanal yerleşimi (`lib/ui/virtual.ts`) büyük başlık bloğunun yüksekliği kadar ötelenir (`scrollTop - headH`); başlık ve çipler kaydırılan alanın içindedir, satır konumları değişmez. Görünüm değişince başa dönülür; yerleşim ölçüleri değişince (yeni posta, saat) kaydırma konumu korunur.
 - Seçim kipinde uygulama çubuğu `--accent` zemin + `--accent-ink`. Örtü `color-mix(in srgb, var(--ink) 42%, transparent)`. Hareket: ekran itme 280 ms (`translateX(28px)` + opacity), çekmece 280 ms, kaydırma dönüşü ve alt çubuk 200 ms; hepsi `cubic-bezier(.16,1,.3,1)`.
 - Kenardan kaydırma çekmeceyi açar (liste ekranında soldaki 20 px şerit); uzun basış 450 ms. Toast mobilde yüzen düğmenin üstünde durur.

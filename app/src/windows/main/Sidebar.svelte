@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Kenar çubuğu (232 px, --ground). Yukarıdan aşağı: Yeni posta; hesap
+  // Kenar çubuğu (248 px, --ground). Yukarıdan aşağı: Yeni posta; hesap
   // kapsamı (yalnız çok hesapta: "Tüm hesaplar" ya da bir hesap); kapsama göre
   // daralan görünümler; her hesabın istenmeyen + özel klasörleri; etiketler;
   // kayıtlı aramalar. Rol klasörleri görünümlerle sunulduğu için ağaçta
@@ -297,8 +297,8 @@
           <!-- Tek hesapta kimlik yalnız burada görünür; çok hesapta kapsam satırları zaten söyler. -->
           <span class="group-title" title={`${account.name} · ${account.email}`}>
             <span class="dot" style:background={account.color}></span>
-            <span class="trunc" class:grow={multi}>{account.name}</span>
-            {#if !multi}<span class="trunc hint grow">{accountHint(account)}</span>{/if}
+            <span class="trunc grow">{account.name}</span>
+            {#if !multi}<span class="hint">{accountHint(account)}</span>{/if}
           </span>
         {/if}
         <button
@@ -448,7 +448,7 @@
 <style>
   .side {
     flex: none;
-    width: 232px;
+    width: 248px;
     display: flex;
     flex-direction: column;
     padding: 12px 0 8px;
@@ -595,6 +595,7 @@
   }
 
   .hint {
+    flex: none;
     font-size: var(--fs-meta);
     font-weight: 400;
     color: var(--ink-2);
