@@ -20,6 +20,8 @@
   import FileBadge from '../../lib/ui/FileBadge.svelte';
   import Icon from '../../lib/ui/Icon.svelte';
   import Menu, { type MenuItem } from '../../lib/ui/Menu.svelte';
+  import Sheet from '../../lib/ui/Sheet.svelte';
+  import { showToast } from '../../lib/ui/toast.svelte';
   import WindowControls from '../../lib/ui/WindowControls.svelte';
   import FollowUpMenu from '../../lib/mail/FollowUpMenu.svelte';
   import { settings } from '../../lib/stores/settings.svelte';
@@ -33,9 +35,18 @@
     initialTo?: Address[];
     /** Yeni postanın gönderen hesabı (kişi kartının postasının hesabı). */
     initialFrom?: string | null;
+    /**
+     * Başka bir ekranın içinde (mobil kabuk): pencere başlığı ve düğmeleri yok,
+     * gönder düğmesi kapsayıcıda (`send()`), "sonra gönder" alt sayfada, kapanış
+     * pencereyi değil `onclose`u çağırır; sökülürken bekleyen değişiklik taslağa yazılır.
+     */
+    embedded?: boolean;
+    onclose?: () => void;
+    /** Gömülü: gönderim giden kutusuna girdi; kapsayıcı ekranı kapatır ve geri alma toast'ı gösterir. */
+    onsent?: (info: { id: string; sendAt: number; msg: OutgoingMessage }) => void;
   }
 
-  let { mode, messageId, initialTo = [], initialFrom = null }: Props = $props();
+  let { mode, messageId, initialTo = [], initialFrom = null, embedded = false, onclose, onsent }: Props = $props();
 
   let accounts = $state<Account[]>([]);
   let fromId = $state<string>('');
@@ -139,11 +150,17 @@
     };
   }
 
+  /** Yazma biter: pencere kapanır; gömülüyse kapsayıcı ekranı kapatır. */
+  async function close() {
+    if (embedded) onclose?.();
+    else await appWindow.close();
+  }
+
   onMount(() => {
     void init();
     const off = on(EVENTS.outbox, (e) => {
       if (!queued || e.id !== queued.id) return;
-      if (e.ok) void appWindow.close();
+      if (e.ok) void close();
       else {
         error = t('toast.sendFailed', { message: e.error ?? '' });
         queued = null;
@@ -158,6 +175,12 @@
       off();
       window.removeEventListener('pagehide', flush);
       if (draftTimer) clearTimeout(draftTimer);
+      // Gömülü ekran geri tuşuyla kapandı: pencere kapanışıyla aynı, değişiklik taslağa.
+      if (embedded && !discarded && !queued && dirty()) {
+        void saveDraft().then(() => {
+          if (draftState === 'saved') showToast({ text: t('mob.compose.draftSaved') });
+        });
+      }
     };
   });
 
@@ -180,7 +203,7 @@
     }
     baseline = snapshot();
     ready = true;
-    document.title = title();
+    if (!embedded) document.title = title();
     setTimeout(() => {
       if (to.length && bodyEl) {
         bodyEl.focus();
@@ -326,7 +349,7 @@
         /* zaten yoksa sorun değil */
       }
     }
-    await appWindow.close();
+    await close();
   }
 
   function parse(text: string): Address | null {
@@ -447,7 +470,9 @@
     return path.split(/[\\/]/).pop() ?? path;
   }
 
-  async function send() {
+  /** Gönderir (kapsayıcı da çağırır: mobilde düğme uygulama çubuğunda). */
+  export async function send() {
+    if (locked) return;
     error = null;
     commit('to');
     commit('cc');
@@ -466,6 +491,8 @@
       const item = await call('send', { msg: { ...msg, bodyText: text, sendAt, draftId } });
       queued = { id: item.id, at: item.sendAt };
       laterOpen = false;
+      // Gömülü: ekran kapanır; geri alınırsa içerik (imzasız gövde) taslak olarak yeniden açılır.
+      if (embedded) onsent?.({ id: item.id, sendAt: item.sendAt, msg: { ...msg, sendAt, draftId } });
     } catch (e) {
       error = toAppError(e).message;
     }
@@ -504,12 +531,31 @@
 
 <svelte:window onkeydown={onKey} />
 
-<div class="win">
-  <header class="titlebar" data-tauri-drag-region>
-    <span class="title trunc" data-tauri-drag-region>{title()}</span>
-    <span class="grow" data-tauri-drag-region></span>
-    <WindowControls height={40} />
-  </header>
+{#snippet laterItems()}
+  {#each later as o (o.key)}
+    <button class="menu-item" role="menuitem" onclick={() => ((sendAt = o.at), (laterOpen = false))}>
+      <Icon name="clock" size={embedded ? 20 : 16} />
+      <span class="grow">{t(o.label)}</span>
+      <span class="meta num">{when(o.at)}</span>
+    </button>
+  {/each}
+  <FollowUpMenu
+    embedded
+    current={followUpAt}
+    onpick={(at) => ((followUpAt = at), (laterOpen = false))}
+    onclear={followUpAt != null ? () => ((followUpAt = null), (laterOpen = false)) : undefined}
+    onclose={() => (laterOpen = false)}
+  />
+{/snippet}
+
+<div class="win" class:embedded>
+  {#if !embedded}
+    <header class="titlebar" data-tauri-drag-region>
+      <span class="title trunc" data-tauri-drag-region>{title()}</span>
+      <span class="grow" data-tauri-drag-region></span>
+      <WindowControls height={40} />
+    </header>
+  {/if}
 
   <div class="fields">
     <div class="field">
@@ -642,7 +688,7 @@
       <span class="meta" role="status">{t('compose.draftSaved')}</span>
     {:else if draftState === 'error'}
       <span class="status err" role="alert">{t('compose.draftFailed', { message: draftError ?? '' })}</span>
-    {:else}
+    {:else if !embedded}
       <span class="meta">{t('read.sendHint')}</span>
     {/if}
     {#if followUpAt != null && !queued}
@@ -650,31 +696,30 @@
     {/if}
     <span class="grow"></span>
     <button class="btn-icon" aria-label={t('compose.discard')} title={t('compose.discard')} disabled={locked} onclick={discard}><Icon name="trash" /></button>
-    <div class="split">
-      <button class="send" onclick={send} disabled={locked}><Icon name="send" size={16} />{sendAt ? t('act.schedule') : t('act.send')}<span class="kbd on-accent">Ctrl Enter</span></button>
-      <button class="more" aria-label={t('compose.later')} title={t('compose.later')} aria-haspopup="menu" aria-expanded={laterOpen} disabled={locked} onclick={() => (laterOpen = !laterOpen)}>
-        <Icon name="chevronDown" size={16} />
+    {#if embedded}
+      <!-- Gönder kapsayıcının uygulama çubuğunda; "sonra gönder" ve hatırlatma alt sayfada. -->
+      <button class="btn-soft later-btn" class:on={sendAt != null} aria-haspopup="menu" aria-expanded={laterOpen} disabled={locked} onclick={() => (laterOpen = true)}>
+        <Icon name="clock" size={18} />{t('compose.later')}
       </button>
       {#if laterOpen}
-        <div class="popover later" role="menu">
-          <div class="menu-title">{t('compose.later')}</div>
-          {#each later as o (o.key)}
-            <button class="menu-item" role="menuitem" onclick={() => ((sendAt = o.at), (laterOpen = false))}>
-              <Icon name="clock" size={16} />
-              <span class="grow">{t(o.label)}</span>
-              <span class="meta num">{when(o.at)}</span>
-            </button>
-          {/each}
-          <FollowUpMenu
-            embedded
-            current={followUpAt}
-            onpick={(at) => ((followUpAt = at), (laterOpen = false))}
-            onclear={followUpAt != null ? () => ((followUpAt = null), (laterOpen = false)) : undefined}
-            onclose={() => (laterOpen = false)}
-          />
-        </div>
+        <Sheet title={t('compose.later')} onclose={() => (laterOpen = false)}>
+          <div class="sheet-later" role="menu" aria-label={t('compose.later')}>{@render laterItems()}</div>
+        </Sheet>
       {/if}
-    </div>
+    {:else}
+      <div class="split">
+        <button class="send" onclick={send} disabled={locked}><Icon name="send" size={16} />{sendAt ? t('act.schedule') : t('act.send')}<span class="kbd on-accent">Ctrl Enter</span></button>
+        <button class="more" aria-label={t('compose.later')} title={t('compose.later')} aria-haspopup="menu" aria-expanded={laterOpen} disabled={locked} onclick={() => (laterOpen = !laterOpen)}>
+          <Icon name="chevronDown" size={16} />
+        </button>
+        {#if laterOpen}
+          <div class="popover later" role="menu">
+            <div class="menu-title">{t('compose.later')}</div>
+            {@render laterItems()}
+          </div>
+        {/if}
+      </div>
+    {/if}
   </footer>
 </div>
 
@@ -687,6 +732,14 @@
     flex-direction: column;
     overflow: hidden;
     background: var(--paper);
+    /* Dar kapsayıcıda (mobil ekran, dar pencere) alanlar tek sütuna yaklaşır. */
+    container-type: inline-size;
+  }
+
+  .win.embedded {
+    flex: 1;
+    min-height: 0;
+    height: auto;
   }
 
   .titlebar {
@@ -952,5 +1005,72 @@
     right: 0;
     bottom: 44px;
     width: 280px;
+  }
+
+  .later-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .later-btn.on {
+    color: var(--accent-text);
+  }
+
+  .sheet-later .menu-item {
+    padding: 0 12px;
+    gap: 14px;
+  }
+
+  .sheet-later :global(.embedded) {
+    margin-top: 6px;
+    padding-top: 6px;
+  }
+
+  /* Dar kapsayıcı: etiketler kısa, öneri listesi tam genişlik, araç çubuğu kayar, alt çubuk sarar. */
+  @container (max-width: 520px) {
+    .fields {
+      padding: 0 12px;
+    }
+
+    .flabel {
+      width: 44px;
+    }
+
+    .suggest {
+      left: 0;
+      right: 0;
+      width: auto;
+    }
+
+    .chip {
+      height: 32px;
+    }
+
+    .chip button {
+      width: 28px;
+      height: 28px;
+    }
+
+    .tools {
+      padding: 6px 8px;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+
+    .editor {
+      padding: 14px 12px 8px;
+    }
+
+    .foot {
+      flex-wrap: wrap;
+      row-gap: 6px;
+      padding: 10px 12px calc(12px + env(safe-area-inset-bottom, 0px));
+    }
+
+    .status {
+      flex: 1 1 100%;
+      min-width: 0;
+    }
   }
 </style>

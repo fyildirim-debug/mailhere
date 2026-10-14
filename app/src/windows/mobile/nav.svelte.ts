@@ -7,13 +7,14 @@
 // açık katman kapanır, sonra ekranlar çıkar. Kökte (derinlik 0) geri tuşu
 // bizim değildir; Android'de uygulama kapanır.
 
-import type { ComposeMode, MessageId } from '../../lib/api';
+import type { Address, ComposeMode, MessageId } from '../../lib/api';
 import type { SettingsSection } from '../../lib/stores/mail.svelte';
 
 export type MobileScreen =
   | { name: 'list' }
   | { name: 'read'; id: MessageId }
-  | { name: 'compose'; mode: ComposeMode; id: MessageId | null }
+  /** Yazma: `to` ve `from` yalnız yeni postada (kişi kartından, `mh:navigate` rotasından) dolu gelir. */
+  | { name: 'compose'; mode: ComposeMode; id: MessageId | null; to: Address[]; from: string | null }
   | { name: 'settings'; section: SettingsSection | null }
   | { name: 'search' };
 
@@ -24,6 +25,7 @@ export interface HistoryLike {
   pushState(data: unknown, unused: string): void;
   replaceState(data: unknown, unused: string): void;
   back(): void;
+  go(delta: number): void;
 }
 
 interface Mark {
@@ -116,6 +118,20 @@ export function createNav(history: HistoryLike) {
       return true;
     },
 
+    /**
+     * Üstteki ekrandan çıkar; açık katman (alt sayfa) varsa onunla birlikte,
+     * tek geçmiş adımında. Bir alt sayfadan seçilen eylem ekranı kapatırken
+     * (arşivle, taşı) iki ayrı `back` yerine bu kullanılır: katman hemen
+     * kapanır, iki girdi birden geri alınır. Kökte false.
+     */
+    pop(): boolean {
+      if (state.stack.length <= 1) return false;
+      const steps = 1 + (state.layer ? 1 : 0);
+      state.layer = null;
+      history.go(-steps);
+      return true;
+    },
+
     /** `popstate`: tarayıcının getirdiği girdiye göre yığın indirgenir. */
     onPopState(data: unknown) {
       reconcile(depthOf(data));
@@ -135,7 +151,7 @@ export type Nav = ReturnType<typeof createNav>;
 const browserHistory: HistoryLike =
   typeof window !== 'undefined'
     ? window.history
-    : { pushState() {}, replaceState() {}, back() {} };
+    : { pushState() {}, replaceState() {}, back() {}, go() {} };
 
 /** Uygulamanın tek gezinme yığını. */
 export const nav = createNav(browserHistory);

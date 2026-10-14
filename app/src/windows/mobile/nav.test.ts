@@ -22,8 +22,12 @@ function fakeHistory() {
       entries[index] = data;
     },
     back() {
-      if (index === 0) return;
-      index--;
+      h.go(-1);
+    },
+    go(delta) {
+      const target = index + delta;
+      if (target < 0 || target > entries.length - 1) return;
+      index = target;
       h.index = index;
       listener?.(entries[index]);
     },
@@ -99,6 +103,23 @@ describe('mobil gezinme yığını', () => {
     nav.back();
     expect(nav.current).toEqual({ name: 'list' });
     expect(nav.layer).toBeNull();
+  });
+
+  it('pop: açık alt sayfayla birlikte ekran tek adımda çıkar', () => {
+    nav.push({ name: 'read', id: 3 });
+    nav.open('sheet');
+    expect(h.entries.length).toBe(3);
+    expect(nav.pop()).toBe(true);
+    expect(nav.layer).toBeNull();
+    expect(nav.current).toEqual({ name: 'list' });
+    expect(h.index).toBe(0);
+    // Kökte çıkılacak ekran yok.
+    expect(nav.pop()).toBe(false);
+    // Katmansız ekranda tek adım.
+    nav.push({ name: 'search' });
+    expect(nav.pop()).toBe(true);
+    expect(nav.current).toEqual({ name: 'list' });
+    expect(h.index).toBe(0);
   });
 
   it('bir katman başka katmanın yerine geçer', () => {

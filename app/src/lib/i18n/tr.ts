@@ -792,11 +792,21 @@ export const tr = {
   'mob.swipeArchive': 'Sola kaydır: arşivle',
   'mob.swipeSnooze': 'Sağa kaydır: yarına ertele',
   'mob.longPress': 'Basılı tutarak seç',
-  'mob.composeSoonTitle': 'Telefondan yazma henüz hazır değil',
-  'mob.composeSoonBody': 'Bu sürümde yeni posta yalnız bilgisayardan yazılır. Okuma, arşivleme ve erteleme burada çalışır.',
   'mob.settingsSoonTitle': 'Ayarlar telefona henüz gelmedi',
   'mob.settingsSoonBody': 'Hesap ve bildirim ayarlarını şimdilik bilgisayardan düzenle; tema buradan değişir.',
   'mob.loading': 'Postalar yükleniyor…',
+
+  // Mobil okuma, yazma ve alt sayfa (3b / 3c)
+  'mob.sheet.label': 'Seçenekler',
+  'mob.read.actions': 'Posta eylemleri',
+  'mob.read.editDraft': 'Düzenle',
+  'mob.read.counting': 'Göndericinin postaları sayılıyor…',
+  'mob.compose.reply': 'Yanıt',
+  'mob.compose.forward': 'İlet',
+  'mob.compose.draft': 'Taslak',
+  'mob.compose.close': 'Yazmayı kapat',
+  'mob.compose.draftSaved': 'Taslaklara kaydedildi',
+  'mob.compose.restored': 'Gönderim geri alındı; taslak olarak açıldı',
 } as const;
 
 export type MessageKey = keyof typeof tr;

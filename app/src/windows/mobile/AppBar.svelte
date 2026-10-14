@@ -33,7 +33,7 @@
     <div class="center">{@render children()}</div>
   {:else}
     <div class="titles">
-      <h1 class="trunc">{title}</h1>
+      {#if title}<h1 class="trunc">{title}</h1>{/if}
       {#if subtitle}<span class="sub trunc num">{subtitle}</span>{/if}
     </div>
   {/if}

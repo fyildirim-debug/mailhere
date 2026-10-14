@@ -10,6 +10,7 @@
   import { displayName, fileSize } from '../util/format';
   import { allowRemote, mail, toggleStar, unsubscribe } from '../stores/mail.svelte';
   import ContactCard from './ContactCard.svelte';
+  import { openCompose } from './open';
   import InviteCard from './InviteCard.svelte';
   import MailBody from './MailBody.svelte';
 
@@ -67,7 +68,7 @@
   }
 
   function compose(mode: 'reply' | 'forward') {
-    void call('open_compose', { prefill: { mode, messageId: d.id } });
+    openCompose({ mode, messageId: d.id });
   }
 </script>
 

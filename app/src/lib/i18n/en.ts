@@ -777,9 +777,19 @@ export const en: Record<MessageKey, string> = {
   'mob.swipeArchive': 'Swipe left: archive',
   'mob.swipeSnooze': 'Swipe right: snooze until tomorrow',
   'mob.longPress': 'Press and hold to select',
-  'mob.composeSoonTitle': 'Writing on the phone is not ready yet',
-  'mob.composeSoonBody': 'In this version new mail is written on the computer only. Reading, archiving and snoozing work here.',
   'mob.settingsSoonTitle': 'Settings have not reached the phone yet',
   'mob.settingsSoonBody': 'Edit account and notification settings on the computer for now; the theme changes here.',
   'mob.loading': 'Loading mail…',
+
+  // Mobile reading, writing and sheet (3b / 3c)
+  'mob.sheet.label': 'Options',
+  'mob.read.actions': 'Message actions',
+  'mob.read.editDraft': 'Edit',
+  'mob.read.counting': 'Counting mail from this sender…',
+  'mob.compose.reply': 'Reply',
+  'mob.compose.forward': 'Forward',
+  'mob.compose.draft': 'Draft',
+  'mob.compose.close': 'Close composer',
+  'mob.compose.draftSaved': 'Saved to Drafts',
+  'mob.compose.restored': 'Sending undone; opened as a draft',
 };
