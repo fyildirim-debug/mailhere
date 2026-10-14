@@ -258,22 +258,33 @@ impl Outbox {
                 failed = true;
             }
         }
-        if let Err(e) = self.store_local(&account.id, MailboxRole::Sent, raw, now) {
-            tracing::warn!(error = %e, "gönderilen postanın yerel kopyası yazılamadı");
-            failed = true;
+        match self.store_local(&account.id, MailboxRole::Sent, raw, now) {
+            Ok(local) => {
+                // "Yanıt gelmezse hatırlat": Gönderilenler'deki kopyaya kurulur.
+                if let Some(at) = row.msg.follow_up_at {
+                    if let Err(e) = self.store.followup_set(local, Some(at), now) {
+                        tracing::warn!(error = %e, "yanıt hatırlatması kurulamadı");
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "gönderilen postanın yerel kopyası yazılamadı");
+                failed = true;
+            }
         }
         Ok(failed
             .then(|| "Posta gönderildi ancak Gönderilenler kutusuna kaydedilemedi.".to_owned()))
     }
 
-    /// Postanın yerel kopyası; sunucu kopyası eşitlemede Message-ID ile eşleşir.
+    /// Postanın yerel kopyası; sunucu kopyası eşitlemede Message-ID ile
+    /// eşleşir. Yerel satırın kimliğini döner.
     fn store_local(
         &self,
         account_id: &str,
         role: MailboxRole,
         raw: Vec<u8>,
         now: Millis,
-    ) -> AppResult<()> {
+    ) -> AppResult<MessageId> {
         // Kutu yoksa sunucunun ad alanında açılacak yolla oluşturulur.
         let mailbox = self.sync.destination(account_id, role)?.mailbox.id;
         let mut m =
@@ -281,9 +292,9 @@ impl Outbox {
                 AppError::new(ErrorCode::Internal, "Gönderilen posta ayrıştırılamadı.")
             })?;
         m.unread = false;
-        self.store.upsert_message(&m)?;
+        let id = self.store.upsert_message(&m)?.id;
         self.sink.changed(vec![mailbox]);
-        Ok(())
+        Ok(id)
     }
 
     /// İletilen postanın ekleri; içerik yerelde yoksa önce indirilir.
@@ -343,6 +354,7 @@ mod tests {
             send_at: None,
             forward_from: None,
             draft_id: None,
+            follow_up_at: None,
         }
     }
 
@@ -605,6 +617,34 @@ mod tests {
             mh_mime::attachment(&raw, 0).unwrap().bytes,
             b"PK\x03\x04 tablo"
         );
+    }
+
+    #[tokio::test]
+    async fn gonderimle_yanit_hatirlatmasi_kurulur() {
+        let (store, rec, outbox) = setup();
+        let mut m = msg();
+        m.subject = "Teklif".into();
+        m.send_at = Some(0);
+        m.follow_up_at = Some(now_ms() + 3 * 86_400_000);
+        let item = outbox.enqueue(&m, 0).unwrap();
+        // Geri alma süresinde hatırlatma yoktur; posta henüz gitmedi.
+        assert!(store.followups_list().unwrap().is_empty());
+        run_due(&store, &outbox).await;
+        assert!(rec.outbox.lock().unwrap()[0].ok);
+        assert_eq!(rec.outbox.lock().unwrap()[0].id, item.id);
+        let list = store.followups_list().unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].subject, "Teklif");
+        assert_eq!(list[0].account_id, "demo-is");
+        assert_eq!(list[0].at, m.follow_up_at.unwrap());
+        assert_eq!(list[0].to, m.to);
+        let sent = view(&store, mh_core::View::Sent, "demo-is");
+        let s = sent.iter().find(|s| s.subject == "Teklif").unwrap();
+        assert_eq!((s.id, s.follow_up), (list[0].id, m.follow_up_at));
+        // Alıcı artık bilinen gönderici (elek için).
+        assert!(store
+            .sender_known("demo-is", "ayse.demir@eposta.com")
+            .unwrap());
     }
 
     #[tokio::test]

@@ -101,6 +101,7 @@ async fn giden_kutusu_jmap_ile_gonderir() {
         send_at: Some(0),
         forward_from: None,
         draft_id: None,
+        follow_up_at: None,
     };
     let item = outbox.enqueue(&msg, 0).unwrap();
     for _ in 0..300 {

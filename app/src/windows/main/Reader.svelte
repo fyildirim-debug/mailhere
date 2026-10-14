@@ -8,8 +8,12 @@
   import { flatten, folderLabel, folderTree } from '../../lib/mail/folders';
   import MailBody from '../../lib/mail/MailBody.svelte';
   import Menu, { type MenuItem } from '../../lib/ui/Menu.svelte';
+  import FollowUpMenu from '../../lib/mail/FollowUpMenu.svelte';
   import SnoozeMenu from '../../lib/mail/SnoozeMenu.svelte';
+  import { followUpDue } from '../../lib/util/followup';
   import { displayName, fileSize, foreignReplyDomains, replyTargets } from '../../lib/util/format';
+  import { fillVariables } from '../../lib/util/variables';
+  import { quickReplies, settings } from '../../lib/stores/settings.svelte';
   import {
     allowRemote,
     blockSender,
@@ -17,9 +21,11 @@
     moveTo,
     moveToFolder,
     newRuleFrom,
+    screenerDecide,
     select,
     selectedIds,
     sendQuickReply,
+    setFollowUp,
     setUnread,
     snooze,
     toggleStar,
@@ -30,9 +36,26 @@
   let sending = $state(false);
   let snoozeOpen = $state(false);
   let replyBox = $state<HTMLTextAreaElement>();
+  /** "Yanıt gelmezse hatırlat" menüsünün konumu (açıkken). */
+  let followAt = $state<{ x: number; y: number } | null>(null);
 
   const d = $derived(mail.detail);
   const account = $derived(d ? mail.accounts.find((a) => a.id === d.accountId) : undefined);
+  const isSent = $derived(d ? mail.mailboxes.find((b) => b.id === d.mailboxId)?.role === 'sent' : false);
+  /** Elek görünümünde: gönderici için kabul / engelle kararı. */
+  const screening = $derived(mail.view.kind === 'screener' && mail.search == null);
+  const chips = $derived(quickReplies(settings.value));
+
+  /** Hızlı yanıt değişkenleri: yanıtlanan kişi ve hesabın gönderen adı. */
+  function useChip(text: string) {
+    if (!d) return;
+    reply = fillVariables(text, {
+      recipient: replyTargets(d)[0] ?? null,
+      sender: account ? { name: account.displayName, email: account.email } : null,
+      locale: locale(),
+    });
+    replyBox?.focus();
+  }
   const recipients = $derived.by(() => {
     if (!d) return '';
     const mine = account?.email.toLowerCase();
@@ -108,11 +131,14 @@
     if (!d) return;
     const msg = d;
     const sender = msg.from.email;
+    const at = anchorOf(e);
     menu = {
-      at: anchorOf(e),
+      at,
       items: [
         { label: t('act.markUnread'), icon: 'mail', hint: 'U', onclick: () => void setUnread([msg.id], true) },
         { label: t('read.openQuick'), icon: 'external', onclick: () => void call('open_quick', { id: msg.id }) },
+        // Gönderilmiş posta: yanıt gelmezse hatırlat.
+        ...(isSent ? [{ label: t('follow.menu'), icon: 'followUp' as const, onclick: () => (followAt = at) }] : []),
         ...(msg.unsubscribe ? [{ label: t('read.unsubscribe'), icon: 'unsubscribe' as const, onclick: () => void unsubscribe(msg) }] : []),
         {
           label: t('read.ruleFromSender'),
@@ -214,6 +240,26 @@
             </button>
           </div>
 
+          {#if d.followUp != null}
+            <div class="strip follow" role="note">
+              <Icon name="followUp" size={16} />
+              <span class="grow">{followUpDue(d.followUp, Date.now()) ? t('follow.dueSince', { when: when(d.followUp) }) : t('follow.pending', { when: when(d.followUp) })}</span>
+              <button class="link small" onclick={() => d && setFollowUp(d.id, null)}>{t('follow.clear')}</button>
+            </div>
+          {/if}
+
+          {#if screening}
+            <div class="strip screen" role="note">
+              <Icon name="sieve" size={16} />
+              <span class="grow">
+                <span class="screen-title">{t('screen.first', { name: displayName(d.from) })}</span>
+                <span class="meta">{t('screen.firstHint')}</span>
+              </span>
+              <button class="btn-primary small" onclick={() => d && screenerDecide(d.accountId, d.from.email, true)}>{t('screen.allow')}</button>
+              <button class="btn-soft small danger" onclick={() => d && screenerDecide(d.accountId, d.from.email, false)}>{t('screen.block')}</button>
+            </div>
+          {/if}
+
           {#if d.unsubscribe}
             <div class="unsub">
               <Icon name="unsubscribe" size={16} />
@@ -264,6 +310,13 @@
       {#if replyForeign.length}
         <p class="reply-warn" role="note">{t('read.replyElsewhere', { domains: replyForeign.join(', ') })}</p>
       {/if}
+      {#if chips.length && !reply}
+        <div class="chips" role="group" aria-label={t('qr.title')}>
+          {#each chips as c (c)}
+            <button class="chip" onclick={() => useChip(c)}>{c}</button>
+          {/each}
+        </div>
+      {/if}
       <div class="replybox">
         <textarea
           bind:this={replyBox}
@@ -299,6 +352,25 @@
 </main>
 
 {#if menu}<Menu at={menu.at} title={menu.title} items={menu.items} onclose={() => (menu = null)} />{/if}
+{#if followAt && d}
+  <FollowUpMenu
+    style="position: fixed; z-index: 60; left: {followAt.x}px; top: {followAt.y}px"
+    current={d.followUp}
+    onpick={(at) => {
+      const id = d.id;
+      followAt = null;
+      void setFollowUp(id, at);
+    }}
+    onclear={d.followUp != null
+      ? () => {
+          const id = d.id;
+          followAt = null;
+          void setFollowUp(id, null);
+        }
+      : undefined}
+    onclose={() => (followAt = null)}
+  />
+{/if}
 
 <style>
   .reply-warn {
@@ -447,6 +519,80 @@
 
   .unsub + .remote {
     margin-top: 8px;
+  }
+
+  .strip {
+    margin-top: 18px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border-radius: var(--r-row);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    color: var(--ink-2);
+    font-size: var(--fs-meta);
+  }
+
+  .strip + .strip,
+  .strip + .unsub,
+  .strip + .remote {
+    margin-top: 8px;
+  }
+
+  .strip.follow :global(.icon) {
+    color: var(--accent-text);
+  }
+
+  .strip.screen {
+    padding: 10px 12px;
+    color: var(--ink);
+    font-size: var(--fs-body);
+  }
+
+  .strip.screen > .grow {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .screen-title {
+    font-weight: 500;
+  }
+
+  .btn-soft.danger {
+    color: var(--danger);
+  }
+
+  .chips {
+    max-width: 680px;
+    margin: 0 auto 8px;
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+  }
+
+  .chip {
+    flex: none;
+    height: 28px;
+    padding: 0 12px;
+    border-radius: 999px;
+    border: 1px solid var(--line-strong);
+    background: var(--paper);
+    color: var(--ink-2);
+    font-size: var(--fs-meta);
+    white-space: nowrap;
+    transition:
+      background var(--t-fast),
+      border-color var(--t-fast),
+      color var(--t-fast);
+  }
+
+  .chip:hover {
+    background: var(--surface);
+    border-color: var(--ink-3);
+    color: var(--ink);
   }
 
   .remote {

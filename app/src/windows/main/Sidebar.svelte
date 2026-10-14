@@ -16,11 +16,15 @@
     icon: IconName;
     label: MessageKey;
     count?: () => number;
+    /** Yalnız sayacı varsa (ya da açıkken) görünür. */
+    optional?: boolean;
   }
 
   const items: NavItem[] = [
     { kind: 'inbox', icon: 'inbox', label: 'nav.inbox', count: () => mail.counts.inboxUnread },
+    { kind: 'screener', icon: 'sieve', label: 'nav.screener', count: () => mail.counts.screener, optional: true },
     { kind: 'snoozed', icon: 'clock', label: 'nav.snoozed', count: () => mail.counts.snoozed },
+    { kind: 'followups', icon: 'followUp', label: 'nav.followups', count: () => mail.counts.followUps, optional: true },
     { kind: 'starred', icon: 'star', label: 'nav.starred' },
     { kind: 'drafts', icon: 'draft', label: 'nav.drafts', count: () => mail.counts.drafts },
     { kind: 'sent', icon: 'send', label: 'nav.sent' },
@@ -177,11 +181,13 @@
   {#each items as item (item.kind)}
     {@const active = mail.screen === 'mail' && mail.search == null && mail.view.kind === item.kind && mail.accountId == null}
     {@const n = item.count?.() ?? 0}
-    <button class="nav" class:active aria-current={active ? 'page' : undefined} onclick={() => setView({ kind: item.kind })}>
-      <Icon name={item.icon} />
-      <span class="trunc">{t(item.label)}</span>
-      {#if n > 0}<span class="count num">{n}</span>{/if}
-    </button>
+    {#if !item.optional || n > 0 || active}
+      <button class="nav" class:active aria-current={active ? 'page' : undefined} onclick={() => setView({ kind: item.kind })}>
+        <Icon name={item.icon} />
+        <span class="trunc">{t(item.label)}</span>
+        {#if n > 0}<span class="count num">{n}</span>{/if}
+      </button>
+    {/if}
     {#if item.kind === 'drafts' && (mail.counts.scheduled > 0 || mail.screen === 'scheduled')}
       {@const on = mail.screen === 'scheduled'}
       <button class="nav" class:active={on} aria-current={on ? 'page' : undefined} onclick={() => (mail.screen = 'scheduled')}>

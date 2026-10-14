@@ -354,6 +354,11 @@ pub struct MessageSummary {
     pub has_attachments: bool,
     pub category: Category,
     pub snoozed_until: Option<Millis>,
+    /// Gönderilmiş postada açık yanıt hatırlatmasının anı; yoksa `None`.
+    /// Süresi geçmişse (`follow_up <= şimdi`) posta "Yanıt bekleniyor"
+    /// işaretiyle gelen kutusunun üstünde görünür.
+    #[serde(default)]
+    pub follow_up: Option<Millis>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -440,7 +445,13 @@ pub enum View {
     Sent,
     Archive,
     Trash,
-    Mailbox { id: String },
+    Mailbox {
+        id: String,
+    },
+    /// Yanıt hatırlatması kurulmuş gönderilmiş postalar (`followups`).
+    Followups,
+    /// Elekte bekleyen, ilk kez yazan göndericilerin postaları (`screener`).
+    Screener,
 }
 
 /// Listede hızlı süzgeç.
@@ -486,6 +497,12 @@ pub struct Counts {
     /// Giden kutusunda bekleyen (planlanmış) gönderimler.
     pub scheduled: u32,
     pub per_account_unread: HashMap<AccountId, u32>,
+    /// Açık yanıt hatırlatmaları (süresi gelen ve gelmeyen).
+    #[serde(default)]
+    pub follow_ups: u32,
+    /// Elekte bekleyen postalar.
+    #[serde(default)]
+    pub screener: u32,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -519,6 +536,43 @@ pub struct OutgoingMessage {
     /// Bu gönderimle silinecek (ya da kaydedilirken yerine yazılacak) taslak.
     #[serde(default)]
     pub draft_id: Option<MessageId>,
+    /// Yanıt gelmezse bu anda hatırlat: gönderim tamamlanınca Gönderilenler'deki
+    /// kopyaya yanıt hatırlatması kurulur.
+    #[serde(default)]
+    pub follow_up_at: Option<Millis>,
+}
+
+/// Gönderilmiş bir postaya kurulu yanıt hatırlatması.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FollowUp {
+    /// Gönderilmiş postanın yerel kimliği.
+    pub id: MessageId,
+    pub account_id: AccountId,
+    /// Hatırlatma anı.
+    pub at: Millis,
+    /// Hatırlatmanın kurulduğu an.
+    pub created_at: Millis,
+    pub subject: String,
+    /// Alıcılar (Kime).
+    pub to: Vec<Address>,
+}
+
+/// Elekte bekleyen bir gönderici (hesap başına).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ScreenedSender {
+    pub account_id: AccountId,
+    /// Küçük harfli adres.
+    pub email: String,
+    /// En son postadaki görünen ad.
+    pub name: Option<String>,
+    /// Elekteki posta sayısı.
+    pub count: u32,
+    /// En son postanın tarihi.
+    pub latest: Millis,
+    /// En son postanın konusu.
+    pub subject: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -766,6 +820,9 @@ pub struct Settings {
     pub dark_mail: bool,
     /// Yazma penceresinde eklenebilen hazır metinler (en çok 50).
     pub templates: Vec<Template>,
+    /// Yeni gönderici eleği: daha önce yazışılmamış göndericinin postası
+    /// gelen kutusu yerine elekte bekler. Varsayılan kapalı.
+    pub screener: bool,
 }
 
 /// Hazır posta şablonu.
@@ -853,6 +910,7 @@ impl Default for Settings {
             quick_replies: None,
             dark_mail: true,
             templates: Vec::new(),
+            screener: false,
         }
     }
 }
@@ -1043,6 +1101,7 @@ mod tests {
             has_attachments: false,
             category: Category::People,
             snoozed_until: None,
+            follow_up: None,
         };
         let d = MessageDetail {
             summary: s,
@@ -1260,6 +1319,78 @@ mod tests {
             serde_json::to_value(Counts::default()).unwrap()["scheduled"],
             0
         );
+    }
+
+    #[test]
+    fn yanit_hatirlatmasi_ve_elek_json_bicimi() {
+        // Yeni görünümler.
+        assert_eq!(
+            serde_json::to_value(View::Followups).unwrap(),
+            serde_json::json!({"kind": "followups"})
+        );
+        assert_eq!(
+            serde_json::to_value(View::Screener).unwrap(),
+            serde_json::json!({"kind": "screener"})
+        );
+        // Özette hatırlatma anı; alanı bilmeyen eski veri `None` okunur.
+        let v = serde_json::json!({
+            "id": 1, "accountId": "a", "mailboxId": "a:Sent", "threadId": "t",
+            "from": {"name": null, "email": "a@ornek.com"}, "to": [], "subject": "x", "snippet": "",
+            "date": 0, "unread": false, "starred": false, "hasAttachments": false,
+            "category": "people", "snoozedUntil": null
+        });
+        let s: MessageSummary = serde_json::from_value(v).unwrap();
+        assert_eq!(s.follow_up, None);
+        assert_eq!(
+            serde_json::to_value(&s).unwrap()["followUp"],
+            serde_json::Value::Null
+        );
+        // Giden postada hatırlatma anı isteğe bağlı.
+        let m: OutgoingMessage = serde_json::from_value(serde_json::json!({
+            "accountId": "a", "to": [], "cc": [], "bcc": [], "subject": "", "bodyText": "",
+            "inReplyTo": null, "attachments": [], "sendAt": null
+        }))
+        .unwrap();
+        assert_eq!(m.follow_up_at, None);
+        let f = FollowUp {
+            id: 7,
+            account_id: "a".into(),
+            at: 10,
+            created_at: 5,
+            subject: "Teklif".into(),
+            to: vec![Address::new(Some("Ayşe"), "ayse@ornek.com")],
+        };
+        assert_eq!(
+            serde_json::to_value(&f).unwrap(),
+            serde_json::json!({
+                "id": 7, "accountId": "a", "at": 10, "createdAt": 5, "subject": "Teklif",
+                "to": [{"name": "Ayşe", "email": "ayse@ornek.com"}]
+            })
+        );
+        let s = ScreenedSender {
+            account_id: "a".into(),
+            email: "yeni@ornek.com".into(),
+            name: None,
+            count: 2,
+            latest: 99,
+            subject: "Merhaba".into(),
+        };
+        assert_eq!(
+            serde_json::to_value(&s).unwrap(),
+            serde_json::json!({
+                "accountId": "a", "email": "yeni@ornek.com", "name": null, "count": 2,
+                "latest": 99, "subject": "Merhaba"
+            })
+        );
+        // Sayaçlar ve ayar varsayılanı.
+        let c = serde_json::to_value(Counts::default()).unwrap();
+        assert_eq!(
+            (c["followUps"].as_u64(), c["screener"].as_u64()),
+            (Some(0), Some(0))
+        );
+        assert!(!Settings::default().screener);
+        let s: Settings = serde_json::from_str(r#"{"screener":true}"#).unwrap();
+        assert!(s.screener);
     }
 
     #[test]

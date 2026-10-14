@@ -21,8 +21,10 @@
   import Icon from '../../lib/ui/Icon.svelte';
   import Menu, { type MenuItem } from '../../lib/ui/Menu.svelte';
   import WindowControls from '../../lib/ui/WindowControls.svelte';
+  import FollowUpMenu from '../../lib/mail/FollowUpMenu.svelte';
   import { settings } from '../../lib/stores/settings.svelte';
   import { baseSubject, displayName, fileSize, snoozeOptions } from '../../lib/util/format';
+  import { fillVariables } from '../../lib/util/variables';
 
   interface Props {
     mode: ComposeMode;
@@ -44,6 +46,8 @@
   let original = $state<MessageDetail | null>(null);
   let laterOpen = $state(false);
   let sendAt = $state<number | null>(null);
+  /** Yanıt gelmezse hatırlatma anı; gönderimle birlikte arka uca gider. */
+  let followUpAt = $state<number | null>(null);
   let queued = $state<{ id: string; at: number } | null>(null);
   let error = $state<string | null>(null);
   let bodyEl = $state<HTMLTextAreaElement>();
@@ -94,18 +98,29 @@
     };
   }
 
-  /** Şablonu imlecin olduğu yere ekler; konu boşsa şablonun konusunu yazar. */
+  /** Şablon değişkenleri: ilk alıcı ve gönderen hesap. */
+  function variables() {
+    return {
+      recipient: to[0] ?? cc[0] ?? null,
+      sender: from ? { name: from.displayName, email: from.email } : null,
+      locale: locale(),
+    };
+  }
+
+  /** Şablonu (değişkenleri doldurarak) imlecin olduğu yere ekler; konu boşsa şablonun konusunu yazar. */
   function insertTemplate(id: string) {
     const tpl = settings.value.templates.find((x) => x.id === id);
     if (!tpl) return;
-    if (tpl.subject && (!subject.trim() || mode === 'new')) subject = tpl.subject;
+    const ctx = variables();
+    if (tpl.subject && (!subject.trim() || mode === 'new')) subject = fillVariables(tpl.subject, ctx);
+    const text = fillVariables(tpl.body, ctx);
     const el = bodyEl;
     // İmleç konumu odak gitse de textarea'da kalır.
     const at = el ? el.selectionStart : 0;
-    body = body.slice(0, at) + tpl.body + body.slice(at);
+    body = body.slice(0, at) + text + body.slice(at);
     queueMicrotask(() => {
       el?.focus();
-      el?.setSelectionRange(at + tpl.body.length, at + tpl.body.length);
+      el?.setSelectionRange(at + text.length, at + text.length);
     });
   }
 
@@ -238,6 +253,7 @@
       sendAt: null,
       forwardFrom,
       draftId,
+      followUpAt,
     };
   }
 
@@ -624,6 +640,9 @@
     {:else}
       <span class="meta">{t('read.sendHint')}</span>
     {/if}
+    {#if followUpAt != null && !queued}
+      <span class="status follow" role="status"><Icon name="followUp" size={14} />{t('follow.composeStatus', { when: when(followUpAt) })}<button class="link" onclick={() => (followUpAt = null)}>{t('act.cancel')}</button></span>
+    {/if}
     <span class="grow"></span>
     <button class="btn-icon" aria-label={t('compose.discard')} title={t('compose.discard')} disabled={locked} onclick={discard}><Icon name="trash" /></button>
     <div class="split">
@@ -641,6 +660,13 @@
               <span class="meta num">{when(o.at)}</span>
             </button>
           {/each}
+          <FollowUpMenu
+            embedded
+            current={followUpAt}
+            onpick={(at) => ((followUpAt = at), (laterOpen = false))}
+            onclear={followUpAt != null ? () => ((followUpAt = null), (laterOpen = false)) : undefined}
+            onclose={() => (laterOpen = false)}
+          />
         </div>
       {/if}
     </div>
@@ -857,6 +883,10 @@
 
   .status :global(.icon) {
     color: var(--ok);
+  }
+
+  .status.follow :global(.icon) {
+    color: var(--accent-text);
   }
 
   .status .link {

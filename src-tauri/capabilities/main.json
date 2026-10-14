@@ -65,6 +65,10 @@
     "allow-messages-move-to",
     "allow-outbox-list",
     "allow-outbox-send-now",
-    "allow-outbox-to-draft"
+    "allow-outbox-to-draft",
+    "allow-followup-set",
+    "allow-followups-list",
+    "allow-screener-list",
+    "allow-screener-decide"
   ]
 }

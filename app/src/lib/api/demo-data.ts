@@ -236,6 +236,7 @@ export function createDemoData(now = new Date()): DemoData {
       hasAttachments: !!s.attachments?.length,
       category: s.category,
       snoozedUntil: null,
+      followUp: null,
       cc: s.cc ?? [],
       bcc: [],
       replyTo: [],

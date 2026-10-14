@@ -61,6 +61,10 @@ fn main() {
         "outbox_list",
         "outbox_send_now",
         "outbox_to_draft",
+        "followup_set",
+        "followups_list",
+        "screener_list",
+        "screener_decide",
     ];
     tauri_build::try_build(
         tauri_build::Attributes::new()

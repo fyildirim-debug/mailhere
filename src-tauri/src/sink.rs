@@ -50,6 +50,11 @@ impl EventSink for TauriSink {
         let Some(messages) = crate::rules::before_notify(&self.app, account, messages) else {
             return;
         };
+        // Yeni posta bir yanıt olabilir: yanıtlanan hatırlatmalar kapanır.
+        crate::followups::on_new_mail(&self.app);
+        // Yeni gönderici eleği kurallardan sonra, bildirimden önce: elenen
+        // posta gelen kutusunda görünmez ve kart açmaz (`screener.rs`).
+        let messages = crate::screener::screen(&self.app, account, messages);
         let Some(state) = self.app.try_state::<AppState>() else {
             return;
         };

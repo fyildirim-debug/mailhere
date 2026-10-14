@@ -66,6 +66,10 @@ export const icons = {
   grid: '<rect x="4.5" y="4.5" width="6.5" height="6.5" rx="1"/><rect x="13" y="4.5" width="6.5" height="6.5" rx="1"/><rect x="4.5" y="13" width="6.5" height="6.5" rx="1"/><rect x="13" y="13" width="6.5" height="6.5" rx="1"/>',
   dot: '<circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/>',
   sync: '<path d="M12 4v4M12 16v4M4 12h4M16 12h4"/>',
+  // Yanıt hatırlatması: dönen ok ve küçük saat.
+  followUp: '<path d="M9 6.5L3.5 12 9 17.5"/><path d="M3.5 12h7.5"/><circle cx="16.5" cy="15" r="4"/><path d="M16.5 13.2v1.9l1.3.9"/>',
+  // Elek: delikli süzgeç.
+  sieve: '<path d="M3.5 7.5h17"/><path d="M5.5 7.5l1.6 8.6A2 2 0 0 0 9.1 17.8h5.8a2 2 0 0 0 2-1.7l1.6-8.6"/><circle cx="10" cy="11.5" r=".9" fill="currentColor"/><circle cx="14" cy="11.5" r=".9" fill="currentColor"/><circle cx="12" cy="14.5" r=".9" fill="currentColor"/>',
 } as const;
 
 export type IconName = keyof typeof icons;

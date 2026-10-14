@@ -151,6 +151,7 @@ mod tests {
             has_attachments: false,
             category,
             snoozed_until: None,
+            follow_up: None,
         }
     }
 

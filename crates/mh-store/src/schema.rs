@@ -202,12 +202,55 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX rule_forwards_at ON rule_forwards(rule_id, at);
     "#,
+    // 8: liste geçişi (ayrı dalda); birleştirmede gerçek geçişle değiştirilir.
+    "-- yer tutucu: liste geçişi (ayrı dalda)",
+    // 9: yanıt hatırlatmaları ve yeni gönderici eleği.
+    r#"
+    -- Gönderilmiş postaya kurulu yanıt hatırlatması. Posta silinince düşer.
+    -- `fired_at`: süresi doldu ve posta gelen kutusuna "Yanıt bekleniyor"
+    -- işaretiyle düştü; NULL ise henüz bekliyor.
+    CREATE TABLE followups (
+        message_id         INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+        account_id         TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        message_id_header  TEXT,
+        thread_id          TEXT NOT NULL,
+        due_at             INTEGER NOT NULL,
+        created_at         INTEGER NOT NULL,
+        fired_at           INTEGER
+    );
+    CREATE INDEX followups_due ON followups(due_at);
+
+    -- Bilinen göndericiler: gönderilen postaların alıcıları ('sent') ve
+    -- elekten kabul edilenler ('accepted'). Hesap başına tutulur.
+    CREATE TABLE known_senders (
+        account_id  TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        email       TEXT NOT NULL,
+        source      TEXT NOT NULL,
+        at          INTEGER NOT NULL,
+        PRIMARY KEY (account_id, email)
+    );
+
+    -- Elekte bekleyen postalar: gelen kutusunda görünmez, kart açmaz.
+    CREATE TABLE screened (
+        message_id  INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+        account_id  TEXT NOT NULL,
+        email       TEXT NOT NULL,
+        at          INTEGER NOT NULL
+    );
+    CREATE INDEX screened_sender ON screened(account_id, email);
+
+    -- Bilinen göndericilerin mevcut Gönderilenler'den bir kez doldurulduğu.
+    CREATE TABLE screener_state (
+        id          INTEGER PRIMARY KEY CHECK (id = 1),
+        backfilled  INTEGER NOT NULL DEFAULT 0
+    );
+    "#,
 ];
 
 /// Dallar ayrı geliştirilirken ana dalın ara sürümleri bazı geçişleri yer
 /// tutucu olarak uyguladı (`user_version` ilerledi, tablolar oluşmadı). Bu
 /// geçişler, varlığı denetlenen tablo yoksa sonradan uygulanır.
-const PLACEHOLDER_REPAIRS: &[(usize, &str)] = &[(3, "actions")];
+const PLACEHOLDER_REPAIRS: &[(usize, &str)] = &[(3, "actions"), (9, "followups")];
 
 fn table_exists(conn: &Connection, name: &str) -> rusqlite::Result<bool> {
     conn.query_row(
@@ -268,6 +311,28 @@ mod tests {
             .unwrap();
         conn.prepare("SELECT nosync FROM mailboxes").unwrap();
         // İkinci açılışta yeniden uygulanmaz (sütunlar zaten var).
+        migrate(&mut conn).unwrap();
+    }
+
+    #[test]
+    fn hatirlatma_ve_elek_tablolari_olusur() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        migrate(&mut conn).unwrap();
+        for t in ["followups", "known_senders", "screened", "screener_state"] {
+            assert!(table_exists(&conn, t).unwrap(), "{t}");
+        }
+        // 9. geçiş yer tutucuyla atlanmışsa sonradan uygulanır.
+        let mut conn = Connection::open_in_memory().unwrap();
+        for (i, sql) in MIGRATIONS.iter().enumerate() {
+            conn.execute_batch(if i == 8 { "-- yer tutucu" } else { sql })
+                .unwrap();
+        }
+        conn.pragma_update(None, "user_version", MIGRATIONS.len() as i64)
+            .unwrap();
+        assert!(!table_exists(&conn, "followups").unwrap());
+        migrate(&mut conn).unwrap();
+        assert!(table_exists(&conn, "followups").unwrap());
+        assert!(table_exists(&conn, "screened").unwrap());
         migrate(&mut conn).unwrap();
     }
 

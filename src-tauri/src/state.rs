@@ -220,6 +220,9 @@ pub fn setup(app: &mut App, rt: tokio::runtime::Handle) -> Result<(), Box<dyn st
     sync.start_all().map_err(|e| e.message)?;
     jmap.start_all().map_err(|e| e.message)?;
     rt.spawn(crate::sink::snooze_ticker(handle.clone()));
+    // Yanıt hatırlatmaları: açılışta kaçan süreler değerlendirilir, sonra dakikada bir.
+    rt.spawn(crate::followups::ticker(handle.clone()));
+    crate::screener::start(&handle, &rt);
     crate::tray::refresh(&handle);
 
     // Tanıtım kipinde ekran görüntüsü otomasyonu: N saniye sonra örnek kart.

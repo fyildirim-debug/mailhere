@@ -160,6 +160,12 @@ export interface MessageSummary {
   hasAttachments: boolean;
   category: Category;
   snoozedUntil: Millis | null;
+  /**
+   * Gönderilmiş postada açık yanıt hatırlatmasının anı; yoksa null. Süresi
+   * geçmişse (followUp <= şimdi) posta "Yanıt bekleniyor" işaretiyle gelen
+   * kutusunun üstünde görünür.
+   */
+  followUp: Millis | null;
 }
 
 export interface Attachment {
@@ -213,7 +219,11 @@ export type View =
   | { kind: 'sent' }
   | { kind: 'archive' }
   | { kind: 'trash' }
-  | { kind: 'mailbox'; id: string };
+  | { kind: 'mailbox'; id: string }
+  /** Yanıt hatırlatması kurulmuş gönderilmiş postalar. */
+  | { kind: 'followups' }
+  /** Elekte bekleyen, ilk kez yazan göndericilerin postaları. */
+  | { kind: 'screener' };
 
 /** Listede hızlı süzgeç. */
 export type ListOnly = 'unread' | 'starred' | 'attachments';
@@ -239,6 +249,10 @@ export interface Counts {
   /** Giden kutusunda bekleyen (planlanmış) gönderimler. */
   scheduled: number;
   perAccountUnread: Record<AccountId, number>;
+  /** Açık yanıt hatırlatmaları (süresi gelen ve gelmeyen). */
+  followUps: number;
+  /** Elekte bekleyen postalar. */
+  screener: number;
 }
 
 export type MoveTarget = 'inbox' | 'archive' | 'trash';
@@ -259,6 +273,35 @@ export interface OutgoingMessage {
   forwardFrom?: MessageId | null;
   /** Gönderilince silinecek ya da kaydederken yerine yazılacak taslak. */
   draftId?: MessageId | null;
+  /** Yanıt gelmezse bu anda hatırlat; gönderim tamamlanınca Gönderilenler'deki kopyaya kurulur. */
+  followUpAt?: Millis | null;
+}
+
+/** Gönderilmiş bir postaya kurulu yanıt hatırlatması. */
+export interface FollowUp {
+  /** Gönderilmiş postanın yerel kimliği. */
+  id: MessageId;
+  accountId: AccountId;
+  /** Hatırlatma anı. */
+  at: Millis;
+  createdAt: Millis;
+  subject: string;
+  to: Address[];
+}
+
+/** Elekte bekleyen bir gönderici (hesap başına). */
+export interface ScreenedSender {
+  accountId: AccountId;
+  /** Küçük harfli adres. */
+  email: string;
+  /** En son postadaki görünen ad. */
+  name: string | null;
+  /** Elekteki posta sayısı. */
+  count: number;
+  /** En son postanın tarihi. */
+  latest: Millis;
+  /** En son postanın konusu. */
+  subject: string;
 }
 
 export interface OutboxItem {
@@ -378,6 +421,8 @@ export interface Settings {
   /** Koyu temada kendi zemini olmayan postalar koyu zeminde gösterilir. */
   darkMail: boolean;
   templates: Template[];
+  /** Yeni gönderici eleği: ilk kez yazanların postası gelen kutusu yerine elekte bekler. */
+  screener: boolean;
 }
 
 /** Hızlı yanıt sınırları (arka uçla aynı). */
@@ -427,6 +472,7 @@ export const defaultSettings: Settings = {
   quickReplies: null,
   darkMail: true,
   templates: [],
+  screener: false,
 };
 
 // ------------------------------------------------------------------- olaylar
@@ -591,6 +637,16 @@ export interface Commands {
   update_check: [Record<string, never>, UpdateInfo | null];
   /** İndirir, kurar ve uygulamayı yeniden başlatır. */
   update_install: [Record<string, never>, null];
+
+  // Yanıt hatırlatmaları
+  /** Gönderilmiş postaya hatırlatma kurar (`at`) ya da kaldırır (null). */
+  followup_set: [{ id: MessageId; at: Millis | null }, null];
+  followups_list: [Record<string, never>, FollowUp[]];
+
+  // Yeni gönderici eleği
+  screener_list: [Record<string, never>, ScreenedSender[]];
+  /** Kabul: gönderici bilinir, postaları gelen kutusuna döner. Engelle: elekteki postalar çöpe gider. */
+  screener_decide: [{ email: string; accountId: AccountId; allow: boolean }, null];
 }
 
 export type CommandName = keyof Commands;

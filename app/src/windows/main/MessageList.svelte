@@ -110,7 +110,18 @@
     sent: 'nav.sent',
     archive: 'nav.archive',
     trash: 'nav.trash',
+    followups: 'nav.followups',
+    screener: 'nav.screener',
   };
+
+  /** Boş durum metni: görünüme özel, yoksa genel. */
+  const empty = $derived.by((): { title: MessageKey; body: MessageKey } => {
+    if (mail.search == null && !mail.category && !mail.only) {
+      if (mail.view.kind === 'followups') return { title: 'follow.emptyTitle', body: 'follow.emptyBody' };
+      if (mail.view.kind === 'screener') return { title: 'screen.emptyTitle', body: 'screen.emptyBody' };
+    }
+    return { title: 'list.emptyTitle', body: mail.category || mail.only ? 'list.emptyFilteredBody' : 'list.emptyBody' };
+  });
 
   const title = $derived.by(() => {
     if (mail.search != null) return t('list.searchTitle', { q: mail.search });
@@ -199,8 +210,8 @@
     {:else if !mail.loading}
       <div class="empty">
         <Icon name="check" size={28} />
-        <div class="empty-title">{t('list.emptyTitle')}</div>
-        <div class="empty-body">{mail.category || mail.only ? t('list.emptyFilteredBody') : t('list.emptyBody')}</div>
+        <div class="empty-title">{t(empty.title)}</div>
+        <div class="empty-body">{t(empty.body)}</div>
       </div>
     {/if}
   </div>
