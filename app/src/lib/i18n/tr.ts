@@ -805,6 +805,8 @@ export const tr = {
   'mob.settings.keystore': 'Parolalar ve giriş jetonları yalnız Android anahtar deposunda (Keystore) şifreli tutulur; hiçbir sunucumuz yok.',
   'mob.settings.accNameHint': 'Çekmecede ve hesap listesinde görünür.',
   'mob.settings.accNotifyHint': 'Kapalıysa bu hesabın yeni postaları için bildirim çıkmaz.',
+  'mob.settings.notify': 'Bildirim ne zaman gelsin?',
+  'mob.settings.screenerHint': 'Daha önce yazışmadığın göndericinin postası gelen kutusu yerine Elek\'te bekler ve bildirim göstermez. Kabul edince bu ve sonraki postaları gelen kutusuna gelir.',
   'mob.settings.tagLead': 'Postalarını kendi renkli etiketlerinle gruplarsın. Etiketler yalnız bu telefonda tutulur; sunucuya yazılmaz.',
   'mob.settings.pinLocal': 'Sabitleme yalnız bu telefonda tutulur; sunucuya yazılmaz.',
   'mob.onboarding.keyring': 'Android anahtar deposunda şifreli saklanır; bu telefondan çıkmaz.',

@@ -790,6 +790,8 @@ export const en: Record<MessageKey, string> = {
   'mob.settings.keystore': 'Passwords and sign-in tokens are kept encrypted in the Android keystore only; there is no server of ours.',
   'mob.settings.accNameHint': 'Shown in the drawer and the account list.',
   'mob.settings.accNotifyHint': 'When off, new mail for this account shows no notification.',
+  'mob.settings.notify': 'When should a notification appear?',
+  'mob.settings.screenerHint': 'Mail from someone you have never written to waits in the Screener instead of the inbox and shows no notification. Once you allow them, this and future mail lands in the inbox.',
   'mob.settings.tagLead': 'Group your mail with your own coloured tags. Tags stay on this phone only; nothing is written to the server.',
   'mob.settings.pinLocal': 'Pinning stays on this phone only; nothing is written to the server.',
   'mob.onboarding.keyring': 'Stored encrypted in the Android keystore; it never leaves this phone.',

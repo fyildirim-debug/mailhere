@@ -54,8 +54,8 @@
 
 <h3 class="set-h">{t('set.notifyWhat')}</h3>
 <div class="set-row top">
-  <span class="set-name">{t('set.notify')}<span class="set-hint">{t(mobile ? 'mob.settings.notifyHint' : 'set.notifyHint')}</span></span>
-  <div class="seg-track" role="radiogroup" aria-label={t('set.notify')}>
+  <span class="set-name">{t(mobile ? 'mob.settings.notify' : 'set.notify')}<span class="set-hint">{t(mobile ? 'mob.settings.notifyHint' : 'set.notifyHint')}</span></span>
+  <div class="seg-track" role="radiogroup" aria-label={t(mobile ? 'mob.settings.notify' : 'set.notify')}>
     {#each modes as [v, k] (v)}
       <button class="seg" role="radio" aria-checked={s.notify === v} onclick={() => updateSettings({ notify: v })}>{t(k)}</button>
     {/each}
@@ -89,7 +89,7 @@
 
 <h3 class="set-h">{t('set.screenerTitle')}</h3>
 <div class="set-row top">
-  <span class="set-name">{t('set.screener')}<span class="set-hint">{t('set.screenerHint')}</span></span>
+  <span class="set-name">{t('set.screener')}<span class="set-hint">{t(mobile ? 'mob.settings.screenerHint' : 'set.screenerHint')}</span></span>
   <input
     type="checkbox"
     role="switch"
