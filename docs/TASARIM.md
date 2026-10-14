@@ -115,7 +115,8 @@ Avatar; gönderici adresinden deterministik seçilen 9 tonlu paletten gelir (zem
 | Yumuşak düğme | `--paper` zemin, `--line-strong` kenar, 34 px. |
 | İkon düğme | 34×34 (satır içinde 28×28), saydam zemin, `--ink-2` ikon; üzerine gelince `--hover` ve `--ink`. Her ikon düğmede `aria-label` ve kısayollu `title`. |
 | Segment (akıllı süzgeç) | `--ground` iz, 3 px iç boşluk; seçili segment `--paper` + `--shadow-sm`. |
-| Kenar çubuğu öğesi | 34 px, köşe 8; etkin öğe `--paper` zemin (koyuda `--raised`). Sayaç 12/500 sağda. |
+| Kenar çubuğu | Sıra: Yeni posta (kısayol harfi düğmenin içinde, çipsiz) · çok hesapta **hesap kapsamı** ("Tüm hesaplar" + her hesap; 40 px iki satırlı: ad / alan adı, sağda okunmamış) · kapsama göre daralan görünümler · her hesabın başlığı altında yalnız **istenmeyen + özel klasörler** (rol klasörleri görünümlerle sunulduğu için yinelenmez; "Tüm hesaplar"da hesap grupları katlanır) · etiketler · kayıtlı aramalar; tek hesapta kapsam bölümü yoktur, "Hesap ekle" listenin sonunda. Kaydırma çubuğu ince ve sessizdir (`.scroll-quiet`: yalnız üzerine gelince ya da kaydırırken). |
+| Kenar çubuğu öğesi | 34 px, köşe 8; etkin öğe `--paper` zemin (koyuda `--raised`). Sayaç 12/500 sağda, `tabular-nums`, tek sütunda hizalı. |
 | Liste satırı | 3 satır (gönderen+saat, konu, önizleme), 8 px okunmamış noktası, 34 px avatar; seçili `--sel`; üzerine gelince sağ üstte Arşivle / Ertele / Sil eylemleri saati örter. |
 | Okuma alanı | araç çubuğu 52 px; konu 24/600; önceki iletiler tek satıra katlanır; gövde 68ch; ekler 252 px kartlar; altta hızlı yanıt kutusu. |
 | Uzak içerik şeridi | koruma ikonu + "Uzak görseller ve izleme pikselleri engellendi" + "Bu göndericiye izin ver". |

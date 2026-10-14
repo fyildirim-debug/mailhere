@@ -1,13 +1,18 @@
 <script lang="ts">
+  // Kenar çubuğu (232 px, --ground). Yukarıdan aşağı: Yeni posta; hesap
+  // kapsamı (yalnız çok hesapta: "Tüm hesaplar" ya da bir hesap); kapsama göre
+  // daralan görünümler; her hesabın istenmeyen + özel klasörleri; etiketler;
+  // kayıtlı aramalar. Rol klasörleri görünümlerle sunulduğu için ağaçta
+  // yinelenmez. Altta güncelleme kartı ve eşitleme durumu + Ayarlar.
   import type { Account, Mailbox, SavedSearch, Tag } from '../../lib/api';
   import { call, toAppError, SAVED_SEARCH_NAME_CHARS } from '../../lib/api';
   import { t } from '../../lib/i18n/index.svelte';
   import CertDialog, { type CertTarget } from '../../lib/mail/CertDialog.svelte';
-  import { flatten, folderIcon, folderLabel, folderTree } from '../../lib/mail/folders';
+  import { flatten, folderIcon, folderLabel } from '../../lib/mail/folders';
   import {
-    accountActive,
     accountHint,
     COLLAPSED_FOLDERS_KEY,
+    folderAccounts,
     folderActive,
     folderCount,
     folderTarget,
@@ -17,6 +22,9 @@
     savedSearchActive,
     saveSet,
     scheduledVisible,
+    scopeActive,
+    scopeView,
+    sideTree,
     tagActive,
     toggled,
     VIEW_ITEMS,
@@ -27,6 +35,7 @@
   import Icon from '../../lib/ui/Icon.svelte';
   import Menu, { type MenuItem } from '../../lib/ui/Menu.svelte';
   import NamePrompt from '../../lib/ui/NamePrompt.svelte';
+  import { quietScroll } from '../../lib/ui/scroll';
   import { showToast } from '../../lib/ui/toast.svelte';
   import { mail, openSettings, reloadMailboxes, searchAll, setView, syncLabel } from '../../lib/stores/mail.svelte';
   import { settings, updateSettings } from '../../lib/stores/settings.svelte';
@@ -34,6 +43,18 @@
   import { installUpdate, update } from '../../lib/stores/update.svelte';
 
   // Görünüm listesi ve etkinlik kuralları mobil çekmeceyle ortak (lib/mail/nav.ts).
+
+  const multi = $derived(mail.accounts.length > 1);
+  /** Hesap kapsamı: depodaki `accountId`; `null` tüm hesaplar. */
+  const scope = $derived(mail.accountId);
+  /** Klasör bölümünde listelenen hesaplar (kapsamdaki ya da hepsi). */
+  const folderList = $derived(folderAccounts(mail.accounts, scope));
+  /** Hesap grupları yalnız "Tüm hesaplar" kapsamında ve çok hesapta katlanır. */
+  const collapsible = $derived(multi && scope == null);
+
+  function pickScope(id: string | null) {
+    setView(scopeView(mail), id);
+  }
 
   // ------------------------------------------------ açık hesaplar ve klasörler
   // Kişisel kolaylık: yalnız bu bilgisayarda, tarayıcı deposunda tutulur.
@@ -51,9 +72,7 @@
     saveSet(COLLAPSED_FOLDERS_KEY, shut);
   }
 
-  const trees = $derived(
-    Object.fromEntries(mail.accounts.map((a) => [a.id, flatten(folderTree(mail.mailboxes, a.id), shut)])),
-  );
+  const trees = $derived(Object.fromEntries(mail.accounts.map((a) => [a.id, flatten(sideTree(mail.mailboxes, a.id), shut)])));
 
   function openFolder(account: Account, b: Mailbox) {
     const target = folderTarget(account, b);
@@ -63,6 +82,16 @@
   // ------------------------------------------------------------ sağ tık menüsü
 
   let menu = $state<{ at: { x: number; y: number }; title: string; items: MenuItem[] } | null>(null);
+
+  function pointOf(e: MouseEvent | KeyboardEvent) {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    return e instanceof MouseEvent && e.clientX ? { x: e.clientX, y: e.clientY } : { x: r.left + 24, y: r.bottom };
+  }
+
+  /** Klavyeyle menü: Shift+F10 ya da menü tuşu. */
+  function menuKey(e: KeyboardEvent, show: (e: KeyboardEvent) => void) {
+    if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) show(e);
+  }
 
   async function hide(b: Mailbox) {
     try {
@@ -85,10 +114,8 @@
 
   function folderMenu(e: MouseEvent | KeyboardEvent, account: Account, b: Mailbox) {
     e.preventDefault();
-    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const at = e instanceof MouseEvent && e.clientX ? { x: e.clientX, y: e.clientY } : { x: r.left + 24, y: r.bottom };
     menu = {
-      at,
+      at: pointOf(e),
       title: folderLabel(b),
       items: [
         { label: t('side.open'), icon: 'folder', onclick: () => openFolder(account, b) },
@@ -101,29 +128,20 @@
 
   function accountMenu(e: MouseEvent | KeyboardEvent, account: Account) {
     e.preventDefault();
-    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const at = e instanceof MouseEvent && e.clientX ? { x: e.clientX, y: e.clientY } : { x: r.left + 24, y: r.bottom };
     menu = {
-      at,
+      at: pointOf(e),
       title: account.name,
       items: [
-        { label: open.has(account.id) ? t('side.collapse') : t('side.expand'), icon: 'folder', onclick: () => toggleAccount(account.id) },
         { label: t('side.syncNow'), icon: 'refresh', onclick: () => void call('sync_now') },
         { label: t('side.accountSettings'), icon: 'settings', onclick: () => openSettings(`account:${account.id}`) },
       ],
     };
   }
 
-  /** Klavyeyle menü: Shift+F10 ya da menü tuşu. */
-  function menuKey(e: KeyboardEvent, show: (e: KeyboardEvent) => void) {
-    if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) show(e);
-  }
-
   // ------------------------------------------------ etiketler ve kayıtlı aramalar
 
-  function pointOf(e: MouseEvent | KeyboardEvent) {
-    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    return e instanceof MouseEvent && e.clientX ? { x: e.clientX, y: e.clientY } : { x: r.left + 24, y: r.bottom };
+  function openTag(tg: Tag) {
+    setView({ kind: 'tag', id: tg.id }, scope);
   }
 
   function tagMenu(e: MouseEvent | KeyboardEvent, tg: Tag) {
@@ -132,7 +150,7 @@
       at: pointOf(e),
       title: tg.name,
       items: [
-        { label: t('tag.open'), icon: 'tag', onclick: () => setView({ kind: 'tag', id: tg.id }) },
+        { label: t('tag.open'), icon: 'tag', onclick: () => openTag(tg) },
         { label: t('tag.edit'), icon: 'settings', onclick: () => openSettings('tags') },
       ],
     };
@@ -173,6 +191,8 @@
     };
   }
 
+  // ------------------------------------------------------------------- durum
+
   const sync = $derived(syncLabel());
   let cert = $state<CertTarget[] | null>(null);
 
@@ -192,145 +212,188 @@
 </script>
 
 <nav class="side" aria-label={t('nav.label')}>
-  <button class="btn-primary compose" onclick={() => call('open_compose', { prefill: { mode: 'new', messageId: null } })}>
+  <button class="btn-primary compose" title="{t('act.compose')} (C)" onclick={() => call('open_compose', { prefill: { mode: 'new', messageId: null } })}>
     <Icon name="pen" />
-    <span>{t('act.compose')}</span>
-    <span class="kbd on-accent">C</span>
+    <span class="trunc">{t('act.compose')}</span>
+    <span class="key" aria-hidden="true">C</span>
   </button>
 
-  {#each VIEW_ITEMS as item (item.kind)}
-    {@const active = viewActive(item.kind, mail)}
-    {@const n = viewCount(item, mail.counts)}
-    {#if viewVisible(item, mail)}
-      <button class="nav" class:active aria-current={active ? 'page' : undefined} onclick={() => setView({ kind: item.kind })}>
-        <Icon name={item.icon} />
-        <span class="trunc">{t(item.label)}</span>
-        {#if n > 0}<span class="count num">{n}</span>{/if}
-      </button>
-    {/if}
-    {#if item.kind === 'drafts' && scheduledVisible(mail)}
-      {@const on = mail.screen === 'scheduled'}
-      <button class="nav" class:active={on} aria-current={on ? 'page' : undefined} onclick={() => (mail.screen = 'scheduled')}>
-        <Icon name="calendarClock" />
-        <span class="trunc">{t('nav.scheduled')}</span>
-        {#if mail.counts.scheduled > 0}<span class="count num">{mail.counts.scheduled}</span>{/if}
-      </button>
-    {/if}
-  {/each}
-
-  {#if tagStore.list.length}
-    <div class="group">
-      <span>{t('tag.title')}</span>
-      <button class="btn-icon small" aria-label={t('tag.manage')} title={t('tag.manage')} onclick={() => openSettings('tags')}>
-        <Icon name="settings" size={14} />
-      </button>
-    </div>
-    {#each tagStore.list as tg (tg.id)}
-      {@const on = tagActive(tg, mail)}
-      <button
-        class="nav"
-        class:active={on}
-        aria-current={on ? 'page' : undefined}
-        onclick={() => setView({ kind: 'tag', id: tg.id })}
-        oncontextmenu={(e) => tagMenu(e, tg)}
-        onkeydown={(e) => menuKey(e, (ev) => tagMenu(ev, tg))}
-      >
-        <span class="tdot" style:background={tg.color}></span>
-        <span class="trunc">{tg.name}</span>
-      </button>
-    {/each}
-  {/if}
-
-  {#if settings.value.savedSearches.length}
-    <div class="group"><span>{t('saved.nav')}</span></div>
-    {#each settings.value.savedSearches as s (s.id)}
-      {@const on = savedSearchActive(s.query, mail)}
-      <button
-        class="nav"
-        class:active={on}
-        aria-current={on ? 'page' : undefined}
-        title={t('saved.query', { q: s.query })}
-        onclick={() => searchAll(s.query)}
-        oncontextmenu={(e) => searchMenu(e, s)}
-        onkeydown={(e) => menuKey(e, (ev) => searchMenu(ev, s))}
-      >
-        <Icon name="bookmark" />
-        <span class="trunc">{s.name}</span>
-      </button>
-    {/each}
-  {/if}
-
-  <div class="group">
-    <span>{t('nav.accounts')}</span>
-    <button class="btn-icon small" aria-label={t('act.addAccount')} title={t('act.addAccount')} onclick={() => (mail.screen = 'onboarding')}>
-      <Icon name="plus" size={14} />
-    </button>
-  </div>
-  {#each mail.accounts as account (account.id)}
-    {@const expanded = open.has(account.id)}
-    {@const n = mail.counts.perAccountUnread[account.id] ?? 0}
-    {@const active = accountActive(account, expanded, mail)}
-    <div class="acc" class:active>
-      <button
-        class="disclose"
-        aria-expanded={expanded}
-        aria-label={t(expanded ? 'side.collapseNamed' : 'side.expandNamed', { name: account.name })}
-        onclick={() => toggleAccount(account.id)}
-      >
-        <Icon name="chevronRight" size={14} class={expanded ? 'turned' : ''} />
-      </button>
-      <button
-        class="acc-main"
-        title={`${account.name} · ${account.email}`}
-        aria-current={active ? 'page' : undefined}
-        onclick={() => setView({ kind: 'inbox' }, account.id)}
-        oncontextmenu={(e) => accountMenu(e, account)}
-        onkeydown={(e) => menuKey(e, (ev) => accountMenu(ev, account))}
-      >
-        <span class="dot" style:background={account.color}></span>
-        <!-- Ad sığmazsa kısalır; alan adı yer kalmazsa alt satıra iner ve gizlenir. -->
-        <span class="acc-text">
-          <span class="trunc acc-name">{account.name}</span>
-          <span class="trunc domain">{accountHint(account)}</span>
-        </span>
-        {#if n > 0 && !expanded}<span class="count num">{n}</span>{/if}
-      </button>
-    </div>
-    {#if expanded}
-      <div class="tree" role="group" aria-label={t('side.folders', { name: account.name })}>
-        {#each trees[account.id] ?? [] as node (node.mailbox.id)}
-          {@const b = node.mailbox}
-          {@const on = folderActive(account, b, mail)}
-          <div class="folder" class:active={on} style:--depth={node.depth}>
-            {#if node.children.length}
-              <button
-                class="disclose small"
-                aria-expanded={!shut.has(b.id)}
-                aria-label={t(shut.has(b.id) ? 'side.expandNamed' : 'side.collapseNamed', { name: folderLabel(b) })}
-                onclick={() => toggleFolder(b.id)}
-              >
-                <Icon name="chevronRight" size={12} class={shut.has(b.id) ? '' : 'turned'} />
-              </button>
-            {:else}
-              <span class="disclose small" aria-hidden="true"></span>
-            {/if}
-            <button
-              class="folder-main"
-              aria-current={on ? 'page' : undefined}
-              onclick={() => openFolder(account, b)}
-              oncontextmenu={(e) => folderMenu(e, account, b)}
-              onkeydown={(e) => menuKey(e, (ev) => folderMenu(ev, account, b))}
-            >
-              <Icon name={folderIcon(b)} size={16} />
-              <span class="trunc grow">{folderLabel(b)}</span>
-              {#if folderCount(b) > 0}<span class="count num">{folderCount(b)}</span>{/if}
-            </button>
-          </div>
+  <div class="scroll scroll-quiet" use:quietScroll>
+    {#if multi}
+      <div class="group">
+        <span class="group-title">{t('nav.accounts')}</span>
+        <button class="btn-icon small" aria-label={t('act.addAccount')} title={t('act.addAccount')} onclick={() => (mail.screen = 'onboarding')}>
+          <Icon name="plus" size={14} />
+        </button>
+      </div>
+      <div class="scopes" role="group" aria-label={t('nav.accounts')}>
+        {#snippet scopeRow(id: string | null, name: string, hint: string, color: string | null, n: number, account: Account | null)}
+          {@const on = scopeActive(id, mail)}
+          <button
+            class="nav acc"
+            class:active={on}
+            aria-pressed={on}
+            title={account ? `${account.name} · ${account.email}` : undefined}
+            onclick={() => pickScope(id)}
+            oncontextmenu={account ? (e) => accountMenu(e, account) : undefined}
+            onkeydown={account ? (e) => menuKey(e, (ev) => accountMenu(ev, account)) : undefined}
+          >
+            <span class="dot" class:all={!color} style:background={color ?? undefined}></span>
+            <span class="acc-text">
+              <span class="trunc">{name}</span>
+              <span class="trunc hint">{hint}</span>
+            </span>
+            {#if n > 0}<span class="count num">{n}</span>{/if}
+          </button>
+        {/snippet}
+        {@render scopeRow(null, t('nav.allAccounts'), t('nav.accountsCount', { n: mail.accounts.length }), null, 0, null)}
+        {#each mail.accounts as account (account.id)}
+          {@render scopeRow(account.id, account.name, accountHint(account), account.color, mail.counts.perAccountUnread[account.id] ?? 0, account)}
         {/each}
-        <button class="link manage" onclick={() => openSettings(`account:${account.id}`)}>{t('side.manageFolders')}</button>
       </div>
     {/if}
-  {/each}
+
+    <div class="views">
+      {#each VIEW_ITEMS as item (item.kind)}
+        {@const active = viewActive(item.kind, mail)}
+        {@const n = viewCount(item, mail.counts, scope)}
+        {#if viewVisible(item, mail)}
+          <button class="nav" class:active aria-current={active ? 'page' : undefined} onclick={() => setView({ kind: item.kind }, scope)}>
+            <Icon name={item.icon} />
+            <span class="trunc">{t(item.label)}</span>
+            {#if n > 0}<span class="count num">{n}</span>{/if}
+          </button>
+        {/if}
+        {#if item.kind === 'drafts' && scheduledVisible(mail)}
+          {@const on = mail.screen === 'scheduled'}
+          <button class="nav" class:active={on} aria-current={on ? 'page' : undefined} onclick={() => (mail.screen = 'scheduled')}>
+            <Icon name="calendarClock" />
+            <span class="trunc">{t('nav.scheduled')}</span>
+            {#if mail.counts.scheduled > 0}<span class="count num">{mail.counts.scheduled}</span>{/if}
+          </button>
+        {/if}
+      {/each}
+    </div>
+
+    <!-- Klasörler: hesap başlığı altında istenmeyen + özel klasörler. -->
+    {#each folderList as account (account.id)}
+      {@const isOpen = !collapsible || open.has(account.id)}
+      <div class="group">
+        {#if collapsible}
+          <button
+            class="group-toggle"
+            aria-expanded={isOpen}
+            aria-label={t(isOpen ? 'side.collapseNamed' : 'side.expandNamed', { name: account.name })}
+            title={`${account.name} · ${account.email}`}
+            onclick={() => toggleAccount(account.id)}
+            oncontextmenu={(e) => accountMenu(e, account)}
+            onkeydown={(e) => menuKey(e, (ev) => accountMenu(ev, account))}
+          >
+            <span class="dot" style:background={account.color}></span>
+            <span class="trunc grow">{account.name}</span>
+            <Icon name="chevronRight" size={14} class="chev {isOpen ? 'turned' : ''}" />
+          </button>
+        {:else}
+          <!-- Tek hesapta kimlik yalnız burada görünür; çok hesapta kapsam satırları zaten söyler. -->
+          <span class="group-title" title={`${account.name} · ${account.email}`}>
+            <span class="dot" style:background={account.color}></span>
+            <span class="trunc" class:grow={multi}>{account.name}</span>
+            {#if !multi}<span class="trunc hint grow">{accountHint(account)}</span>{/if}
+          </span>
+        {/if}
+        <button
+          class="btn-icon small"
+          aria-label={t('side.manageNamed', { name: account.name })}
+          title={t('side.manage')}
+          onclick={() => openSettings(`account:${account.id}`)}
+        >
+          <Icon name="settings" size={14} />
+        </button>
+      </div>
+      {#if isOpen}
+        <div class="tree" role="group" aria-label={t('side.folders', { name: account.name })}>
+          {#each trees[account.id] ?? [] as node (node.mailbox.id)}
+            {@const b = node.mailbox}
+            {@const on = folderActive(account, b, mail)}
+            <div class="folder" class:active={on} style:--depth={node.depth}>
+              {#if node.children.length}
+                <button
+                  class="disclose"
+                  aria-expanded={!shut.has(b.id)}
+                  aria-label={t(shut.has(b.id) ? 'side.expandNamed' : 'side.collapseNamed', { name: folderLabel(b) })}
+                  onclick={() => toggleFolder(b.id)}
+                >
+                  <Icon name="chevronRight" size={14} class="chev {shut.has(b.id) ? '' : 'turned'}" />
+                </button>
+              {:else}
+                <span class="disclose" aria-hidden="true"></span>
+              {/if}
+              <button
+                class="nav folder-main"
+                aria-current={on ? 'page' : undefined}
+                onclick={() => openFolder(account, b)}
+                oncontextmenu={(e) => folderMenu(e, account, b)}
+                onkeydown={(e) => menuKey(e, (ev) => folderMenu(ev, account, b))}
+              >
+                <Icon name={folderIcon(b)} />
+                <span class="trunc">{folderLabel(b)}</span>
+                {#if folderCount(b) > 0}<span class="count num">{folderCount(b)}</span>{/if}
+              </button>
+            </div>
+          {/each}
+        </div>
+      {/if}
+    {/each}
+
+    {#if tagStore.list.length}
+      <div class="group">
+        <span class="group-title">{t('tag.title')}</span>
+        <button class="btn-icon small" aria-label={t('tag.manage')} title={t('tag.manage')} onclick={() => openSettings('tags')}>
+          <Icon name="settings" size={14} />
+        </button>
+      </div>
+      {#each tagStore.list as tg (tg.id)}
+        {@const on = tagActive(tg, mail)}
+        <button
+          class="nav"
+          class:active={on}
+          aria-current={on ? 'page' : undefined}
+          onclick={() => openTag(tg)}
+          oncontextmenu={(e) => tagMenu(e, tg)}
+          onkeydown={(e) => menuKey(e, (ev) => tagMenu(ev, tg))}
+        >
+          <span class="tdot" style:background={tg.color}></span>
+          <span class="trunc">{tg.name}</span>
+        </button>
+      {/each}
+    {/if}
+
+    {#if settings.value.savedSearches.length}
+      <div class="group"><span class="group-title">{t('saved.nav')}</span></div>
+      {#each settings.value.savedSearches as s (s.id)}
+        {@const on = savedSearchActive(s.query, mail)}
+        <button
+          class="nav"
+          class:active={on}
+          aria-current={on ? 'page' : undefined}
+          title={t('saved.query', { q: s.query })}
+          onclick={() => searchAll(s.query)}
+          oncontextmenu={(e) => searchMenu(e, s)}
+          onkeydown={(e) => menuKey(e, (ev) => searchMenu(ev, s))}
+        >
+          <Icon name="bookmark" />
+          <span class="trunc">{s.name}</span>
+        </button>
+      {/each}
+    {/if}
+
+    {#if !multi}
+      <button class="nav quiet" onclick={() => (mail.screen = 'onboarding')}>
+        <Icon name="plus" />
+        <span class="trunc">{t('act.addAccount')}</span>
+      </button>
+    {/if}
+  </div>
 
   {#if update.info && !update.dismissed}
     <div class="update" role="status">
@@ -388,24 +451,51 @@
     width: 232px;
     display: flex;
     flex-direction: column;
-    gap: 2px;
-    padding: 14px 10px 10px;
+    padding: 12px 0 8px;
     background: var(--ground);
-    overflow-y: auto;
   }
 
+  /* Yeni posta: kenar çubuğunun tek birincil düğmesi; kısayol harfi sakin, çipsiz. */
   .compose {
+    flex: none;
     justify-content: flex-start;
-    height: 40px;
-    margin-bottom: 14px;
+    margin: 0 10px 10px;
+    padding: 0 12px;
   }
 
-  .on-accent {
+  .key {
     margin-left: auto;
-    background: transparent;
-    border-color: color-mix(in srgb, var(--accent-ink) 40%, transparent);
-    color: inherit;
+    font-size: var(--fs-meta);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    color: color-mix(in srgb, var(--accent-ink) 72%, transparent);
   }
+
+  /* Kaydırılan bölüm: sağda ince çubuk için yer ayrılır (scrollbar-gutter). */
+  .scroll {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding: 0 2px 8px 10px;
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+  }
+
+  .views,
+  .scopes,
+  .tree {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+
+  .scopes {
+    margin-bottom: 8px;
+  }
+
+  /* ---------------------------------------------------------------- satırlar */
 
   .nav {
     display: flex;
@@ -413,7 +503,7 @@
     gap: 10px;
     width: 100%;
     height: 34px;
-    padding: 0 10px;
+    padding: 0 8px 0 10px;
     border: 0;
     border-radius: var(--r-icon);
     background: transparent;
@@ -433,7 +523,7 @@
     background: var(--paper);
     color: var(--ink);
     font-weight: 500;
-    box-shadow: 0 1px 2px rgba(20, 24, 40, 0.08);
+    box-shadow: var(--seg-on-shadow);
   }
 
   :global(:root[data-theme='dark']) .nav.active {
@@ -441,11 +531,23 @@
     box-shadow: none;
   }
 
+  /* Sayaçlar sağda tek sütunda, eşit genişlikli rakamlarla. */
   .count {
+    flex: none;
     margin-left: auto;
+    min-width: 2ch;
     font-size: var(--fs-meta);
     font-weight: 500;
+    text-align: right;
     color: var(--ink-2);
+  }
+
+  .nav.active .count {
+    color: var(--ink);
+  }
+
+  .quiet {
+    margin-top: 12px;
   }
 
   /* Etiket rengi kullanıcı verisidir; ikon genişliğine (18 px) hizalanır. */
@@ -457,52 +559,169 @@
     border-radius: 50%;
   }
 
+  /* -------------------------------------------------------------- kapsam */
+
+  /* Hesap satırı iki satırlı: ad ve alan adı ayrı ayrı kısalır, hiçbiri kaybolmaz. */
+  .acc {
+    height: 40px;
+  }
+
+  .dot {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    margin: 0 5px;
+    border-radius: 50%;
+  }
+
+  /* "Tüm hesaplar": içi boş halka, hesap noktalarıyla aynı ölçü. */
+  .dot.all {
+    box-sizing: border-box;
+    border: 1.5px solid currentColor;
+  }
+
+  .acc-text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    line-height: 1.2;
+  }
+
+  .hint {
+    font-size: var(--fs-meta);
+    font-weight: 400;
+    color: var(--ink-2);
+  }
+
+  /* ----------------------------------------------------------- bölümler */
+
   .group {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    padding: 20px 4px 6px 10px;
+    gap: 4px;
+    height: 28px;
+    margin-top: 12px;
+    padding: 0 0 0 2px;
     font-size: var(--fs-meta);
     font-weight: 600;
     color: var(--ink-2);
   }
 
+  .group-title {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding-left: 8px;
+  }
+
+  .group-title .dot,
+  .group-toggle .dot {
+    margin: 0 4px 0 0;
+  }
+
+  .grow {
+    flex: 1;
+  }
+
+  /* Ardışık katlı başlıklar sıkı durur. */
+  .group + .group {
+    margin-top: 4px;
+  }
+
   .group .btn-icon {
-    color: var(--ink-3);
+    color: var(--ink-2);
   }
 
   .group .btn-icon:hover {
     color: var(--ink);
   }
 
-  .acc,
-  .folder {
+  /* Katlanır hesap başlığı: satırın tamamı aç/kapa düğmesi. */
+  .group-toggle {
+    flex: 1;
+    min-width: 0;
     display: flex;
     align-items: center;
-    border-radius: var(--r-icon);
-    color: var(--ink-2);
+    gap: 6px;
+    height: 28px;
+    padding: 0 6px 0 8px;
+    border: 0;
+    border-radius: var(--r-sm);
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
     transition:
       background var(--t-fast),
       color var(--t-fast);
   }
 
-  .acc:hover,
-  .folder:hover {
+  .group-toggle:hover {
     background: var(--hover);
     color: var(--ink);
   }
 
-  .acc.active,
-  .folder.active {
-    background: var(--paper);
-    color: var(--ink);
-    font-weight: 500;
-    box-shadow: 0 1px 2px rgba(20, 24, 40, 0.08);
+  :global(.side .chev) {
+    flex: none;
+    color: var(--ink-2);
+    transition: transform var(--t-fast) var(--ease);
   }
 
-  :global(:root[data-theme='dark']) .acc.active,
+  :global(.side .chev.turned) {
+    transform: rotate(90deg);
+  }
+
+  /* ------------------------------------------------------------ klasörler */
+
+  .folder {
+    display: flex;
+    align-items: center;
+    /* Alt klasörler 14 px içeri. */
+    padding-left: calc(var(--depth) * 14px);
+    border-radius: var(--r-icon);
+    transition: background var(--t-fast);
+  }
+
+  .folder:hover {
+    background: var(--hover);
+  }
+
+  .folder.active {
+    background: var(--paper);
+    box-shadow: var(--seg-on-shadow);
+  }
+
   :global(:root[data-theme='dark']) .folder.active {
     background: var(--raised);
+    box-shadow: none;
+  }
+
+  .folder.active .folder-main {
+    color: var(--ink);
+    font-weight: 500;
+  }
+
+  .folder.active .count {
+    color: var(--ink);
+  }
+
+  .folder-main {
+    flex: 1;
+    min-width: 0;
+    padding-left: 2px;
+  }
+
+  .folder:hover .folder-main {
+    color: var(--ink);
+  }
+
+  .folder.active .folder-main,
+  .folder-main:hover,
+  .folder:hover .folder-main {
+    background: transparent;
     box-shadow: none;
   }
 
@@ -510,106 +729,24 @@
     flex: none;
     display: grid;
     place-items: center;
-    width: 22px;
+    width: 24px;
     height: 34px;
-    margin-left: 2px;
     padding: 0;
     border: 0;
     border-radius: var(--r-sm);
     background: transparent;
-    color: var(--ink-3);
-  }
-
-  .disclose.small {
-    width: 18px;
-    height: 30px;
-    margin-left: 0;
-  }
-
-  .disclose:hover {
-    color: var(--ink);
-  }
-
-  .disclose :global(.icon) {
-    transition: transform var(--t-fast) var(--ease);
-  }
-
-  .disclose :global(.turned) {
-    transform: rotate(90deg);
-  }
-
-  .acc-main,
-  .folder-main {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    height: 34px;
-    padding: 0 10px 0 4px;
-    border: 0;
-    border-radius: var(--r-icon);
-    background: transparent;
-    color: inherit;
-    font-weight: inherit;
-    text-align: left;
-  }
-
-  .folder-main {
-    height: 30px;
-    gap: 8px;
-  }
-
-  .tree {
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-    margin: 2px 0 8px;
-  }
-
-  .folder {
-    /* Alt klasörler 14 px içeri; hesap okunun hizasından başlar. */
-    padding-left: calc(14px + var(--depth) * 14px);
-  }
-
-  .grow {
-    flex: 1;
-  }
-
-  .manage {
-    align-self: flex-start;
-    margin: 4px 0 0 46px;
-    font-size: var(--fs-meta);
-  }
-
-  .dot {
-    width: 8px;
-    height: 8px;
-    flex: none;
-    margin: 0 1px;
-    border-radius: 50%;
-  }
-
-  .acc-text {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    column-gap: 8px;
-    height: 22px;
-    overflow: hidden;
-  }
-
-  .domain {
-    flex: 1 1 64px;
-    font-size: var(--fs-meta);
     color: var(--ink-2);
   }
 
+  button.disclose:hover {
+    color: var(--ink);
+  }
+
+  /* ---------------------------------------------------------- güncelleme */
+
   .update {
-    margin-top: auto;
-    margin-bottom: 4px;
+    flex: none;
+    margin: 8px 10px 0;
     padding: 12px;
     border-radius: var(--r-card);
     background: var(--paper);
@@ -649,26 +786,31 @@
     margin-top: 10px;
   }
 
-  .update + .foot {
-    margin-top: 0;
-  }
+  /* ---------------------------------------------------------------- alt */
 
   .foot {
-    margin-top: auto;
+    flex: none;
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 12px 0 0 10px;
+    margin: 8px 10px 0;
+    padding-top: 8px;
+    border-top: 1px solid var(--line);
+  }
+
+  .foot .btn-icon {
+    margin-right: -6px;
   }
 
   .foot-text {
     flex: 1;
+    padding-left: 2px;
     font-size: var(--fs-meta);
     color: var(--ink-2);
   }
 
   .foot-text.warn {
-    padding: 0;
+    padding: 0 0 0 2px;
     text-align: left;
     color: var(--amber);
   }
@@ -677,6 +819,7 @@
     width: 7px;
     height: 7px;
     flex: none;
+    margin-left: 2px;
     border-radius: 50%;
     background: var(--ok);
   }
@@ -693,6 +836,12 @@
   @keyframes pulse {
     50% {
       opacity: 0.35;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    :global(.side .chev) {
+      transition: none;
     }
   }
 </style>

@@ -92,6 +92,38 @@ textarea {
   background: transparent;
 }
 
+/*
+ * Sessiz kaydırma çubuğu (kenar çubuğu, çekmece): ince; yalnız üzerine
+ * gelince ya da kaydırırken (`.scrolling`, lib/ui/scroll.ts) görünür.
+ * Standart özellikleri destekleyen motorlar onları, WebKit eski sözdizimini kullanır.
+ */
+.scroll-quiet {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+.scroll-quiet:hover,
+.scroll-quiet.scrolling {
+  scrollbar-color: var(--scroll) transparent;
+}
+
+.scroll-quiet::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.scroll-quiet::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.scroll-quiet:hover::-webkit-scrollbar-thumb,
+.scroll-quiet.scrolling::-webkit-scrollbar-thumb {
+  background-color: var(--scroll);
+}
+
 /* ------------------------------------------------------------ yardımcılar */
 
 .trunc {

@@ -37,7 +37,7 @@ test('kenar çubuğu: hesabın klasör ağacı açılır, alt klasör seçilir, 
   await expect(tree.getByRole('button', { name: 'Hukuk' })).toHaveCount(0);
   await expect(page.getByRole('status')).toContainText('Hukuk gizlendi');
 
-  await tree.getByRole('button', { name: 'Klasörleri düzenle' }).click();
+  await side(page).getByRole('button', { name: 'İş klasörlerini düzenle' }).click();
   await page.getByRole('tab', { name: 'Klasörler' }).click();
   const show = page.getByRole('switch', { name: 'Hukuk kenar çubuğunda görünsün' });
   await expect(show).not.toBeChecked();
