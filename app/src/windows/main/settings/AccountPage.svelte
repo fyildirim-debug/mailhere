@@ -1,7 +1,7 @@
 <script lang="ts">
   import { t, type MessageKey } from '../../../lib/i18n/index.svelte';
   import Icon from '../../../lib/ui/Icon.svelte';
-  import { mail, openSettings } from '../../../lib/stores/mail.svelte';
+  import { mail, openSettings, type AccountTab } from '../../../lib/stores/mail.svelte';
   import AccountFolders from './AccountFolders.svelte';
   import AccountGeneral from './AccountGeneral.svelte';
   import AccountServer from './AccountServer.svelte';
@@ -14,7 +14,7 @@
 
   let { id }: Props = $props();
 
-  type Tab = 'general' | 'signatures' | 'server' | 'folders' | 'vacation';
+  type Tab = AccountTab;
   const tabs: { key: Tab; label: MessageKey }[] = [
     { key: 'general', label: 'acc.tab.general' },
     { key: 'signatures', label: 'acc.tab.signatures' },
@@ -23,7 +23,9 @@
     { key: 'vacation', label: 'acc.tab.vacation' },
   ];
 
-  let tab = $state<Tab>('general');
+  // Sayfa bir sekme ipucuyla açılabilir (openAccountPassword → "Sunucu ve parola"); ipucu tek seferliktir.
+  let tab = $state<Tab>(mail.accountTab ?? 'general');
+  mail.accountTab = null;
   const account = $derived(mail.accounts.find((a) => a.id === id));
 
   function onTabKey(e: KeyboardEvent) {

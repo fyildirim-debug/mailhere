@@ -81,6 +81,10 @@ export const icons = {
   // Mobil kabuk: çekmece düğmesi ve geri oku.
   menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
   arrowLeft: '<path d="M19 12H5"/><path d="M11 6l-6 6 6 6"/>',
+  // Cihazlar arası aktarım: bilgisayar + telefon, QR kodu, pano.
+  devices: '<rect x="3" y="5" width="12.5" height="9" rx="1.5"/><path d="M7 18.5h5M9.25 14v4.5"/><rect x="17" y="9" width="4" height="10.5" rx="1.2"/><path d="M19 17h.01"/>',
+  qr: '<rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><path d="M7 7h.01M17 7h.01M7 17h.01"/><path d="M14 14h3v3h-3z"/><path d="M20 14v3M14 20h3M20 20h.01"/>',
+  clipboard: '<rect x="5.5" y="5" width="13" height="15.5" rx="1.5"/><path d="M9 5V3.5h6V5"/><path d="M9 11.5h6M9 15h4"/>',
 } as const;
 
 export type IconName = keyof typeof icons;

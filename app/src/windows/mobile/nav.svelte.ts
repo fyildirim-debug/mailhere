@@ -27,6 +27,7 @@ export interface HistoryLike {
   pushState(data: unknown, unused: string): void;
   replaceState(data: unknown, unused: string): void;
   back(): void;
+  go(delta: number): void;
 }
 
 interface Mark {
@@ -119,6 +120,16 @@ export function createNav(history: HistoryLike) {
       return true;
     },
 
+    /**
+     * Köke döner (ör. aktarım bitince "Gelen kutusuna git"): bizim tüm geçmiş
+     * girdileri tek seferde geri alınır, yığın `popstate` ile boşalır. Kökteyken
+     * bir şey yapmaz.
+     */
+    home() {
+      const d = depth();
+      if (d > 0) history.go(-d);
+    },
+
     /** `popstate`: tarayıcının getirdiği girdiye göre yığın indirgenir. */
     onPopState(data: unknown) {
       reconcile(depthOf(data));
@@ -138,7 +149,7 @@ export type Nav = ReturnType<typeof createNav>;
 const browserHistory: HistoryLike =
   typeof window !== 'undefined'
     ? window.history
-    : { pushState() {}, replaceState() {}, back() {} };
+    : { pushState() {}, replaceState() {}, back() {}, go() {} };
 
 /** Uygulamanın tek gezinme yığını. */
 export const nav = createNav(browserHistory);

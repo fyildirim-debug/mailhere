@@ -8,6 +8,7 @@
   import AccountPage from './AccountPage.svelte';
   import AccountsSection from './AccountsSection.svelte';
   import ComposeSection from './ComposeSection.svelte';
+  import DevicesSection from './DevicesSection.svelte';
   import GeneralSection from './GeneralSection.svelte';
   import NotifySection from './NotifySection.svelte';
   import PrivacySection from './PrivacySection.svelte';
@@ -23,6 +24,7 @@
     { key: 'accounts', icon: 'user', label: 'set.nav.accounts' },
   ];
   const tail: { key: SettingsSection; icon: IconName; label: MessageKey }[] = [
+    { key: 'devices', icon: 'devices', label: 'aktar.nav' },
     { key: 'privacy', icon: 'shield', label: 'set.nav.privacy' },
     { key: 'about', icon: 'info', label: 'set.nav.about' },
   ];
@@ -89,6 +91,8 @@
           <TagsSection />
         {:else if section === 'accounts'}
           <AccountsSection />
+        {:else if section === 'devices'}
+          <DevicesSection />
         {:else if section === 'privacy'}
           <PrivacySection />
         {:else}

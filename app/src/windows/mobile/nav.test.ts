@@ -27,6 +27,13 @@ function fakeHistory() {
       h.index = index;
       listener?.(entries[index]);
     },
+    go(delta) {
+      const target = Math.max(0, Math.min(entries.length - 1, index + delta));
+      if (target === index) return;
+      index = target;
+      h.index = index;
+      listener?.(entries[index]);
+    },
     forward() {
       if (index >= entries.length - 1) return;
       index++;
@@ -144,5 +151,18 @@ describe('mobil gezinme yığını', () => {
     expect(nav.stack).toEqual([{ name: 'list' }]);
     expect(nav.layer).toBeNull();
     expect(nav.depth()).toBe(0);
+  });
+
+  it('home tüm girdileri tek seferde geri alır; geçmiş imleci köke iner, kökte sessiz', () => {
+    nav.push({ name: 'settings', section: null });
+    nav.push({ name: 'settings', section: 'devices' });
+    nav.open('sheet');
+    expect(h.index).toBe(3);
+    nav.home();
+    expect(nav.stack).toEqual([{ name: 'list' }]);
+    expect(nav.layer).toBeNull();
+    expect(h.index).toBe(0);
+    nav.home();
+    expect(h.index).toBe(0);
   });
 });

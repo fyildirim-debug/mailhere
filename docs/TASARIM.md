@@ -41,6 +41,7 @@ Bileşenler **asla** ham renk yazmaz; yalnız aşağıdaki jetonları (`var(--�
 | `--brand` | marka bölgesi (karşılama paneli); üstünde her temada beyaz metin | `#4655D4` (koyu: `#3440B0`) |
 | `--signal` | logodaki "burada" noktası | `#F2B544` |
 | `--mail-paper` | HTML postanın kâğıdı (posta kendi renkleriyle tasarlandığı için her temada beyaz) | `#FFFFFF` |
+| `--qr-paper` / `--qr-ink` | QR kodun zemini ve modülleri; telefon kamerası ters (açık modül, koyu zemin) kodu güvenilir okumadığı için her temada beyaz üstüne koyu | `#FFFFFF` / `#15171C` |
 
 ### 2.2 Koyu tema
 
@@ -68,6 +69,7 @@ Bileşenler **asla** ham renk yazmaz; yalnız aşağıdaki jetonları (`var(--�
 Kurallar:
 
 - HTML postalar kendi açık renkleriyle tasarlandığı için koyu temada da beyaz kâğıt (`--mail-paper`) üzerinde, köşeli bir yüzeyde gösterilir; düz metin postalar temayı izler.
+- QR kodu (cihazlar arası aktarım) koyu temada da beyaz kart (`--qr-paper`, köşe 12, `--line` kenar) üstünde `--qr-ink` modüllerle çizilir; 4 modüllük sessiz bölge kartın içindedir. Okunabilirlik temadan önce gelir; QR'ın kendisi hiçbir zaman tema rengine boyanmaz.
 - Zemin katmanı sırası: `ground` → `surface` → `paper` → `raised`. Bir katman kendinden alttakinin üstüne oturur; tersi olmaz.
 - `--ink-3` yalnız `surface`, `paper` ve `sel` üstünde kullanılır. `ground` üstünde üst bilgi için `--ink-2` kullanılır (karşıtlık).
 - Metin çiftleri her iki temada en az **4.5:1**, büyük metin ve ikonlar en az **3:1** karşıtlık sağlar.
