@@ -65,6 +65,11 @@
     "allow-messages-move-to",
     "allow-outbox-list",
     "allow-outbox-send-now",
-    "allow-outbox-to-draft"
+    "allow-outbox-to-draft",
+    "allow-thread-get",
+    "allow-contact-get",
+    "allow-message-save-eml",
+    "allow-invite-reply",
+    "allow-invite-open"
   ]
 }

@@ -42,6 +42,17 @@
     onchange={(e) => updateSettings({ darkMail: (e.currentTarget as HTMLInputElement).checked })}
   />
 </div>
+<div class="set-row top">
+  <span class="set-name">{t('set.conversation')}<span class="set-hint">{t('set.conversationHint')}</span></span>
+  <input
+    type="checkbox"
+    role="switch"
+    class="switch"
+    aria-label={t('set.conversation')}
+    checked={s.conversationView}
+    onchange={(e) => updateSettings({ conversationView: (e.currentTarget as HTMLInputElement).checked })}
+  />
+</div>
 <div class="set-row">
   <span class="set-name">{t('set.density')}</span>
   <div class="seg-track" role="radiogroup" aria-label={t('set.density')}>

@@ -1,6 +1,7 @@
 //! Mailhere gönderim: posta kurma, SMTP, giden kutusu, geri alma ve taslaklar.
 
 mod drafts;
+mod imip;
 mod message;
 mod mime;
 mod outbox;
@@ -10,6 +11,7 @@ mod smtp;
 mod transport;
 mod unsubscribe;
 
+pub use imip::{build_imip, invite_reply_message, reply_texts};
 pub use message::{
     build, build_with, clean_name, validate, validate_with, BuildOptions, ReplyRef, MAX_ATTACHMENTS,
 };

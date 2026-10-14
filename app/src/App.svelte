@@ -11,7 +11,7 @@
 {:else if route.current.name === 'quick'}
   <QuickWindow id={route.current.id} />
 {:else if route.current.name === 'compose'}
-  <ComposeWindow mode={route.current.mode} messageId={route.current.id} />
+  <ComposeWindow mode={route.current.mode} messageId={route.current.id} initialTo={route.current.to} />
 {:else}
   <MainWindow />
 {/if}

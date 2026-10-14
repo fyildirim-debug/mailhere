@@ -46,6 +46,7 @@ fn on_menu(app: &AppHandle, event: MenuEvent) {
                 let prefill = ComposePrefill {
                     mode: ComposeMode::New,
                     message_id: None,
+                    to: Vec::new(),
                 };
                 if let Err(e) = crate::windows::open_compose(&app, &prefill) {
                     tracing::warn!(error = %e, "yazma penceresi açılamadı");

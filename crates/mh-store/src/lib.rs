@@ -6,6 +6,7 @@
 mod accounts;
 mod actions;
 mod codec;
+mod contacts;
 mod demo;
 mod drafts;
 mod encryption;
@@ -19,6 +20,7 @@ mod scheduled;
 mod schema;
 mod search;
 mod settings;
+mod threads;
 
 use std::path::Path;
 use std::sync::Mutex;
@@ -27,6 +29,7 @@ use mh_core::{AppError, AppResult, ErrorCode};
 use rusqlite::{Connection, Transaction};
 
 pub use actions::{Action, QueuedAction, ServerFlag, ServerRef};
+pub use contacts::CONTACT_RECENT;
 pub use demo::{seed_demo, DEMO_HOST};
 pub use drafts::DraftPut;
 pub use encryption::{private_dir, probe, relocate, DbFile};
@@ -42,6 +45,7 @@ pub use rules::{
     FORWARDS_PER_HOUR, MAX_RULES,
 };
 pub use search::{fold_loose, fts_query};
+pub use threads::THREAD_LIMIT;
 
 /// Yerel depo.
 pub struct Store {

@@ -20,7 +20,7 @@ pub struct ReplyRef {
 /// Eklerin toplam üst sınırı (çoğu sağlayıcı 25 MB'ı geçeni reddeder).
 pub const MAX_ATTACHMENTS: u64 = 25 * 1024 * 1024;
 
-fn mailbox(a: &Address) -> AppResult<Mailbox> {
+pub(crate) fn mailbox(a: &Address) -> AppResult<Mailbox> {
     let email = a.email.trim().parse().map_err(|_| {
         AppError::new(
             ErrorCode::Invalid,
@@ -118,7 +118,7 @@ fn read_attachment(path: &str, limit: u64) -> AppResult<Vec<u8>> {
     Ok(bytes)
 }
 
-fn bracket(id: &str) -> String {
+pub(crate) fn bracket(id: &str) -> String {
     format!(
         "<{}>",
         id.trim().trim_start_matches('<').trim_end_matches('>')

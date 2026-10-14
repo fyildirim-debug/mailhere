@@ -302,7 +302,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       snippet: msg.bodyText.replace(/\s+/g, ' ').slice(0, 200), date: now(), unread: false, starred: false,
       hasAttachments: msg.attachments.length > 0, category: 'people', snoozedUntil: null, cc: msg.cc, bcc: msg.bcc, replyTo: [],
       messageIdHeader: null, references: [], bodyText: msg.bodyText, bodyHtml: null, hasRemoteContent: false,
-      remoteAllowed: false, attachments: [], thread: [], unsubscribe: null,
+      remoteAllowed: false, attachments: [], thread: [], unsubscribe: null, invite: null,
     };
   }
 
@@ -320,7 +320,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
         snippet: msg.bodyText.replace(/\s+/g, ' ').slice(0, 200), date: now(), unread: false, starred: false,
         hasAttachments: msg.attachments.length > 0, category: 'people', snoozedUntil: null, cc: msg.cc, bcc: [], replyTo: [],
         messageIdHeader: null, references: [], bodyText: msg.bodyText, bodyHtml: null, hasRemoteContent: false,
-        remoteAllowed: false, attachments: [], thread: [], unsubscribe: null,
+        remoteAllowed: false, attachments: [], thread: [], unsubscribe: null, invite: null,
       });
     }
     emit(EVENTS.outbox, { id, ok: true, error: null });
@@ -529,7 +529,11 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     },
     open_compose: ({ prefill }) => {
       if (typeof window !== 'undefined') {
-        window.open(`#/compose/${prefill.mode}/${prefill.messageId ?? 0}`, `compose-${nextId++}`, 'popup=yes,width=820,height=660');
+        // Alıcılar arka uçtaki gibi `?to=Ad <adres>` sorgusuyla taşınır.
+        const q = new URLSearchParams();
+        for (const a of (prefill.to ?? []).slice(0, 20)) q.append('to', a.name ? `${a.name} <${a.email}>` : a.email);
+        const query = q.size ? `?${q}` : '';
+        window.open(`#/compose/${prefill.mode}/${prefill.messageId ?? 0}${query}`, `compose-${nextId++}`, 'popup=yes,width=820,height=660');
       }
       return null;
     },
@@ -755,6 +759,59 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     update_install: async () => {
       await new Promise((r) => setTimeout(r, 600));
       return null;
+    },
+    thread_get: ({ id }) => {
+      const m = find(id);
+      const keep = (x: MessageDetail) => x.id === id || !['trash', 'junk'].includes(roleOf(x.mailboxId));
+      return state.messages
+        .filter((x) => x.accountId === m.accountId && x.threadId === m.threadId && keep(x))
+        .sort((a, b) => a.date - b.date || a.id - b.id)
+        .slice(-100)
+        .map(detail);
+    },
+    contact_get: ({ email }) => {
+      const e = lower(email.trim());
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) fail('invalid', 'Adres eksik ya da bozuk; kişi bilgisi gösterilemez.');
+      const involves = (m: MessageDetail) => lower(m.from.email) === e || [...m.to, ...m.cc].some((a) => lower(a.email) === e);
+      const counted = (m: MessageDetail) => !['trash', 'junk', 'drafts'].includes(roleOf(m.mailboxId));
+      const hits = state.messages.filter((m) => counted(m) && involves(m)).sort((a, b) => b.date - a.date || b.id - a.id);
+      const named = state.messages.filter((m) => lower(m.from.email) === e && m.from.name).sort((a, b) => b.date - a.date);
+      const threads = new Map<string, MessageDetail>();
+      for (const m of hits) {
+        const k = `${m.accountId}|${m.threadId}`;
+        if (!threads.has(k)) threads.set(k, m);
+      }
+      return { email: e, name: named[0]?.from.name ?? null, total: hits.length, lastDate: hits[0]?.date ?? null, recent: [...threads.values()].slice(0, 5).map(summary) };
+    },
+    message_save_eml: ({ id }) => {
+      const m = find(id);
+      return `/tmp/mailhere/${m.subject.replace(/[\\/:*?"<>|]/g, '_').trim() || 'posta'}.eml`;
+    },
+    invite_reply: ({ id, response }) => {
+      const m = find(id);
+      if (!m.invite) fail('notFound', 'Bu postada takvim daveti yok.');
+      if (m.invite.method !== 'request') fail('invalid', 'Bu etkinlik iptal edildi; yanıt gönderilmez.');
+      if (!m.invite.organizer) fail('invalid', 'Davette düzenleyenin adresi yok; yanıt gönderilemez. Gönderene doğrudan yazabilirsin.');
+      const account = state.accounts.find((a) => a.id === m.accountId);
+      if (!account) fail('notFound', 'Postayı alan hesap bulunamadı.');
+      const prefix = state.settings.language === 'en'
+        ? { accepted: 'Accepted', tentative: 'Tentative', declined: 'Declined' }[response]
+        : { accepted: 'Kabul edildi', tentative: 'Belki', declined: 'Katılmıyor' }[response];
+      state.messages.push({
+        id: nextId++, accountId: account.id, mailboxId: boxFor(account.id, 'sent'), threadId: m.threadId,
+        from: { name: account.displayName, email: account.email }, to: [m.invite.organizer], subject: `${prefix}: ${m.invite.summary}`,
+        snippet: `${account.displayName} daveti yanıtladı: ${m.invite.summary}`, date: now(), unread: false, starred: false,
+        hasAttachments: false, category: 'people', snoozedUntil: null, cc: [], bcc: [], replyTo: [],
+        messageIdHeader: null, references: [], bodyText: `${account.displayName} daveti yanıtladı: ${m.invite.summary}`, bodyHtml: null,
+        hasRemoteContent: false, remoteAllowed: false, attachments: [], thread: [], unsubscribe: null, invite: null,
+      });
+      emit(EVENTS.changed, { mailboxIds: [] });
+      return null;
+    },
+    invite_open: ({ id }) => {
+      const m = find(id);
+      if (!m.invite) fail('notFound', 'Bu postada takvim daveti yok.');
+      return `/tmp/mailhere/${m.invite.summary || 'davet'}.ics`;
     },
     demo_notify: () => {
       const m = state.messages.find((x) => x.subject === 'Cumartesi kahvaltı?') ?? state.messages[0];

@@ -43,6 +43,14 @@ Son denetim: 2026-10-13 (beş alanda kod denetimi; bulgular doğrulanıp düzelt
 - İletme adresi tek ve geçerli bir adres olmalı (en çok 254 karakter, ad ya da liste kabul edilmez). Kural iletmesi gönderilemezse taslağa çevrilmez.
 - Arama işleçlerinin (`from:`, `in:`, `önce:` …) değerleri SQL'e hep parametreyle gider; serbest metin FTS sorgusuna yalnız tırnaklı önek terimleri olarak girer.
 
+**Okuma: konuşma, kişi kartı, yazdırma, takvim daveti**
+- Yazdırma uygulama arayüzünden ayrı, kum havuzlu (`allow-same-origin allow-modals`) ve betiksiz gizli bir çerçevede yapılır; yalnız o çerçeve basılır. Gövde Rust'ta temizlenmiş HTML'dir, başlıklar kaçışlanır; çerçevenin CSP'si uzak görseli yalnız göndericiye izin verildiyse yükler, Referer gitmez.
+- `.eml` kaydetme yalnız işletim sisteminin kaydet penceresinde seçilen yola yazar (arayüz yol veremez); dosya 0600, uzantı `.eml` zorlanır, önerilen ad konudan temizlenir (`sanitize_filename`).
+- Takvim daveti (`text/calendar`) Rust'ta ayrıştırılır: parça en çok 512 KB, 20 bin satır, satır 16 KB, metin alanları 500 karakter, katılımcı sayısı sınırlı; bozuk girdi panik üretmez. Yalnız METHOD REQUEST/CANCEL kart olur. Zaman dilimi postadaki VTIMEZONE'dan hesaplanır; bilinmeyen dilim yerel saat sayılır.
+- Davete yanıt yalnız kullanıcı düğmeye basınca, postayı alan hesaptan, davetin ORGANIZER satırındaki tek `mailto:` adresine gider (adres kartta görünür); METHOD REPLY, aynı UID/SEQUENCE, PARTSTAT. İptal edilmiş davete yanıt gönderilmez. Not: düzenleyen adresi gönderenin elindedir; yanıt o adrese postanın okunduğunu ve kullanıcının adresini bildirir.
+- "Takvime ekle" takvim parçasını açılan ekler klasörüne (0700/0600) yazar ve varsayılan uygulamayla açar; `.ics` izin listesindedir.
+- Kişi kartı sorguları (gönderen/alıcı adresi) SQL'e parametreyle gider; bozuk adres (`is_full_address`) reddedilir. Konuşma görünümü aynı hesapla sınırlıdır; en çok 100 ileti.
+
 **Ağ ve kimlik doğrulama**
 - TLS zorunlu; şifresiz bağlantı yalnız `localhost`'a. STARTTLS reddedilirse düz metne düşülmez.
 - Geçersiz sertifika yalnız sunucunun gerçekten sunduğu sertifika için onaylanabilir. Onay ayrıca işletim sisteminin kendi penceresinde istenir. Büyük sağlayıcılarda (Gmail, Outlook…) onay verilemez.

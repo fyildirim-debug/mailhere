@@ -1,7 +1,7 @@
 // Tarayıcı modu, testler ve ekran görüntüleri için örnek veri.
 // İçerik onaylı tasarımdaki postalarla aynıdır; gerçek kişi ya da kurum değildir.
 
-import type { Account, Address, Attachment, Category, Mailbox, MailboxRole, MessageDetail, Unsubscribe } from './types';
+import type { Account, Address, Attachment, Category, Invite, Mailbox, MailboxRole, MessageDetail, Unsubscribe } from './types';
 
 export interface DemoData {
   accounts: Account[];
@@ -66,6 +66,7 @@ interface Seed {
   thread?: string;
   remote?: boolean;
   unsubscribe?: Unsubscribe;
+  invite?: Invite;
 }
 
 function snippetOf(text: string): string {
@@ -216,6 +217,40 @@ export function createDemoData(now = new Date()): DemoData {
       body: 'Eylül dönemine ait faturanız oluşturuldu.\n\nTutar: 1.180,00 ₺',
       date: at(now, -31, 11, 0), category: 'notifications',
     },
+    {
+      // Takvim daveti (text/calendar, METHOD:REQUEST).
+      key: 'm14', account: A_WORK, role: 'inbox', from: kerem, to: [ME_WORK, murat], subject: 'Davet: Sprint planlama',
+      body:
+        'Sprint planlama toplantısına davetlisin.\n\nGündem: biten işler, yeni sürümün kapsamı, riskler. Not almak için sunum şablonunu getirmen yeter.\n\nKerem',
+      date: at(now, -1, 10, 5), category: 'people',
+      attachments: [{ index: 0, name: 'davet.ics', mime: 'text/calendar', size: 1_412 }],
+      invite: {
+        uid: 'sprint-planlama-42@ornek.com.tr', summary: 'Sprint planlama', start: at(now, 2, 10, 0), end: at(now, 2, 11, 0), allDay: false,
+        location: 'Toplantı odası 2', organizer: kerem, attendees: 3, method: 'request', sequence: 0,
+      },
+    },
+    // Çok iletili konuşma: üç kişi, dört ileti.
+    {
+      key: 'y1', account: A_WORK, role: 'sent', from: ME_WORK, to: [kerem, murat], subject: 'Yayın planı',
+      body: 'Selam,\n\n0.2 sürümünü haftaya salı yayınlamayı düşünüyorum. Takvimi uygunsa haber verin.\n\nFurkan',
+      date: at(now, -5, 9, 0), category: 'people', thread: 'yayin',
+    },
+    {
+      key: 'y2', account: A_WORK, role: 'inbox', from: murat, to: [ME_WORK, kerem], subject: 'Re: Yayın planı',
+      body: 'Salı bana uyar. Sunucu tarafında bir engel yok.\n\nMurat',
+      date: at(now, -5, 11, 30), category: 'people', thread: 'yayin',
+    },
+    {
+      key: 'y3', account: A_WORK, role: 'inbox', from: kerem, to: [ME_WORK, murat], subject: 'Re: Yayın planı',
+      body: 'Sürüm notlarının taslağını ekledim; bir göz atın.\n\nSalı uygun, yalnız duyuruyu öğleden sonraya alalım.\n\nKerem',
+      date: at(now, -4, 16, 10), category: 'people', thread: 'yayin',
+      attachments: [{ index: 0, name: 'Surum_notlari_0_2.pdf', mime: 'application/pdf', size: 88_064 }],
+    },
+    {
+      key: 'y4', account: A_WORK, role: 'inbox', from: murat, to: [ME_WORK, kerem], subject: 'Re: Yayın planı',
+      body: 'Duyuru metnini pazartesi gönderirim. Yayın günü sabah son bir deneme yapalım.\n\nMurat',
+      date: at(now, -2, 10, 45), category: 'people', thread: 'yayin',
+    },
   ];
 
   const messages: MessageDetail[] = seeds.map((s, i) => {
@@ -248,6 +283,7 @@ export function createDemoData(now = new Date()): DemoData {
       attachments: s.attachments ?? [],
       thread: [],
       unsubscribe: s.unsubscribe ?? null,
+      invite: s.invite ?? null,
     };
   });
 

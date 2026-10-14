@@ -11,6 +11,7 @@ mod cmd_jmap;
 mod cmd_mailbox;
 mod cmd_oauth;
 mod cmd_outbox;
+mod cmd_reading;
 mod cmd_rules;
 mod cmd_unsubscribe;
 mod cmd_vacation;
@@ -157,6 +158,11 @@ fn main() {
             cmd_outbox::outbox_list,
             cmd_outbox::outbox_send_now,
             cmd_outbox::outbox_to_draft,
+            cmd_reading::thread_get,
+            cmd_reading::contact_get,
+            cmd_reading::message_save_eml,
+            cmd_reading::invite_reply,
+            cmd_reading::invite_open,
         ])
         .build(tauri::generate_context!())
         .expect("Mailhere başlatılamadı");
