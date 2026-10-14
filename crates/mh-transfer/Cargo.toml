@@ -1,0 +1,25 @@
+[package]
+name = "mh-transfer"
+description = "Mailhere bilgisayardan telefona QR ile ayar aktarımı: kripto, tel protokolü, sunucu ve istemci"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# Paket bu crate için saydam bayt dizisidir (JSON'u mh-app kurar/çözer);
+# bu yüzden serde gerekmez.
+mh-core.workspace = true
+tokio.workspace = true
+ring.workspace = true
+base64.workspace = true
+zeroize.workspace = true
+if-addrs.workspace = true
+qrcode.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+# `start_paused`: süre dolma testi gerçek 180 s beklemeden çalışır.
+tokio = { workspace = true, features = ["test-util"] }
