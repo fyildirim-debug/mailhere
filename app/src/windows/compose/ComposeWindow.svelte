@@ -27,9 +27,11 @@
   interface Props {
     mode: ComposeMode;
     messageId: number | null;
+    /** Yeni postada önceden doldurulan alıcılar (kişi kartından). */
+    initialTo?: Address[];
   }
 
-  let { mode, messageId }: Props = $props();
+  let { mode, messageId, initialTo = [] }: Props = $props();
 
   let accounts = $state<Account[]>([]);
   let fromId = $state<string>('');
@@ -145,6 +147,7 @@
   async function init() {
     accounts = await call('accounts_list');
     fromId = accounts[0]?.id ?? '';
+    if (messageId == null && initialTo.length) to = [...initialTo];
     if (messageId != null) {
       try {
         const d = await call('message_get', { id: messageId });

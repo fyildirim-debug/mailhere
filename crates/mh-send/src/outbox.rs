@@ -32,7 +32,7 @@ pub struct Outbox {
     pub(crate) wake: Notify,
 }
 
-fn now_ms() -> Millis {
+pub(crate) fn now_ms() -> Millis {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as Millis)
@@ -231,19 +231,32 @@ impl Outbox {
             auto_forwarded: row.id.starts_with(AUTO_PREFIX),
         };
         let message = build_with(&account, &row.msg, &opts, now)?;
+        self.transmit(&account, &row.msg, message, now).await
+    }
+
+    /// Kurulmuş postayı gönderir: JMAP hesabında sunucu, diğerlerinde SMTP;
+    /// ardından Gönderilenler'e sunucu ve yerel kopya. Kabulden sonraki
+    /// adımların hatası gönderimi başarısız saymaz, not olarak döner.
+    pub(crate) async fn transmit(
+        &self,
+        account: &Account,
+        msg: &OutgoingMessage,
+        message: lettre::Message,
+        now: Millis,
+    ) -> AppResult<Option<String>> {
         let raw = message.formatted();
         let mut server_copy = false;
         if account.kind == AccountKind::Jmap {
             // JMAP'te SMTP yok: sunucu gönderir ve Gönderilenler'e kendisi taşır.
-            if mh_jmap::is_syncable(&account) {
-                let rcpt = mh_jmap::envelope_recipients(&row.msg);
-                mh_jmap::send_raw(&self.store, &self.secrets, &account, &raw, &rcpt).await?;
+            if mh_jmap::is_syncable(account) {
+                let rcpt = mh_jmap::envelope_recipients(msg);
+                mh_jmap::send_raw(&self.store, &self.secrets, account, &raw, &rcpt).await?;
             }
-        } else if !is_demo(&account) {
+        } else if !is_demo(account) {
             let cfg = account.smtp.clone().ok_or_else(|| {
                 AppError::new(ErrorCode::Invalid, "Hesabın giden posta ayarı yok.")
             })?;
-            let creds = credentials_for(&self.secrets, self.sync.tokens(), &account).await?;
+            let creds = credentials_for(&self.secrets, self.sync.tokens(), account).await?;
             crate::transport::send_with(&cfg, &creds, message).await?;
             server_copy = !crate::transport::server_saves_sent(&cfg);
         }

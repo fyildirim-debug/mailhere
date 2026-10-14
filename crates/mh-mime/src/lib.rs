@@ -3,6 +3,7 @@
 
 pub mod category;
 pub mod html;
+pub mod ics;
 pub mod parse;
 mod prescan;
 pub mod text;
@@ -10,6 +11,7 @@ pub mod unsubscribe;
 
 pub use category::classify;
 pub use html::{sanitize_html, Sanitized};
+pub use ics::{build_reply, calendar_text, invite, parse_calendar, to_invite, Calendar};
 pub use parse::{
     attachment, parse, render, visible_attachments, AttachmentData, ParsedMessage, Rendered,
 };

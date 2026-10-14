@@ -362,7 +362,7 @@ const ATTACHMENT_TTL: std::time::Duration = std::time::Duration::from_secs(24 * 
 
 /// Yalnız kullanıcının erişebildiği klasör (Unix'te 0700; Windows'ta kullanıcı
 /// profilinin varsayılan izinleri).
-fn private_dir(dir: &Path) -> std::io::Result<()> {
+pub(crate) fn private_dir(dir: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
@@ -379,7 +379,7 @@ fn private_dir(dir: &Path) -> std::io::Result<()> {
 }
 
 /// Dosyayı yalnız kullanıcının okuyabileceği biçimde yazar (Unix'te 0600).
-fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+pub(crate) fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
     let mut opts = std::fs::OpenOptions::new();
     opts.write(true).create(true).truncate(true);

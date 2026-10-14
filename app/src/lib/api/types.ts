@@ -191,6 +191,42 @@ export interface MessageDetail extends MessageSummary {
   thread: ThreadEntry[];
   /** List-Unsubscribe başlığı varsa abonelikten çıkma yolları. */
   unsubscribe: Unsubscribe | null;
+  /** Postadaki takvim daveti (text/calendar, METHOD:REQUEST ya da CANCEL). */
+  invite: Invite | null;
+}
+
+/** Takvim davetinin amacı (iTIP METHOD). */
+export type InviteMethod = 'request' | 'cancel';
+
+export interface Invite {
+  /** Etkinliğin kalıcı kimliği; yanıtta aynen döner. */
+  uid: string;
+  summary: string;
+  /** Başlangıç (UTC ms; tüm gün etkinlikte günün UTC 00:00'ı). */
+  start: Millis;
+  /** Bitiş; tüm gün etkinlikte dışlayıcı (ertesi günün 00:00'ı). */
+  end: Millis | null;
+  allDay: boolean;
+  location: string | null;
+  /** Düzenleyen; yanıt bu adrese gider. */
+  organizer: Address | null;
+  attendees: number;
+  method: InviteMethod;
+  sequence: number;
+}
+
+/** Davete verilen yanıt (iTIP PARTSTAT). */
+export type InviteResponse = 'accepted' | 'tentative' | 'declined';
+
+/** Bir kişiyle yazışmanın özeti (kişi kartı). */
+export interface ContactInfo {
+  email: string;
+  name: string | null;
+  /** Bu kişiden gelen ve ona giden toplam posta. */
+  total: number;
+  lastDate: Millis | null;
+  /** Son konuşmalar (her konuşmanın en yeni iletisi, yeniden eskiye). */
+  recent: MessageSummary[];
 }
 
 export interface Unsubscribe {
@@ -337,6 +373,8 @@ export type ComposeMode = 'new' | 'reply' | 'replyAll' | 'forward' | 'draft';
 export interface ComposePrefill {
   mode: ComposeMode;
   messageId: MessageId | null;
+  /** Yeni postada önceden doldurulan alıcılar (ör. kişi kartından). */
+  to?: Address[];
 }
 
 // ------------------------------------------------------------------ eşitleme
@@ -378,6 +416,8 @@ export interface Settings {
   /** Koyu temada kendi zemini olmayan postalar koyu zeminde gösterilir. */
   darkMail: boolean;
   templates: Template[];
+  /** Okuma alanında konuşmanın tüm iletileri alt alta gösterilir. */
+  conversationView: boolean;
 }
 
 /** Hızlı yanıt sınırları (arka uçla aynı). */
@@ -427,6 +467,7 @@ export const defaultSettings: Settings = {
   quickReplies: null,
   darkMail: true,
   templates: [],
+  conversationView: true,
 };
 
 // ------------------------------------------------------------------- olaylar
@@ -591,6 +632,17 @@ export interface Commands {
   update_check: [Record<string, never>, UpdateInfo | null];
   /** İndirir, kurar ve uygulamayı yeniden başlatır. */
   update_install: [Record<string, never>, null];
+
+  // Okuma: konuşma, kişi kartı, yazdırma / kaydetme, takvim daveti
+  /** Postanın konuşmasındaki tüm iletiler (aynı hesap, eskiden yeniye, en çok 100). Gövdesi yerelde olmayan ileti gövdesiz gelir; açılınca `message_get` indirir. */
+  thread_get: [{ id: MessageId }, MessageDetail[]];
+  contact_get: [{ email: string }, ContactInfo];
+  /** Ham postayı işletim sisteminin kaydet penceresiyle .eml olarak yazar; vazgeçilirse null. */
+  message_save_eml: [{ id: MessageId }, string | null];
+  /** Davete yanıt: düzenleyene iMIP REPLY postası gider (postayı alan hesaptan). */
+  invite_reply: [{ id: MessageId; response: InviteResponse }, null];
+  /** Davetin .ics dosyasını geçici klasöre yazar ve varsayılan takvimle açar; dosya yolu. */
+  invite_open: [{ id: MessageId }, string];
 }
 
 export type CommandName = keyof Commands;

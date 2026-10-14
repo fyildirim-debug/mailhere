@@ -277,17 +277,56 @@ fn mode_route(mode: ComposeMode) -> &'static str {
     }
 }
 
+/// Önceden doldurulan en çok alıcı.
+const MAX_PREFILL_TO: usize = 20;
+
+/// Yazma penceresinin rotası: `compose/<kip>/<posta>`; alıcılar varsa
+/// `?to=Ad <adres>` sorgu parametreleri (arayüz çözer).
+fn compose_route(prefill: &ComposePrefill) -> String {
+    let mut route = format!(
+        "compose/{}/{}",
+        mode_route(prefill.mode),
+        prefill.message_id.unwrap_or(0)
+    );
+    let to: Vec<&mh_core::Address> = prefill
+        .to
+        .iter()
+        .filter(|a| a.email.contains('@') && !a.email.chars().any(char::is_whitespace))
+        .take(MAX_PREFILL_TO)
+        .collect();
+    if to.is_empty() {
+        return route;
+    }
+    let mut url = tauri::Url::parse("mailhere://compose/").expect("sabit adres");
+    {
+        let mut q = url.query_pairs_mut();
+        for a in to {
+            let value = match a
+                .name
+                .as_deref()
+                .map(mh_send::clean_name)
+                .filter(|n| !n.is_empty())
+            {
+                Some(name) => format!("{name} <{}>", a.email.trim()),
+                None => a.email.trim().to_owned(),
+            };
+            q.append_pair("to", &value);
+        }
+    }
+    if let Some(q) = url.query() {
+        route.push('?');
+        route.push_str(q);
+    }
+    route
+}
+
 /// Yeni bir yazma penceresi.
 pub fn open_compose(app: &AppHandle, prefill: &ComposePrefill) -> tauri::Result<()> {
     let n = app
         .try_state::<AppState>()
         .map(|s| s.compose_counter.fetch_add(1, Ordering::SeqCst) + 1)
         .unwrap_or(1);
-    let route = format!(
-        "compose/{}/{}",
-        mode_route(prefill.mode),
-        prefill.message_id.unwrap_or(0)
-    );
+    let route = compose_route(prefill);
     let open = app
         .webview_windows()
         .keys()
@@ -348,5 +387,29 @@ mod tests {
     fn yazma_rotasi() {
         assert_eq!(mode_route(ComposeMode::ReplyAll), "replyAll");
         assert_eq!(mode_route(ComposeMode::New), "new");
+        let plain = ComposePrefill {
+            mode: ComposeMode::Reply,
+            message_id: Some(7),
+            to: Vec::new(),
+        };
+        assert_eq!(compose_route(&plain), "compose/reply/7");
+        let with_to = ComposePrefill {
+            mode: ComposeMode::New,
+            message_id: None,
+            to: vec![
+                mh_core::Address::new(Some("Ayşe Demir"), "ayse@ornek.com"),
+                mh_core::Address::new(None, "bozuk adres"),
+                mh_core::Address::new(Some("Evil\r\nX"), "e@ornek.com"),
+            ],
+        };
+        let route = compose_route(&with_to);
+        assert!(route.starts_with("compose/new/0?to="), "{route}");
+        assert!(
+            route.contains("Ay%C5%9Fe+Demir+%3Cayse%40ornek.com%3E"),
+            "{route}"
+        );
+        assert!(!route.contains("bozuk"), "boşluklu adres atılır");
+        assert!(route.contains("to=Evil+X+%3Ce%40ornek.com%3E"), "{route}");
+        assert!(!route.contains('\n'));
     }
 }

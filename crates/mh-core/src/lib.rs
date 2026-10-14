@@ -402,6 +402,66 @@ pub struct MessageDetail {
     /// başlık yoksa `None`.
     #[serde(default)]
     pub unsubscribe: Option<Unsubscribe>,
+    /// Postadaki takvim daveti (`text/calendar`, METHOD:REQUEST ya da
+    /// CANCEL); yoksa `None`.
+    #[serde(default)]
+    pub invite: Option<Invite>,
+}
+
+/// Takvim davetinin amacı (iTIP METHOD).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum InviteMethod {
+    /// Yeni davet ya da güncelleme; yanıtlanabilir.
+    Request,
+    /// Etkinlik iptal edildi; yalnız bilgi.
+    Cancel,
+}
+
+/// Postadaki takvim davetinin okuma alanında gösterilen özeti.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Invite {
+    /// Etkinliğin kalıcı kimliği (UID); yanıtta aynen döner.
+    pub uid: String,
+    pub summary: String,
+    /// Başlangıç (UTC milisaniye; tüm gün etkinlikte günün UTC 00:00'ı).
+    pub start: Millis,
+    /// Bitiş; tüm gün etkinlikte dışlayıcı (ertesi günün 00:00'ı). Yoksa `None`.
+    pub end: Option<Millis>,
+    pub all_day: bool,
+    pub location: Option<String>,
+    /// Düzenleyen; yanıt bu adrese gider.
+    pub organizer: Option<Address>,
+    /// Katılımcı sayısı.
+    pub attendees: u32,
+    pub method: InviteMethod,
+    /// Davetin sürüm sayacı; yanıtta aynen döner.
+    pub sequence: u32,
+}
+
+/// Davete verilen yanıt (iTIP PARTSTAT).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum InviteResponse {
+    Accepted,
+    Tentative,
+    Declined,
+}
+
+/// Bir kişiyle yazışmanın özeti (kişi kartı).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ContactInfo {
+    pub email: String,
+    /// En son görülen görünen ad.
+    pub name: Option<String>,
+    /// Bu kişiden gelen ve ona giden toplam posta.
+    pub total: u32,
+    /// En son postanın tarihi.
+    pub last_date: Option<Millis>,
+    /// Son konuşmalar (her konuşmanın en yeni iletisi, yeniden eskiye).
+    pub recent: Vec<MessageSummary>,
 }
 
 /// Postanın `List-Unsubscribe` (RFC 2369) ve `List-Unsubscribe-Post`
@@ -652,6 +712,9 @@ pub enum ComposeMode {
 pub struct ComposePrefill {
     pub mode: ComposeMode,
     pub message_id: Option<MessageId>,
+    /// Yeni postada önceden doldurulan alıcılar (ör. kişi kartından).
+    #[serde(default)]
+    pub to: Vec<Address>,
 }
 
 // ------------------------------------------------------------------ eşitleme
@@ -766,6 +829,8 @@ pub struct Settings {
     pub dark_mail: bool,
     /// Yazma penceresinde eklenebilen hazır metinler (en çok 50).
     pub templates: Vec<Template>,
+    /// Okuma alanında konuşmanın tüm iletileri alt alta gösterilir.
+    pub conversation_view: bool,
 }
 
 /// Hazır posta şablonu.
@@ -853,6 +918,7 @@ impl Default for Settings {
             quick_replies: None,
             dark_mail: true,
             templates: Vec::new(),
+            conversation_view: true,
         }
     }
 }
@@ -1062,6 +1128,18 @@ mod tests {
                 mailto: None,
                 one_click: true,
             }),
+            invite: Some(Invite {
+                uid: "etkinlik-1@ornek.com".into(),
+                summary: "Sprint planlama".into(),
+                start: 1_000,
+                end: Some(4_600_000),
+                all_day: false,
+                location: Some("Toplantı odası 2".into()),
+                organizer: Some(Address::new(Some("Kerem"), "kerem@ornek.com")),
+                attendees: 3,
+                method: InviteMethod::Request,
+                sequence: 2,
+            }),
         };
         let v = serde_json::to_value(&d).unwrap();
         assert_eq!(v["subject"], "Merhaba");
@@ -1071,11 +1149,20 @@ mod tests {
             v["unsubscribe"],
             serde_json::json!({"url": "https://bulten.ornek.com/cik?u=1", "mailto": null, "oneClick": true})
         );
+        assert_eq!(v["invite"]["method"], "request");
+        assert_eq!(v["invite"]["allDay"], false);
+        assert_eq!(v["invite"]["organizer"]["email"], "kerem@ornek.com");
         // Alanı bilmeyen eski veri `None` okunur.
         let mut old = v.clone();
         old.as_object_mut().unwrap().remove("unsubscribe");
+        old.as_object_mut().unwrap().remove("invite");
         let back: MessageDetail = serde_json::from_value(old).unwrap();
         assert_eq!(back.unsubscribe, None);
+        assert_eq!(back.invite, None);
+        assert_eq!(
+            serde_json::to_value(InviteResponse::Tentative).unwrap(),
+            "tentative"
+        );
         assert_eq!(
             serde_json::to_value(UnsubscribeResult::Browser).unwrap(),
             "browser"
@@ -1169,6 +1256,31 @@ mod tests {
         assert_eq!(s.theme, Theme::Dark);
         assert_eq!(s.notify, NotifyMode::People);
         assert_eq!(s.undo_send_seconds, 10);
+        assert!(s.conversation_view, "eski ayarda konuşma görünümü açık");
+        assert_eq!(
+            serde_json::to_value(&s).unwrap()["conversationView"],
+            serde_json::json!(true)
+        );
+        // Kişi kartından açılan yazma penceresi alıcı taşır; eski istek boş liste.
+        let p: ComposePrefill =
+            serde_json::from_value(serde_json::json!({"mode": "new", "messageId": null})).unwrap();
+        assert!(p.to.is_empty());
+        let p: ComposePrefill = serde_json::from_value(serde_json::json!({
+            "mode": "new", "messageId": null, "to": [{"name": "Ayşe", "email": "ayse@ornek.com"}]
+        }))
+        .unwrap();
+        assert_eq!(p.to, vec![Address::new(Some("Ayşe"), "ayse@ornek.com")]);
+        let c = ContactInfo {
+            email: "ayse@ornek.com".into(),
+            name: Some("Ayşe".into()),
+            total: 4,
+            last_date: Some(9),
+            recent: vec![],
+        };
+        assert_eq!(
+            serde_json::to_value(&c).unwrap(),
+            serde_json::json!({"email": "ayse@ornek.com", "name": "Ayşe", "total": 4, "lastDate": 9, "recent": []})
+        );
         assert_eq!(
             serde_json::to_value(CardPosition::BottomRight).unwrap(),
             "bottomRight"

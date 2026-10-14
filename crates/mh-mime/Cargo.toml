@@ -12,3 +12,5 @@ mh-core.workspace = true
 mail-parser.workspace = true
 ammonia.workspace = true
 base64.workspace = true
+# Takvim daveti: tarih-saat ve dilim hesapları.
+chrono.workspace = true

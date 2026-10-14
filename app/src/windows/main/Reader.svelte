@@ -2,16 +2,16 @@
   import { call, toAppError } from '../../lib/api';
   import { locale, t, when } from '../../lib/i18n/index.svelte';
   import Avatar from '../../lib/ui/Avatar.svelte';
-  import FileBadge from '../../lib/ui/FileBadge.svelte';
   import Icon from '../../lib/ui/Icon.svelte';
   import { showToast } from '../../lib/ui/toast.svelte';
   import { flatten, folderLabel, folderTree } from '../../lib/mail/folders';
-  import MailBody from '../../lib/mail/MailBody.svelte';
+  import Conversation from '../../lib/mail/Conversation.svelte';
+  import MessageView from '../../lib/mail/MessageView.svelte';
   import Menu, { type MenuItem } from '../../lib/ui/Menu.svelte';
   import SnoozeMenu from '../../lib/mail/SnoozeMenu.svelte';
+  import { printDocument, printInFrame } from '../../lib/mail/print';
   import { displayName, fileSize, foreignReplyDomains, replyTargets } from '../../lib/util/format';
   import {
-    allowRemote,
     blockSender,
     mail,
     moveTo,
@@ -22,9 +22,9 @@
     sendQuickReply,
     setUnread,
     snooze,
-    toggleStar,
     unsubscribe,
   } from '../../lib/stores/mail.svelte';
+  import { settings } from '../../lib/stores/settings.svelte';
 
   let reply = $state('');
   let sending = $state(false);
@@ -33,16 +33,12 @@
 
   const d = $derived(mail.detail);
   const account = $derived(d ? mail.accounts.find((a) => a.id === d.accountId) : undefined);
-  const recipients = $derived.by(() => {
-    if (!d) return '';
-    const mine = account?.email.toLowerCase();
-    return [...d.to, ...d.cc].map((a) => (a.email.toLowerCase() === mine ? t('read.me') : displayName(a))).join(', ');
-  });
   // Yanıt alıcıları adresleriyle gösterilir: gizli bir Reply-To fark edilsin.
   const replyList = $derived(d ? replyTargets(d).map((a) => a.email).join(', ') : '');
   const replyForeign = $derived(d ? foreignReplyDomains(d) : []);
-  const totalSize = $derived(d ? d.attachments.reduce((s, a) => s + a.size, 0) : 0);
   const isDraft = $derived(d ? mail.mailboxes.find((b) => b.id === d.mailboxId)?.role === 'drafts' : false);
+  /** Konuşma görünümü: ayar açık ve taslak değil. */
+  const conversation = $derived(settings.value.conversationView && !isDraft);
 
   export function focusReply() {
     if (isDraft) editDraft();
@@ -73,10 +69,27 @@
     }
   }
 
-  async function openAttachment(index: number) {
+  /** Başlıklar ve gövde yalıtılmış bir çerçevede yazdırılır; arayüz basılmaz. */
+  async function print() {
+    if (!d) return;
+    const doc = printDocument({
+      detail: d,
+      labels: { from: t('print.from'), to: t('print.to'), cc: t('print.cc'), date: t('print.date'), attachments: t('print.attachments') },
+      when: when(d.date),
+      fileSize: (n) => fileSize(n, locale()),
+    });
+    try {
+      await printInFrame(doc);
+    } catch {
+      showToast({ text: t('print.failed') });
+    }
+  }
+
+  async function saveEml() {
     if (!d) return;
     try {
-      await call('attachment_open', { id: d.id, index });
+      const path = await call('message_save_eml', { id: d.id });
+      if (path) showToast({ text: t('print.saved', { path }) });
     } catch (e) {
       showToast({ text: t('toast.error', { message: toAppError(e).message }) });
     }
@@ -113,6 +126,8 @@
       items: [
         { label: t('act.markUnread'), icon: 'mail', hint: 'U', onclick: () => void setUnread([msg.id], true) },
         { label: t('read.openQuick'), icon: 'external', onclick: () => void call('open_quick', { id: msg.id }) },
+        { label: t('print.action'), icon: 'print', onclick: () => void print() },
+        { label: t('print.saveEml'), icon: 'download', onclick: () => void saveEml() },
         ...(msg.unsubscribe ? [{ label: t('read.unsubscribe'), icon: 'unsubscribe' as const, onclick: () => void unsubscribe(msg) }] : []),
         {
           label: t('read.ruleFromSender'),
@@ -182,82 +197,43 @@
     </div>
 
     <div class="scroll">
-      {#key d.id}
-        <article class="article">
-          <div class="subject-row">
-            <h2 class="selectable">{d.subject || '—'}</h2>
-            {#if account && mail.accounts.length > 1}<span class="tag">{account.name}</span>{/if}
-          </div>
-          <div class="meta">{t('read.thread', { n: d.thread.length + 1 })} · {d.from.email}</div>
-
-          {#if d.thread.length}
-            <div class="thread">
-              {#each d.thread as p (p.id)}
-                <button class="prior" onclick={() => select(p.id, { markRead: false })}>
-                  <Avatar address={p.from} size={28} />
-                  <span class="trunc"><span class="prior-name">{displayName(p.from)}</span><span class="prior-text">{p.snippet}</span></span>
-                  <span class="meta num">{when(p.date)}</span>
-                </button>
-              {/each}
+      {#if conversation}
+        {#key `${d.accountId}|${d.threadId}`}
+          <article class="article">
+            <div class="subject-row">
+              <h2 class="selectable">{d.subject || '—'}</h2>
+              {#if account && mail.accounts.length > 1}<span class="tag">{account.name}</span>{/if}
             </div>
-          {/if}
-
-          <div class="sender">
-            <Avatar address={d.from} size={40} />
-            <div class="who">
-              <div class="trunc"><span class="name">{displayName(d.from)}</span><span class="meta addr">{d.from.email}</span></div>
-              <div class="meta trunc">{t('read.to', { list: recipients })}</div>
+            <Conversation selected={d} />
+          </article>
+        {/key}
+      {:else}
+        {#key d.id}
+          <article class="article">
+            <div class="subject-row">
+              <h2 class="selectable">{d.subject || '—'}</h2>
+              {#if account && mail.accounts.length > 1}<span class="tag">{account.name}</span>{/if}
             </div>
-            <span class="meta num">{when(d.date)}</span>
-            <button class="btn-icon" aria-label={d.starred ? t('act.unstar') : t('act.star')} title="{t('act.star')} · S" onclick={() => toggleStar(d.id)}>
-              <span class:star={d.starred}><Icon name="star" filled={d.starred} /></span>
-            </button>
-          </div>
+            <div class="meta">{t('read.thread', { n: d.thread.length + 1 })} · {d.from.email}</div>
 
-          {#if d.unsubscribe}
-            <div class="unsub">
-              <Icon name="unsubscribe" size={16} />
-              <span class="grow">{t('read.listMail')}</span>
-              <button class="link small" onclick={() => d && unsubscribe(d)}>{t('read.unsubscribe')}</button>
-            </div>
-          {/if}
-
-          {#if d.hasRemoteContent && !d.remoteAllowed}
-            <div class="remote">
-              <Icon name="shield" />
-              <span class="remote-text">{t('read.remoteBlocked')}</span>
-              <button class="link small" onclick={() => allowRemote(d.id)}>{t('read.remoteAllow')}</button>
-            </div>
-          {/if}
-
-          <div class="body">
-            {#if d.bodyText == null && d.bodyHtml == null}
-              <p class="meta">{t('read.noBody')}</p>
-            {:else}
-              <MailBody text={d.bodyText} html={d.bodyHtml} remoteAllowed={d.remoteAllowed} />
-            {/if}
-          </div>
-
-          {#if d.attachments.length}
-            <div class="atts">
-              <div class="atts-head">
-                <span class="atts-title">{t('read.attachments', { n: d.attachments.length, size: fileSize(totalSize, locale()) })}</span>
-              </div>
-              <div class="atts-list">
-                {#each d.attachments as a (a.index)}
-                  <button class="att" onclick={() => openAttachment(a.index)} title={a.name}>
-                    <FileBadge name={a.name} mime={a.mime} />
-                    <span class="att-text">
-                      <span class="trunc att-name">{a.name}</span>
-                      <span class="meta">{fileSize(a.size, locale())} · {t('read.preview')}</span>
-                    </span>
+            {#if d.thread.length}
+              <div class="thread">
+                {#each d.thread as p (p.id)}
+                  <button class="prior" onclick={() => select(p.id, { markRead: false })}>
+                    <Avatar address={p.from} size={28} />
+                    <span class="trunc"><span class="prior-name">{displayName(p.from)}</span><span class="prior-text">{p.snippet}</span></span>
+                    <span class="meta num">{when(p.date)}</span>
                   </button>
                 {/each}
               </div>
+            {/if}
+
+            <div class="single">
+              <MessageView detail={d} />
             </div>
-          {/if}
-        </article>
-      {/key}
+          </article>
+        {/key}
+      {/if}
     </div>
 
     {#if !isDraft}<div class="reply-wrap">
@@ -405,127 +381,8 @@
     color: var(--ink-2);
   }
 
-  .sender {
+  .single {
     margin-top: 22px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-
-  .who {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-  }
-
-  .name {
-    font-weight: 600;
-  }
-
-  .addr {
-    margin-left: 8px;
-  }
-
-  .star {
-    display: inline-flex;
-    color: var(--amber);
-  }
-
-  .unsub {
-    margin-top: 18px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 8px 12px;
-    border-radius: var(--r-row);
-    background: var(--surface);
-    border: 1px solid var(--line);
-    color: var(--ink-2);
-    font-size: var(--fs-meta);
-  }
-
-  .unsub + .remote {
-    margin-top: 8px;
-  }
-
-  .remote {
-    margin-top: 18px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 10px 12px;
-    border-radius: var(--r-row);
-    background: var(--surface);
-    border: 1px solid var(--line);
-    color: var(--accent-text);
-  }
-
-  .remote-text {
-    flex: 1;
-    font-size: var(--fs-meta);
-    color: var(--ink-2);
-  }
-
-  .link.small {
-    font-size: var(--fs-meta);
-  }
-
-  .body {
-    margin-top: 22px;
-  }
-
-  .atts {
-    margin-top: 26px;
-    padding-top: 18px;
-    border-top: 1px solid var(--line);
-  }
-
-  .atts-head {
-    margin-bottom: 10px;
-  }
-
-  .atts-title {
-    font-size: var(--fs-meta);
-    font-weight: 600;
-    color: var(--ink-2);
-  }
-
-  .atts-list {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-  }
-
-  .att {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    width: 252px;
-    padding: 8px 12px 8px 8px;
-    border: 1px solid var(--line);
-    border-radius: var(--r-card);
-    background: var(--paper);
-    color: var(--ink);
-    text-align: left;
-    transition:
-      border-color var(--t-fast),
-      background var(--t-fast);
-  }
-
-  .att:hover {
-    border-color: var(--line-strong);
-    background: var(--hover);
-  }
-
-  .att-text {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-  }
-
-  .att-name {
-    font-weight: 500;
   }
 
   .reply-wrap {

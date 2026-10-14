@@ -61,6 +61,11 @@ fn main() {
         "outbox_list",
         "outbox_send_now",
         "outbox_to_draft",
+        "thread_get",
+        "contact_get",
+        "message_save_eml",
+        "invite_reply",
+        "invite_open",
     ];
     tauri_build::try_build(
         tauri_build::Attributes::new()
