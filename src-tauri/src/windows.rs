@@ -281,7 +281,8 @@ fn mode_route(mode: ComposeMode) -> &'static str {
 const MAX_PREFILL_TO: usize = 20;
 
 /// Yazma penceresinin rotası: `compose/<kip>/<posta>`; alıcılar varsa
-/// `?to=Ad <adres>` sorgu parametreleri (arayüz çözer).
+/// `?to=Ad <adres>`, hesap verilmişse `from=<hesap>` sorgu parametreleri
+/// (arayüz çözer).
 fn compose_route(prefill: &ComposePrefill) -> String {
     let mut route = format!(
         "compose/{}/{}",
@@ -294,12 +295,23 @@ fn compose_route(prefill: &ComposePrefill) -> String {
         .filter(|a| a.email.contains('@') && !a.email.chars().any(char::is_whitespace))
         .take(MAX_PREFILL_TO)
         .collect();
-    if to.is_empty() {
+    // Hesap kimliği yalnız güvenli karakterlerden oluşuyorsa taşınır.
+    let from = prefill.account_id.as_deref().filter(|id| {
+        !id.is_empty()
+            && id.len() <= 64
+            && id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | ':'))
+    });
+    if to.is_empty() && from.is_none() {
         return route;
     }
     let mut url = tauri::Url::parse("mailhere://compose/").expect("sabit adres");
     {
         let mut q = url.query_pairs_mut();
+        if let Some(id) = from {
+            q.append_pair("from", id);
+        }
         for a in to {
             let value = match a
                 .name
@@ -391,6 +403,7 @@ mod tests {
             mode: ComposeMode::Reply,
             message_id: Some(7),
             to: Vec::new(),
+            account_id: None,
         };
         assert_eq!(compose_route(&plain), "compose/reply/7");
         let with_to = ComposePrefill {
@@ -401,6 +414,7 @@ mod tests {
                 mh_core::Address::new(None, "bozuk adres"),
                 mh_core::Address::new(Some("Evil\r\nX"), "e@ornek.com"),
             ],
+            account_id: None,
         };
         let route = compose_route(&with_to);
         assert!(route.starts_with("compose/new/0?to="), "{route}");
@@ -411,5 +425,18 @@ mod tests {
         assert!(!route.contains("bozuk"), "boşluklu adres atılır");
         assert!(route.contains("to=Evil+X+%3Ce%40ornek.com%3E"), "{route}");
         assert!(!route.contains('\n'));
+        // Hesap kimliği taşınır; güvensiz kimlik atılır.
+        let from = ComposePrefill {
+            mode: ComposeMode::New,
+            message_id: None,
+            to: Vec::new(),
+            account_id: Some("demo-is".into()),
+        };
+        assert_eq!(compose_route(&from), "compose/new/0?from=demo-is");
+        let bad = ComposePrefill {
+            account_id: Some("a&to=x@y.z".into()),
+            ..from
+        };
+        assert_eq!(compose_route(&bad), "compose/new/0");
     }
 }

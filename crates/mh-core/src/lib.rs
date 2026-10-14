@@ -808,6 +808,10 @@ pub struct ComposePrefill {
     /// Yeni postada önceden doldurulan alıcılar (ör. kişi kartından).
     #[serde(default)]
     pub to: Vec<Address>,
+    /// Yeni postanın gönderileceği hesap (ör. kişi kartının açıldığı
+    /// postanın hesabı); yoksa ilk hesap.
+    #[serde(default)]
+    pub account_id: Option<AccountId>,
 }
 
 // ------------------------------------------------------------------ eşitleme
