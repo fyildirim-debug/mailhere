@@ -32,6 +32,7 @@ pub mod signatures;
 pub mod sink;
 pub mod state;
 pub mod transfer;
+pub mod wake;
 
 pub use platform::{BoxFut, Confirm, Platform};
 pub use state::{setup_core, AppState, Dirs};
@@ -82,6 +83,7 @@ define_shared_commands! { $
     commands::settings_set,
     commands::quick_replies_set,
     commands::sync_now,
+    commands::sync_reconnect,
     commands::open_main,
     commands::open_compose,
     commands::notify_snooze,

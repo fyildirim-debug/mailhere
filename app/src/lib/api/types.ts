@@ -753,6 +753,8 @@ export interface Commands {
   settings_get: [Record<string, never>, Settings];
   settings_set: [{ settings: Settings }, Settings];
   sync_now: [Record<string, never>, null];
+  /** Bağlantıları baştan kurar (arka plandan dönüş, ağ değişimi); sık çağrılırsa yalnız eşitler. */
+  sync_reconnect: [Record<string, never>, null];
   open_main: [{ id: MessageId | null }, null];
   open_quick: [{ id: MessageId }, null];
   open_compose: [{ prefill: ComposePrefill }, null];

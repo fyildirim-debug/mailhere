@@ -35,6 +35,7 @@
     "allow-settings-set",
     "allow-quick-replies-set",
     "allow-sync-now",
+    "allow-sync-reconnect",
     "allow-open-quick",
     "allow-open-compose",
     "allow-notify-snooze",

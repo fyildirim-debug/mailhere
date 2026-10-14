@@ -33,6 +33,8 @@ pub struct AppState {
     pub platform: Arc<dyn Platform>,
     /// QR aktarımı: açık teklif ve uygulanmayı bekleyen paketler.
     pub transfer: crate::transfer::TransferHub,
+    /// Bağlantıları baştan kurmanın sıklık sınırı (uyku, arka plandan dönüş).
+    pub reconnect: crate::wake::Reconnect,
 }
 
 pub fn now_ms() -> Millis {
@@ -261,6 +263,7 @@ pub fn setup_core(
         cache_dir: dirs.cache,
         platform: platform.clone(),
         transfer: Default::default(),
+        reconnect: Default::default(),
     });
     if let Err(e) = core.start(&rt) {
         tracing::error!(code = %e.code, error = %e.message, "eşitleme başlatılamadı");
@@ -268,6 +271,8 @@ pub fn setup_core(
         return Err(e);
     }
     rt.spawn(crate::sink::snooze_ticker(handle.clone()));
+    // Uykudan dönüşte ölü IDLE bağlantıları beklenmeden yenilenir.
+    rt.spawn(crate::wake::sleep_watch(handle.clone()));
     // Yanıt hatırlatmaları: açılışta kaçan süreler değerlendirilir, sonra dakikada bir.
     rt.spawn(crate::followups::ticker(handle.clone()));
     crate::screener::start(&handle, &rt);

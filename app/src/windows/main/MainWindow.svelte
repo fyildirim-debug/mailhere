@@ -14,6 +14,7 @@
   import { checkAll, checkedIds, clearChecked, extendChecked, multi } from '../../lib/stores/selection.svelte';
   import { resolvedTheme, toggleTheme } from '../../lib/stores/settings.svelte';
   import { initUpdate } from '../../lib/stores/update.svelte';
+  import { watchWake } from '../../lib/mail/wake';
   import BulkPanel from './BulkPanel.svelte';
   import CommandPalette from './CommandPalette.svelte';
   import MessageList from './MessageList.svelte';
@@ -34,6 +35,8 @@
   onMount(() => {
     void initMail();
     initUpdate();
+    // Ağ geri gelince ölü bağlantılar yenilenir (uyku Rust tarafında yakalanır).
+    return watchWake({ background: false });
   });
 
   // Görev çubuğunda okunmamış sayısı.

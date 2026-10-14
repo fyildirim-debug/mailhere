@@ -22,6 +22,7 @@ settings_get
 settings_set
 quick_replies_set
 sync_now
+sync_reconnect
 open_main
 open_compose
 notify_snooze

@@ -13,6 +13,7 @@
   import { t, type MessageKey } from '../../lib/i18n/index.svelte';
   import { listTitle } from '../../lib/mail/listing';
   import { bindComposeOpener } from '../../lib/mail/open';
+  import { watchWake } from '../../lib/mail/wake';
   import Icon from '../../lib/ui/Icon.svelte';
   import Menu, { type MenuItem } from '../../lib/ui/Menu.svelte';
   import { bindSheetLayer } from '../../lib/ui/sheet-layer';
@@ -69,12 +70,15 @@
       const r = parseRoute(p.route);
       if (r.name === 'compose') openCompose({ name: 'compose', mode: r.mode, id: r.id, to: r.to, from: r.from });
     });
+    // Arka plandan dönüşte ve ağ değişince ölü bağlantılar yenilenir.
+    const offWake = watchWake({ background: true });
     return () => {
       window.removeEventListener('popstate', onPop);
       bindSheetLayer(null);
       bindComposeOpener(null);
       offOpen();
       offNav();
+      offWake();
     };
   });
 

@@ -837,6 +837,10 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       for (const a of state.accounts) emit(EVENTS.sync, { accountId: a.id, state: 'online' });
       return null;
     },
+    sync_reconnect: () => {
+      for (const a of state.accounts) emit(EVENTS.sync, { accountId: a.id, state: 'online' });
+      return null;
+    },
     open_main: () => {
       if (typeof window !== 'undefined') window.location.hash = '#/main';
       return null;

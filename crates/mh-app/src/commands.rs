@@ -618,6 +618,13 @@ pub fn sync_now(app: AppHandle, state: State<'_, AppState>) -> Res<()> {
     Ok(())
 }
 
+/// Bağlantıları baştan kurar: telefon arka plandan döndü ya da ağ değişti.
+/// Sık çağrılırsa yalnız eşitler.
+#[tauri::command]
+pub fn sync_reconnect(state: State<'_, AppState>) -> Res<()> {
+    crate::wake::reconnect(&state, "istek")
+}
+
 // ------------------------------------------------------------------ pencereler
 //
 // Pencere açan komutlar `async`tır: eşzamanlı komutta pencere oluşturmak
