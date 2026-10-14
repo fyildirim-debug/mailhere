@@ -483,6 +483,12 @@
     scrollbar-gutter: stable;
   }
 
+  /* Taşan sütunda satırlar büzülmesin (çok klasörlü hesapta görünümler
+     sıkışıyor, son klasör kaydırılamıyordu). */
+  .scroll > :global(*) {
+    flex-shrink: 0;
+  }
+
   .views,
   .scopes,
   .tree {

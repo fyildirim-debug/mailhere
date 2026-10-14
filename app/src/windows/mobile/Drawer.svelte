@@ -279,7 +279,13 @@
           {#each trees[account.id] ?? [] as node (node.mailbox.id)}
             {@const b = node.mailbox}
             {@const on = folderActive(account, b, mail)}
+            <!-- Simge görünümlerle aynı sütunda; aç/kapa oku yalnız alt klasörü olanda, sonda. -->
             <div class="folder" class:active={on} style:--depth={node.depth}>
+              <button class="item folder-main" aria-current={on ? 'page' : undefined} onclick={() => openFolder(account, b)}>
+                <Icon name={folderIcon(b)} size={22} />
+                <span class="trunc grow">{folderLabel(b)}</span>
+                {#if folderCount(b) > 0}<span class="count num">{folderCount(b)}</span>{/if}
+              </button>
               {#if node.children.length}
                 <button
                   class="disclose"
@@ -289,14 +295,7 @@
                 >
                   <Icon name="chevronRight" size={16} class="chev {shut.has(b.id) ? '' : 'turned'}" />
                 </button>
-              {:else}
-                <span class="disclose" aria-hidden="true"></span>
               {/if}
-              <button class="item folder-main" aria-current={on ? 'page' : undefined} onclick={() => openFolder(account, b)}>
-                <Icon name={folderIcon(b)} size={22} />
-                <span class="trunc grow">{folderLabel(b)}</span>
-                {#if folderCount(b) > 0}<span class="count num">{folderCount(b)}</span>{/if}
-              </button>
             </div>
           {/each}
         </div>
@@ -424,6 +423,12 @@
     overflow-y: auto;
     overscroll-behavior: contain;
     scrollbar-gutter: stable;
+  }
+
+  /* Taşan sütunda satırlar büzülmesin: klasörü çok hesapta görünümler yazı
+     yüksekliğine iniyor, klasör bloğu taşıp son satır kaydırılamıyordu. */
+  .scroll > :global(*) {
+    flex-shrink: 0;
   }
 
   .scopes,
@@ -607,7 +612,7 @@
   .folder {
     display: flex;
     align-items: center;
-    padding-left: calc(var(--depth) * 16px);
+    padding-left: calc(var(--depth) * 20px);
     border-radius: var(--r-row);
   }
 
@@ -629,7 +634,6 @@
   .folder-main {
     flex: 1;
     min-width: 0;
-    padding-left: 2px;
   }
 
   .folder.active .folder-main,

@@ -159,3 +159,43 @@ test('koyu tema çekmeceden açılır; görüntü bozulmaz', async ({ page }) =>
   // Koyu temada da satırlar ve yüzen düğme yerinde.
   await expect(page.getByRole('button', { name: 'Yeni posta' })).toBeVisible();
 });
+
+test('çok klasörlü hesapta çekmece satırları büzülmez; klasör simgeleri görünümlerle hizalı, son klasöre inilir', async ({ page }) => {
+  // Gerçek hesaplarda klasörler ekrana sığmaz: taşan sütunda görünüm satırları
+  // yazı yüksekliğine büzülüyor, son klasör alt çubuğun altında kalıyordu.
+  await page.waitForFunction(() => !!window.__mh);
+  await page.evaluate(() => {
+    const acc = window.__mh.state.accounts[0].id;
+    for (let i = 1; i <= 14; i++) {
+      const name = `Klasör ${String(i).padStart(2, '0')}`;
+      window.__mh.state.mailboxes.push({ id: `${acc}:${name}`, accountId: acc, path: name, name, role: 'other', unread: 0, total: 0, parentId: null, hidden: false });
+    }
+    // Arayüz klasörleri değişiklik olayıyla yeniden okur.
+    window.__mh.emit('mh:changed', []);
+  });
+  // İş kapsamında hesabın klasörleri açık listelenir.
+  await openDrawer(page);
+  await drawer(page).getByRole('button', { name: /^İş/ }).first().click();
+  await expect(drawer(page)).toBeHidden();
+  await openDrawer(page);
+  const d = drawer(page);
+  for (const name of ['Gelen Kutusu', 'Çöp', 'İstenmeyen', 'Klasör 01']) {
+    const box = await d.getByRole('button', { name, exact: true }).boundingBox();
+    expect(Math.round(box!.height * 100) / 100, name).toBeGreaterThanOrEqual(48);
+  }
+  // Yaprak klasörün simgesi görünüm simgesiyle aynı sütunda (çekmece kayarken
+  // de doğru olsun diye iki simge aynı karede ölçülür).
+  const dx = await d.evaluate((el) => {
+    const icon = (name: string) =>
+      [...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === name)!.querySelector('svg')!.getBoundingClientRect().x;
+    return Math.abs(icon('Klasör 01') - icon('Gelen Kutusu'));
+  });
+  expect(dx).toBeLessThan(1);
+  // Son klasöre kaydırılır ve alt çubuğun üstünde görünür.
+  const last = d.getByRole('button', { name: 'Klasör 14', exact: true });
+  await last.scrollIntoViewIfNeeded();
+  await expect(last).toBeInViewport({ ratio: 1 });
+  const nav = (await d.getByRole('navigation').boundingBox())!;
+  const lastBox = (await last.boundingBox())!;
+  expect(lastBox.y + lastBox.height).toBeLessThanOrEqual(nav.y + nav.height + 0.5);
+});
