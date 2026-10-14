@@ -656,7 +656,9 @@ async fn apply_account(
     let (key, kind) = secret_slot(&account);
     let secret = ta.secret.filter(|s| s.kind == kind);
     let mut without_secret = false;
-    match secret {
+    // Önce giriş denetimi (ağ), sonra hesap satırı, en son gizli değer: depo
+    // yazılamazsa anahtar zincirinde hesapsız parola kalmasın.
+    let secret = match secret {
         Some(secret) => {
             let rejected = applier.check_login
                 && kind == SecretKind::Password
@@ -670,24 +672,31 @@ async fn apply_account(
             if rejected {
                 tracing::warn!(account = %account.id, "sunucu aktarılan parolayı reddetti; parola kaydedilmedi");
                 without_secret = true;
-            } else if let Err(e) = secret_set(applier.secrets, key, secret.value.clone()).await {
-                tracing::warn!(account = %account.id, error = %e.message, "gizli değer anahtar zincirine yazılamadı");
-                without_secret = true;
+                None
+            } else {
+                Some(secret)
             }
         }
         None => {
             // Yerelde zaten gizli değeri olan hesap korunur; yoksa parola istenir.
-            if !(exists && secret_present(applier.secrets, key).await) {
+            if !(exists && secret_present(applier.secrets, key.clone()).await) {
                 without_secret = true;
             }
+            None
+        }
+    };
+    store.insert_account(&account)?;
+    if let Some(u) = jmap_username.as_deref() {
+        store.set_jmap_username(&account.id, u)?;
+    }
+    if let Some(secret) = secret {
+        if let Err(e) = secret_set(applier.secrets, key, secret.value.clone()).await {
+            tracing::warn!(account = %account.id, error = %e.message, "gizli değer anahtar zincirine yazılamadı");
+            without_secret = true;
         }
     }
     if without_secret {
         report.accounts_without_secret.push(account.email.clone());
-    }
-    store.insert_account(&account)?;
-    if let Some(u) = jmap_username.as_deref() {
-        store.set_jmap_username(&account.id, u)?;
     }
     if exists {
         report.accounts_updated += 1;

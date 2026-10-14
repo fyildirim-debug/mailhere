@@ -19,7 +19,7 @@
 //!   ve sayılır (5 → teklif kapanır). Paket tek bir istemciye bir kez verilir.
 //! - Sunucu yalnız yerel ağ eşlerini kabul eder; kod yalnız yerel ağ
 //!   adresleri taşır; genel adres içeren kod reddedilir.
-//! - Süreler: teklif 180 s, onay 120 s, okuma 10 s, istemci toplam 30 s.
+//! - Süreler: teklif 180 s, onay 8 dk, okuma 10 s, istemci toplam 30 s.
 //! - Gizli değerler (`K`, türetilmiş anahtarlar, düz paket) `Zeroizing`;
 //!   `Debug` çıktıları ve hata mesajları gizli değer içermez.
 //!

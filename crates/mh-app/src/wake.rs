@@ -47,8 +47,10 @@ pub fn reconnect(state: &AppState, why: &str) -> AppResult<()> {
         return Ok(());
     }
     tracing::info!(why, "bağlantılar yeniden kuruluyor");
-    state.sync.start_all()?;
-    state.jmap.start_all()
+    // Biri başarısız olsa da öteki yeniden kurulur.
+    let imap = state.sync.start_all();
+    let jmap = state.jmap.start_all();
+    imap.and(jmap)
 }
 
 /// İki ölçümden büyük olanı: Linux'ta tekdüze saat uykuda durur (duvar

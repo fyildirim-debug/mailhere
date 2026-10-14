@@ -44,6 +44,11 @@ use crate::EventSink;
 
 const MIN_BACKOFF: Duration = Duration::from_secs(2);
 const MAX_BACKOFF: Duration = Duration::from_secs(300);
+/// Bu kadar ayakta kalan oturum sağlıklı sayılır; kopunca bekleme baştan
+/// başlar. Giriş yapılır yapılmaz kopan oturum (bağlantı sınırında BYE,
+/// IDLE'ı saniyeler içinde kesen ara cihaz) beklemeyi büyütmeye devam eder;
+/// yoksa sunucu 2 saniyede bir yoklanırdı.
+const STABLE_SESSION: Duration = Duration::from_secs(60);
 /// Tüm kutuların düzenli eşitlenmesi (aynı zamanda bağlantıyı canlı tutar).
 const PERIODIC: Duration = Duration::from_secs(10 * 60);
 /// IDLE en geç bu sürede yenilenir (RFC 2177: 29 dakikadan kısa). Kısa
@@ -242,6 +247,11 @@ impl SyncManager {
     /// Hesabın eşitleme görevlerini başlatır (zaten çalışıyorsa yeniden).
     pub fn start(&self, account: Account) {
         self.stop(&account.id);
+        // JMAP hesabının durumunu JMAP yöneticisi bildirir; burada "çevrimiçi"
+        // yayılsaydı yeniden başlatmada bir an yanlış durum görünürdü.
+        if account.kind == AccountKind::Jmap {
+            return;
+        }
         if !is_syncable(&account) {
             self.sink.sync_status(SyncStatus {
                 account_id: account.id.clone(),
@@ -622,7 +632,8 @@ async fn account_loop(ctx: Arc<AccountCtx>, mut rx: UnboundedReceiver<Command>) 
     let mut pending: VecDeque<Command> = VecDeque::from([Command::SyncAll]);
     let mut backoff = MIN_BACKOFF;
     loop {
-        let err = match run_session(&ctx, &mut rx, &mut pending, &mut backoff).await {
+        let opened = Instant::now();
+        let err = match run_session(&ctx, &mut rx, &mut pending).await {
             Ok(()) => return,
             Err(e) => e,
         };
@@ -641,6 +652,9 @@ async fn account_loop(ctx: Arc<AccountCtx>, mut rx: UnboundedReceiver<Command>) 
                 message: app.message,
             },
         });
+        if opened.elapsed() >= STABLE_SESSION {
+            backoff = MIN_BACKOFF;
+        }
         let sleep = tokio::time::sleep(backoff);
         tokio::pin!(sleep);
         loop {
@@ -695,7 +709,6 @@ async fn run_session(
     ctx: &AccountCtx,
     rx: &mut UnboundedReceiver<Command>,
     pending: &mut VecDeque<Command>,
-    backoff: &mut Duration,
 ) -> SyncResult<()> {
     if pending.contains(&Command::SyncAll) {
         ctx.status(SyncState::Syncing { done: 0, total: 0 });
@@ -709,7 +722,6 @@ async fn run_session(
         server_paths: HashSet::new(),
         listed: false,
     };
-    *backoff = MIN_BACKOFF;
     // Kutular işlemlerden önce: hedef kutular, roller ve eşitlenmeyen kutular
     // (Gmail "Tüm Postalar") bilinsin.
     timeout(ACTION_TIMEOUT, refresh_mailboxes(ctx, &mut conn)).await??;
@@ -776,6 +788,14 @@ async fn run_actions(
     pending: &mut VecDeque<Command>,
 ) -> SyncResult<()> {
     while let Some(qa) = ctx.store.action_head(ctx.id())? {
+        // Ekleme başlamadan deneme sayılır: görev ortada iptal edilirse
+        // (uyandırma, yeniden bağlanma) sonraki oturum sunucuda Message-ID ile
+        // arar, posta Gönderilenler'e iki kez yazılmaz.
+        let started = if matches!(qa.action, Action::Append { .. }) {
+            Some(ctx.store.action_attempt(qa.id)?)
+        } else {
+            None
+        };
         let res = match timeout(action_timeout(&qa), run_action(ctx, conn, &qa)).await {
             Ok(r) => r,
             Err(_) => Err(SyncError::Timeout),
@@ -793,7 +813,10 @@ async fn run_actions(
                 }
             }
             Err(e) if e.is_connection() => {
-                let attempts = ctx.store.action_attempt(qa.id)?;
+                let attempts = match started {
+                    Some(n) => n,
+                    None => ctx.store.action_attempt(qa.id)?,
+                };
                 if attempts >= ACTION_MAX_ATTEMPTS {
                     tracing::warn!(account = %ctx.account.id, action = ?qa.action, "sunucu işleminden vazgeçildi");
                     ctx.store.action_done(qa.id)?;
@@ -1483,12 +1506,16 @@ async fn apply_delete(conn: &mut Conn, items: &[ServerRef]) -> SyncResult<()> {
 async fn idle_loop(ctx: Arc<AccountCtx>, tx: UnboundedSender<Command>) {
     let mut backoff = MIN_BACKOFF;
     loop {
-        let res = idle_session(&ctx, &tx, &mut backoff).await;
+        let opened = Instant::now();
+        let res = idle_session(&ctx, &tx).await;
         ctx.watching.store(false, Ordering::Relaxed);
         match res {
             Ok(()) => return,
             Err(e) => {
                 tracing::debug!(account = %ctx.account.id, error = %e, "IDLE bağlantısı kesildi");
+                if opened.elapsed() >= STABLE_SESSION {
+                    backoff = MIN_BACKOFF;
+                }
                 // Onay bekleyen sertifikada sunucu boşuna yoklanmasın.
                 let wait = if e.to_app().code == ErrorCode::Untrusted {
                     MAX_BACKOFF
@@ -1502,14 +1529,9 @@ async fn idle_loop(ctx: Arc<AccountCtx>, tx: UnboundedSender<Command>) {
     }
 }
 
-async fn idle_session(
-    ctx: &AccountCtx,
-    tx: &UnboundedSender<Command>,
-    backoff: &mut Duration,
-) -> SyncResult<()> {
+async fn idle_session(ctx: &AccountCtx, tx: &UnboundedSender<Command>) -> SyncResult<()> {
     let mut session = ctx.connect().await?;
     let caps = timeout(ACTION_TIMEOUT, session.capabilities()).await??;
-    *backoff = MIN_BACKOFF;
     if !caps.has_str("IDLE") {
         let _ = timeout(Duration::from_secs(5), session.logout()).await;
         ctx.watching.store(true, Ordering::Relaxed);

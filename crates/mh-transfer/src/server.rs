@@ -46,7 +46,9 @@ pub const MAX_CONNECTIONS: usize = 8;
 pub struct OfferOptions {
     /// Teklifin ömrü (telefon bu sürede bağlanmalı): 180 s.
     pub ttl: Duration,
-    /// Teslimden sonra onay için beklenen süre: 120 s.
+    /// Teslimden sonra onay için beklenen süre: 8 dk. Telefon önizlemeyi 5 dk
+    /// tutar, uygularken hesap başına giriş denetimi yapar; bilgisayar o sırada
+    /// "onay gelmedi" deyip kapanmasın.
     pub confirm_ttl: Duration,
     /// Bir bağlantıdan selam/onay okuma süresi: 10 s.
     pub read_timeout: Duration,
@@ -68,7 +70,7 @@ impl Default for OfferOptions {
     fn default() -> Self {
         Self {
             ttl: Duration::from_secs(180),
-            confirm_ttl: Duration::from_secs(120),
+            confirm_ttl: Duration::from_secs(8 * 60),
             read_timeout: Duration::from_secs(10),
             write_timeout: Duration::from_secs(30),
             max_bad_attempts: 5,
@@ -418,6 +420,36 @@ async fn run(
     emit(last);
 }
 
+/// Bağlantıdan okunan ileti.
+enum Msg {
+    /// Tam uzunlukta geldi.
+    Full,
+    /// Hiç bayt gelmeden kapandı: telefonun aynı bilgisayara başka adresten
+    /// açtığı yedek bağlantılar (ilk kurulan kazanır, kalanlar kapanır) ya da
+    /// kapı yoklayan araçlar. Hatalı deneme sayılmaz; sayılsaydı dört
+    /// ulaşılabilir adresi olan bilgisayarda aktarım kendi kendini kapatırdı.
+    Empty,
+    /// Eksik, geç ya da okunamadı: hatalı deneme.
+    Bad,
+}
+
+async fn read_msg(stream: &mut TcpStream, buf: &mut [u8], limit: Duration) -> Msg {
+    let res = timeout(limit, async {
+        let n = stream.read(buf).await?;
+        if n == 0 {
+            return Ok::<_, std::io::Error>(false);
+        }
+        stream.read_exact(&mut buf[n..]).await?;
+        Ok(true)
+    })
+    .await;
+    match res {
+        Ok(Ok(true)) => Msg::Full,
+        Ok(Ok(false)) => Msg::Empty,
+        _ => Msg::Bad,
+    }
+}
+
 /// Tek bağlantı: eş denetimi, selam → paket ya da onay.
 async fn handle(mut stream: TcpStream, peer: SocketAddr, shared: Arc<Shared>) {
     let peer_ip = peer.ip().to_canonical();
@@ -428,14 +460,13 @@ async fn handle(mut stream: TcpStream, peer: SocketAddr, shared: Arc<Shared>) {
     match shared.phase() {
         Phase::Waiting => {
             let mut hello = [0u8; HELLO_LEN];
-            if timeout(shared.read_timeout, stream.read_exact(&mut hello))
-                .await
-                .ok()
-                .and_then(|r| r.ok())
-                .is_none()
-            {
-                shared.bad_attempt(peer_ip);
-                return;
+            match read_msg(&mut stream, &mut hello, shared.read_timeout).await {
+                Msg::Full => {}
+                Msg::Empty => return,
+                Msg::Bad => {
+                    shared.bad_attempt(peer_ip);
+                    return;
+                }
             }
             let Ok(nonce_c) = crypto::verify_hello(&shared.keys, &shared.t, &hello) else {
                 shared.bad_attempt(peer_ip);
@@ -474,14 +505,13 @@ async fn handle(mut stream: TcpStream, peer: SocketAddr, shared: Arc<Shared>) {
         }
         Phase::Claimed => {
             let mut msg = [0u8; CONFIRM_LEN];
-            if timeout(shared.read_timeout, stream.read_exact(&mut msg))
-                .await
-                .ok()
-                .and_then(|r| r.ok())
-                .is_none()
-            {
-                shared.bad_attempt(peer_ip);
-                return;
+            match read_msg(&mut stream, &mut msg, shared.read_timeout).await {
+                Msg::Full => {}
+                Msg::Empty => return,
+                Msg::Bad => {
+                    shared.bad_attempt(peer_ip);
+                    return;
+                }
             }
             match crypto::open_confirm(&shared.keys, &shared.t, &msg) {
                 Ok(status) => {
@@ -671,6 +701,31 @@ mod tests {
             .is_none());
         // Doğru kod artık işe yaramaz: kapı kapalı.
         assert!(client::fetch(&code, &copts()).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn bos_kapanan_baglantilar_hatali_sayilmaz() {
+        // Telefon bilgisayarın tüm adreslerine birden bağlanır, ilk kurulanı
+        // kullanır, kalanları hiç yazmadan kapatır. Bunlar sayılsaydı dört
+        // adresli bilgisayarda aktarım "5 hatalı deneme" ile kapanırdı.
+        let mut offer = start(paket(), opts()).await.unwrap();
+        assert_eq!(next(&mut offer).await, TransferStateKind::Waiting);
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), offer.info.port);
+        let code = Code::parse(&offer.info.text).unwrap();
+        for _ in 0..6 {
+            drop(TcpStream::connect(addr).await.unwrap());
+        }
+        let got = client::fetch(&code, &copts()).await.unwrap();
+        assert_eq!(&got[..], &paket()[..]);
+        assert_eq!(next(&mut offer).await, TransferStateKind::Connected);
+        assert_eq!(next(&mut offer).await, TransferStateKind::Delivered);
+        for _ in 0..6 {
+            drop(TcpStream::connect(addr).await.unwrap());
+        }
+        client::confirm(&code, ApplyStatus::Applied, &copts())
+            .await
+            .unwrap();
+        assert_eq!(next(&mut offer).await, TransferStateKind::Applied);
     }
 
     #[tokio::test]

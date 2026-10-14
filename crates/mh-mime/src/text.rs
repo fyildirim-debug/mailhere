@@ -209,11 +209,19 @@ pub fn snippet(text: &str) -> String {
 /// `{{ad}}`, `*|MC_PREVIEW_TEXT|*`, `%%preheader%%`), bağlantılar ve
 /// bağlantıdan geriye kalan boş ayraçlar. Boşluklar sadeleşir.
 fn clean_preview(s: &str) -> String {
-    let visible: String = s.chars().filter(|&c| !is_invisible(c)).collect();
-    let mut t = strip_between(&visible, "{{", "}}");
-    t = strip_between(&t, "{%", "%}");
-    t = strip_between(&t, "*|", "|*");
-    t = strip_between(&t, "%%", "%%");
+    // Önizleme en çok ~200 karakter; gövdenin başı yeter. Büyük gövdede
+    // temizlik doğrusal kalsın.
+    let visible: String = s
+        .chars()
+        .filter(|&c| !is_invisible(c))
+        .take(PREVIEW_SCAN)
+        .collect();
+    let mut t = strip_between(&visible, "{{", "}}", |_| true);
+    t = strip_between(&t, "{%", "%}", |_| true);
+    // Birleştirme etiketleri tek sözcüktür: "CPU %%95, bellek %%80" gibi
+    // metnin arası silinmesin.
+    t = strip_between(&t, "*|", "|*", is_merge_tag);
+    t = strip_between(&t, "%%", "%%", is_merge_tag);
     let words: Vec<&str> = t
         .split_whitespace()
         .filter(|w| !is_link(w) && !is_template_token(w))
@@ -255,15 +263,37 @@ fn is_invisible(c: char) -> bool {
     )
 }
 
-/// `open … close` arasını (en çok 60 karakter, satır sonu yok) atar; kapanmayan
-/// açılış olduğu gibi kalır.
-fn strip_between(s: &str, open: &str, close: &str) -> String {
+/// Önizleme temizliğinde gövdenin en çok bu kadar karakterine bakılır.
+const PREVIEW_SCAN: usize = 4096;
+/// Şablon değişkeninin en uzun iç metni (karakter).
+const TAG_MAX: usize = 60;
+
+/// `*|MC_PREVIEW_TEXT|*`, `%%preheader%%`: boşluksuz tek sözcük.
+fn is_merge_tag(inner: &str) -> bool {
+    !inner.is_empty()
+        && inner
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | ':' | '.'))
+}
+
+/// `open … close` arasını (en çok `TAG_MAX` karakter, satır sonu yok, `valid`
+/// kabul ederse) atar; kapanmayan açılış olduğu gibi kalır. Kapanış yalnız
+/// kısa bir pencerede aranır: uzun metinde karesel tarama olmasın.
+fn strip_between(s: &str, open: &str, close: &str, valid: fn(&str) -> bool) -> String {
     let mut out = String::with_capacity(s.len());
     let mut rest = s;
     while let Some(i) = rest.find(open) {
         let after = &rest[i + open.len()..];
-        match after.find(close) {
-            Some(j) if after[..j].chars().count() <= 60 && !after[..j].contains('\n') => {
+        let window_end = after
+            .char_indices()
+            .nth(TAG_MAX + close.chars().count())
+            .map_or(after.len(), |(k, _)| k);
+        match after[..window_end].find(close) {
+            Some(j)
+                if after[..j].chars().count() <= TAG_MAX
+                    && !after[..j].contains('\n')
+                    && valid(after[..j].trim()) =>
+            {
                 out.push_str(&rest[..i]);
                 out.push(' ');
                 rest = &after[j + close.len()..];
@@ -460,6 +490,24 @@ mod tests {
             "Biçim {ad} soyad (yarın) {{ eksik"
         );
         assert_eq!(snippet("Hata kodu {X}"), "Hata kodu {X}");
+        // Yüzde işaretli gerçek metin silinmez; yalnız tek sözcüklü etiket gider.
+        assert_eq!(snippet("CPU %%95, bellek %%80"), "CPU %%95, bellek %%80");
+        assert_eq!(snippet("Kampanya *|FNAME|* başladı"), "Kampanya başladı");
+    }
+
+    #[test]
+    fn onizleme_temizligi_buyuk_govdede_dogrusal() {
+        // Kapanmayan açılışlarla dolu yüzlerce KB'lık gövde (önceden karesel).
+        for open in ["{{ ", "*| ", "%% "] {
+            let body = open.repeat(200_000);
+            let t = std::time::Instant::now();
+            let _ = snippet(&body);
+            assert!(
+                t.elapsed() < std::time::Duration::from_millis(500),
+                "{open:?}: {:?}",
+                t.elapsed()
+            );
+        }
     }
 
     #[test]
