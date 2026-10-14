@@ -135,6 +135,16 @@ export function createNav(history: HistoryLike) {
       return true;
     },
 
+    /**
+     * Köke döner (ör. aktarım bitince "Gelen kutusuna git"): bizim tüm geçmiş
+     * girdileri tek seferde geri alınır, yığın `popstate` ile boşalır. Kökteyken
+     * bir şey yapmaz.
+     */
+    home() {
+      const d = depth();
+      if (d > 0) history.go(-d);
+    },
+
     /** `popstate`: tarayıcının getirdiği girdiye göre yığın indirgenir. */
     onPopState(data: unknown) {
       reconcile(depthOf(data));

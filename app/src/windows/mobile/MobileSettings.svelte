@@ -13,6 +13,7 @@
   import AccountPage from '../main/settings/AccountPage.svelte';
   import AccountsSection from '../main/settings/AccountsSection.svelte';
   import ComposeSection from '../main/settings/ComposeSection.svelte';
+  import DevicesSection from '../main/settings/DevicesSection.svelte';
   import GeneralSection from '../main/settings/GeneralSection.svelte';
   import NotifySection from '../main/settings/NotifySection.svelte';
   import PrivacySection from '../main/settings/PrivacySection.svelte';
@@ -43,10 +44,10 @@
     { key: 'rules', icon: 'rules', label: 'set.nav.rules' },
     { key: 'tags', icon: 'tag', label: 'tag.title' },
   ];
-  // Hesaplar grubu aşağıda ayrı çizilir (hesap başına satır + "Hesap ekle").
-  // 4c: "Cihazlar" (bilgisayardan QR ile aktarım) bu listeye, Hesaplar ile
-  // Gizlilik arasına girer; SettingsSection'a 'devices' eklenince burada açılır.
+  // Hesaplar grubu aşağıda ayrı çizilir (hesap başına satır + "Hesap ekle");
+  // "Cihazlar" (bilgisayardan QR ile aktarım) onun altında, Gizlilik'in üstünde.
   const tail: Item[] = [
+    { key: 'devices', icon: 'devices', label: 'aktar.nav' },
     { key: 'privacy', icon: 'shield', label: 'set.nav.privacy' },
     { key: 'about', icon: 'info', label: 'mob.settings.about' },
   ];
@@ -129,6 +130,8 @@
         <TagsSection />
       {:else if section === 'accounts'}
         <AccountsSection />
+      {:else if section === 'devices'}
+        <DevicesSection />
       {:else if section === 'privacy'}
         <PrivacySection />
       {:else}

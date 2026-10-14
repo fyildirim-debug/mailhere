@@ -877,6 +877,12 @@ export interface Commands {
   transfer_receive: [{ code: string }, TransferPreview];
   /** Bekleyen paketi seçime göre uygular, sonucu bilgisayara bildirir ve raporu döner. */
   transfer_apply: [{ previewId: string; choice: TransferChoice }, TransferReport];
+
+  // Yalnız mobil kabuk (Android; masaüstü kabukta tanımlı değil)
+  /** Kamerayla QR okutur; okunan metin, vazgeçilirse null. */
+  qr_scan: [Record<string, never>, string | null];
+  /** Bildirim izni ister; sonuç "granted" | "denied" | "prompt" (Android 13 öncesi hep "granted"). */
+  notification_permission: [Record<string, never>, string];
 }
 
 export type CommandName = keyof Commands;

@@ -16,8 +16,12 @@
   import { isMobileShell } from '../../lib/shell';
   import { mail, reloadAccounts } from '../../lib/stores/mail.svelte';
 
-  type Step = 'email' | 'found' | 'jmap' | 'oauth' | 'ready';
+  type Step = 'email' | 'found' | 'jmap' | 'oauth' | 'ready' | 'transfer';
   type Provider = Exclude<AuthKind, 'password'>;
+
+  // Mobilde ilk seçenek: bilgisayardan QR ile aktarım. Bileşen tembel yüklenir;
+  // masaüstü paketi mobil gezinmeyi taşımaz ve masaüstünde bu seçenek yoktur.
+  const receive = isMobileShell ? import('../mobile/TransferReceive.svelte') : null;
 
   let step = $state<Step>('email');
   let email = $state('');
@@ -360,13 +364,23 @@
         {#if notice}<p class="note top" role="status">{notice}</p>{/if}
         <button class="btn-primary wide" disabled={!valid || finding} onclick={find}>{finding ? t('onb.finding') : t('onb.continue')}</button>
         <div class="or"><span></span>{t('onb.or')}<span></span></div>
-        <!-- 4c: mobilde ilk seçenek "Bilgisayardan QR ile aktar" (isMobileShell) buraya, Google'ın üstüne gelir. -->
         <div class="alts">
+          {#if receive}
+            <button class="alt" onclick={() => ((step = 'transfer'), reset())}><Icon name="qr" />{t('aktar.onboarding')}</button>
+          {/if}
           <button class="alt" onclick={() => chooseProvider('google')}><Icon name="globe" />{t('onb.google')}</button>
           <button class="alt" onclick={() => chooseProvider('microsoft')}><Icon name="grid" />{t('onb.microsoft')}</button>
           <button class="alt" onclick={manual}><Icon name="settings" />{t('onb.manual')}</button>
           <button class="alt" onclick={openJmap}><Icon name="server" />{t('onb.jmap')}</button>
         </div>
+      </div>
+    {:else if step === 'transfer'}
+      <div class="step">
+        {#if receive}
+          {#await receive then { default: TransferReceive }}
+            <TransferReceive onback={() => (step = 'email')} ondone={openInbox} />
+          {/await}
+        {/if}
       </div>
     {:else if step === 'found'}
       <div class="step">

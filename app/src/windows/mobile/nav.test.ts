@@ -166,4 +166,17 @@ describe('mobil gezinme yığını', () => {
     expect(nav.layer).toBeNull();
     expect(nav.depth()).toBe(0);
   });
+
+  it('home tüm girdileri tek seferde geri alır; geçmiş imleci köke iner, kökte sessiz', () => {
+    nav.push({ name: 'settings', section: null });
+    nav.push({ name: 'settings', section: 'devices' });
+    nav.open('sheet');
+    expect(h.index).toBe(3);
+    nav.home();
+    expect(nav.stack).toEqual([{ name: 'list' }]);
+    expect(nav.layer).toBeNull();
+    expect(h.index).toBe(0);
+    nav.home();
+    expect(h.index).toBe(0);
+  });
 });

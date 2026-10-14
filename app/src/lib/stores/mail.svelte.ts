@@ -30,7 +30,20 @@ import { loadTags } from './tags.svelte';
 export type Screen = 'mail' | 'settings' | 'onboarding' | 'scheduled';
 
 /** Ayarlar sayfasının bölümü; hesap sayfası `account:<kimlik>`. */
-export type SettingsSection = 'general' | 'notifications' | 'compose' | 'accounts' | 'rules' | 'tags' | 'privacy' | 'about' | `account:${string}`;
+export type SettingsSection =
+  | 'general'
+  | 'notifications'
+  | 'compose'
+  | 'accounts'
+  | 'rules'
+  | 'tags'
+  | 'devices'
+  | 'privacy'
+  | 'about'
+  | `account:${string}`;
+
+/** Hesap sayfasının sekmeleri. */
+export type AccountTab = 'general' | 'signatures' | 'server' | 'folders' | 'vacation';
 
 const PAGE = 100;
 
@@ -48,6 +61,8 @@ export const mail = $state({
   /** Listede hızlı süzgeç (okunmamış, yıldızlı, ekli). */
   only: null as ListOnly | null,
   settingsSection: 'general' as SettingsSection,
+  /** Hesap sayfası açılınca gösterilecek sekme (tek seferlik; sayfa okuyup sıfırlar). */
+  accountTab: null as AccountTab | null,
   /** Kurallar bölümü açılınca düzenleyicide gösterilecek taslak (postadan kural). */
   ruleDraft: null as Rule | null,
 
@@ -260,6 +275,12 @@ export function setOnly(only: ListOnly | null) {
 export function openSettings(section: SettingsSection = mail.settingsSection) {
   mail.settingsSection = section;
   mail.screen = 'settings';
+}
+
+/** Hesabın "Sunucu ve parola" sekmesini açar (ör. aktarımdan parolasız gelen hesap). */
+export function openAccountPassword(id: string) {
+  mail.accountTab = 'server';
+  openSettings(`account:${id}`);
 }
 
 /** Kurallar bölümünü bu taslakla açar. */
