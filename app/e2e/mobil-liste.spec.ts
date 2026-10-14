@@ -171,7 +171,7 @@ test('çok klasörlü hesapta çekmece satırları büzülmez; klasör simgeleri
       window.__mh.state.mailboxes.push({ id: `${acc}:${name}`, accountId: acc, path: name, name, role: 'other', unread: 0, total: 0, parentId: null, hidden: false });
     }
     // Arayüz klasörleri değişiklik olayıyla yeniden okur.
-    window.__mh.emit('mh:changed', []);
+    window.__mh.emit('mh:changed', { mailboxIds: [] });
   });
   // İş kapsamında hesabın klasörleri açık listelenir.
   await openDrawer(page);
