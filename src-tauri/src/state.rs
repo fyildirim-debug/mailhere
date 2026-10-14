@@ -223,6 +223,18 @@ pub fn setup(app: &mut App, rt: tokio::runtime::Handle) -> Result<(), Box<dyn st
     // Yanıt hatırlatmaları: açılışta kaçan süreler değerlendirilir, sonra dakikada bir.
     rt.spawn(crate::followups::ticker(handle.clone()));
     crate::screener::start(&handle, &rt);
+    // Önceki sürümlerde HTML kaynağıyla kaydedilmiş önizlemeler onarılır.
+    {
+        let (store, app) = (store.clone(), handle.clone());
+        rt.spawn_blocking(move || match store.repair_html_snippets() {
+            Ok(0) => {}
+            Ok(n) => {
+                tracing::info!(n, "HTML kaynaklı önizlemeler onarıldı");
+                crate::sink::changed(&app, Vec::new());
+            }
+            Err(e) => tracing::warn!(error = %e.message, "önizlemeler onarılamadı"),
+        });
+    }
     crate::tray::refresh(&handle);
 
     // Tanıtım kipinde ekran görüntüsü otomasyonu: N saniye sonra örnek kart.

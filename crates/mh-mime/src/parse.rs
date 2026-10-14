@@ -8,7 +8,9 @@ use mh_core::{Address, Attachment, Category, Millis};
 
 use crate::category::classify;
 use crate::html::{normalize_cid, sanitize_html};
-use crate::text::{clean_display_name, clean_line, html_to_text, snippet, tidy_lines};
+use crate::text::{
+    clean_display_name, clean_line, html_to_text, looks_like_html, snippet, tidy_lines,
+};
 
 /// Arama dizinine yazılacak gövde metninin üst sınırı (karakter).
 const INDEX_TEXT_LIMIT: usize = 64 * 1024;
@@ -135,7 +137,14 @@ fn bodies<'a>(msg: &'a Message<'a>) -> (Option<String>, Option<String>) {
         })
         .collect::<Vec<_>>();
     let join = |v: Vec<&str>, sep: &str| (!v.is_empty()).then(|| v.join(sep));
-    (join(text, "\n\n"), join(html, "\n<hr>\n"))
+    let (text, html) = (join(text, "\n\n"), join(html, "\n<hr>\n"));
+    // Bazı göndericiler HTML kaynağını düz metin bölümüne koyar (ya da içerik
+    // türü yazmaz): bu metin HTML sayılır; yoksa önizlemede ve okuma alanında
+    // `<!DOCTYPE html>…` görünürdü.
+    match text {
+        Some(t) if looks_like_html(&t) => (None, html.or(Some(t))),
+        text => (text, html),
+    }
 }
 
 /// HTML gövdede `cid:` ile başvurulan Content-ID'ler (küçük harfli).
@@ -371,6 +380,19 @@ Content-Type: text/html; charset=utf-8\r
 --sinir--\r
 ";
 
+    /// İçerik türü yazmayan (varsayılan düz metin) ama HTML kaynağı taşıyan posta.
+    const HTML_AS_TEXT: &str = "From: KamuTech <noreply@kamutech.example>\r
+To: furkan@ornek.com.tr\r
+Subject: Yeni Kurtarma E-Postasi Dogrulama\r
+Date: Wed, 14 Oct 2026 14:23:00 +0300\r
+Message-ID: <kurtarma@kamutech.example>\r
+\r
+<!DOCTYPE html>\r
+<html><head><meta charset=\"utf-8\"><title>Dogrulama</title><style>p{color:red}</style></head>\r
+<body><p>Kurtarma adresini dogrulamak icin kodu gir:</p><p><b>482913</b></p>\r
+<img src=\"https://iz.example/p.gif\"></body></html>\r
+";
+
     const MIXED: &str = "From: Elif =?ISO-8859-9?Q?=DEahin?= <elif.sahin@hukukbiz.com.tr>\r
 To: furkan@ornek.com.tr\r
 Subject: =?UTF-8?B?U8O2emxlxZ9tZSBpbXpheWEgaGF6xLFy?=\r
@@ -589,5 +611,22 @@ x\r\n\
             "{:?}",
             t.elapsed()
         );
+    }
+
+    #[test]
+    fn duz_metindeki_html_kaynagi_html_sayilir() {
+        let p = parse(HTML_AS_TEXT.as_bytes(), false).unwrap();
+        assert_eq!(
+            p.snippet,
+            "Kurtarma adresini dogrulamak icin kodu gir: 482913"
+        );
+        assert!(!p.body_text.as_deref().unwrap().contains('<'));
+        let r = render(HTML_AS_TEXT.as_bytes(), false).unwrap();
+        // Okuma alanında temizlenmiş HTML olarak gösterilir; uzak görsel engelli.
+        let html = r.html.expect("html");
+        assert!(html.contains("482913"));
+        assert!(!html.contains("<style") && !html.contains("<!DOCTYPE"));
+        assert!(r.has_remote_content);
+        assert!(!r.text.unwrap().contains("<!DOCTYPE"));
     }
 }

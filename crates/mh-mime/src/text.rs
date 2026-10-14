@@ -160,9 +160,41 @@ pub fn clean_display_name(s: &str) -> String {
     collapse_ws(&spaced)
 }
 
+/// Metin aslında HTML kaynağı mı? Düz metin bölümüne HTML koyan göndericiler
+/// için: baştaki boşluk ve BOM atıldıktan sonra `<` ile başlayan ve ilk
+/// kilobaytında belge ya da yaygın blok etiketi geçen metin HTML sayılır.
+/// `<ayse@ornek.com> yazdı:` gibi düz metinler HTML sayılmaz.
+pub fn looks_like_html(text: &str) -> bool {
+    let head = text.trim_start_matches(|c: char| c.is_whitespace() || c == '\u{feff}');
+    if !head.starts_with('<') {
+        return false;
+    }
+    let end = head.char_indices().nth(1024).map_or(head.len(), |(i, _)| i);
+    let lower = head[..end].to_ascii_lowercase();
+    const MARKERS: &[&str] = &[
+        "<!doctype",
+        "<html",
+        "<head",
+        "<body",
+        "<meta ",
+        "<table",
+        "</div>",
+        "</p>",
+        "</td>",
+        "<br>",
+        "<br/>",
+        "<br />",
+    ];
+    MARKERS.iter().any(|m| lower.contains(m))
+}
+
 /// Liste satırında gösterilen önizleme: alıntı satırları atlanır, boşluklar
-/// sadeleşir, ~200 karakterde kelime sınırından kesilir.
+/// sadeleşir, ~200 karakterde kelime sınırından kesilir. HTML kaynağı verilirse
+/// (ör. sunucunun hazırladığı önizleme) önce metne çevrilir.
 pub fn snippet(text: &str) -> String {
+    if looks_like_html(text) {
+        return snippet(&html_to_text(text));
+    }
     let body: Vec<&str> = text
         .lines()
         .map(str::trim)
@@ -289,6 +321,20 @@ mod tests {
         let s = snippet(&long);
         assert!(s.chars().count() <= SNIPPET_LEN);
         assert!(s.ends_with("kelime"));
+    }
+
+    #[test]
+    fn html_kaynagi_onizlemede_metne_cevrilir() {
+        let html = "<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\"><title>Doğrulama</title>\
+                    <style>p{color:red}</style></head><body><p>Kurtarma e-postanı doğrula:</p>\
+                    <p>Kod: 123456</p></body></html>";
+        assert!(looks_like_html(html));
+        assert_eq!(snippet(html), "Kurtarma e-postanı doğrula: Kod: 123456");
+        // Düz metin HTML sayılmaz.
+        assert!(!looks_like_html("<ayse@ornek.com> yazdı:\n> merhaba"));
+        assert!(!looks_like_html("Merhaba <b> etiketi"));
+        assert!(!looks_like_html(""));
+        assert!(looks_like_html("\u{feff}  <div>Selam</div>"));
     }
 
     #[test]

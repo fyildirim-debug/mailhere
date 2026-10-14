@@ -1,7 +1,7 @@
 {
   "name": "mailhere",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Hızlı, sakin, klavyeyle yönetilen masaüstü e-posta istemcisi",
   "license": "MIT",
   "author": "Furkan YILDIRIM <posta@furkanyildirim.com>",

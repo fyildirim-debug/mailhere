@@ -16,6 +16,7 @@ pub use parse::{
     attachment, parse, render, visible_attachments, AttachmentData, ParsedMessage, Rendered,
 };
 pub use text::{
-    clean_display_name, clean_line, collapse_ws, fold_tr, html_to_text, normalize_subject, snippet,
+    clean_display_name, clean_line, collapse_ws, fold_tr, html_to_text, looks_like_html,
+    normalize_subject, snippet,
 };
 pub use unsubscribe::{parse_list_unsubscribe, parse_mailto, unsubscribe, Mailto};

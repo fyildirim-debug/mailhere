@@ -533,6 +533,42 @@ impl Store {
         })
     }
 
+    /// HTML kaynağı taşıyan önizlemeleri onarır: düz metin bölümüne HTML
+    /// koyan göndericilerin daha önce kaydedilmiş postaları. Gövdesi yerelde
+    /// olan posta yeniden ayrıştırılır (önizleme, arama metni); olmayanın
+    /// önizlemesi kendinden metne çevrilir, gövde inince yeniden hesaplanır.
+    /// Onarılan posta sayısını döner.
+    pub fn repair_html_snippets(&self) -> AppResult<usize> {
+        let ids: Vec<(MessageId, String)> = self.with(|c| {
+            let mut st =
+                c.prepare("SELECT id, snippet FROM messages WHERE ltrim(snippet) LIKE '<%'")?;
+            let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+            rows.collect()
+        })?;
+        let mut fixed = 0;
+        for (id, snip) in ids {
+            if !mh_mime::looks_like_html(&snip) {
+                continue;
+            }
+            let raw = self.raw(id)?;
+            match raw
+                .as_deref()
+                .and_then(|r| mh_mime::parse(r, false).map(|p| (r, p)))
+            {
+                Some((r, p)) => self.store_parsed_body(id, r, Some(p))?,
+                None => self.with(|c| {
+                    c.execute(
+                        "UPDATE messages SET snippet = ?2 WHERE id = ?1",
+                        params![id, mh_mime::snippet(&snip)],
+                    )?;
+                    Ok(())
+                })?,
+            }
+            fixed += 1;
+        }
+        Ok(fixed)
+    }
+
     pub fn raw(&self, id: MessageId) -> AppResult<Option<Vec<u8>>> {
         self.with(|c| {
             c.query_row("SELECT raw FROM messages WHERE id = ?1", [id], |r| {
@@ -1756,5 +1792,45 @@ pub(crate) mod tests {
         s.remove_account(&"a".to_string()).unwrap();
         assert!(s.summary(id).unwrap().is_none());
         assert!(s.mailboxes().unwrap().is_empty());
+    }
+
+    #[test]
+    fn html_kaynakli_onizleme_onarilir() {
+        let s = crate::testutil::store_with_account("a");
+        s.upsert_mailbox("a", "INBOX", "INBOX", MailboxRole::Inbox, None, false)
+            .unwrap();
+        // Eski sürümün kaydettiği bozuk önizleme: gövde yerelde var.
+        let raw = "From: k@ornek.com\r\nSubject: Kod\r\n\r\n<!DOCTYPE html><html><body><p>Kodun: 42</p></body></html>\r\n";
+        let mut m = msg("a", "a:INBOX", "Kod", 1_000);
+        m.raw = Some(raw.as_bytes().to_vec());
+        let id = s.upsert_message(&m).unwrap().id;
+        // Gövdesi yerelde olmayan bozuk önizleme.
+        let other = s
+            .upsert_message(&msg("a", "a:INBOX", "Diğer", 2_000))
+            .unwrap()
+            .id;
+        // Düz metin "<" ile başlayan önizlemeye dokunulmaz.
+        let plain = s
+            .upsert_message(&msg("a", "a:INBOX", "Düz", 3_000))
+            .unwrap()
+            .id;
+        s.with(|c| {
+            c.execute(
+                "UPDATE messages SET snippet = '<!DOCTYPE html> <html> <head> <meta c' WHERE id IN (?1, ?2)",
+                params![id, other],
+            )?;
+            c.execute("UPDATE messages SET snippet = '<ayse@ornek.com> yazdı: merhaba' WHERE id = ?1", [plain])?;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(s.repair_html_snippets().unwrap(), 2);
+        assert_eq!(s.summary(id).unwrap().unwrap().snippet, "Kodun: 42");
+        assert!(!s.summary(other).unwrap().unwrap().snippet.contains('<'));
+        assert_eq!(
+            s.summary(plain).unwrap().unwrap().snippet,
+            "<ayse@ornek.com> yazdı: merhaba"
+        );
+        // İkinci açılışta yapılacak iş kalmaz.
+        assert_eq!(s.repair_html_snippets().unwrap(), 0);
     }
 }
