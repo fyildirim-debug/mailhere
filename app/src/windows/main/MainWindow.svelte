@@ -9,7 +9,7 @@
   import { runToastAction } from '../../lib/ui/toast.svelte';
   import { snoozeOptions } from '../../lib/util/format';
   import { isEditing, shortcutFor } from '../../lib/util/keys';
-  import { initMail, mail, move, moveTo, select, selectedIds, setUnread, toggleStar } from '../../lib/stores/mail.svelte';
+  import { initMail, mail, move, moveTo, pullMail, select, selectedIds, setUnread, toggleStar } from '../../lib/stores/mail.svelte';
   import { bulkMove, bulkSetUnread, bulkSnooze, bulkStar, togglePin } from '../../lib/stores/bulk.svelte';
   import { checkAll, checkedIds, clearChecked, extendChecked, multi } from '../../lib/stores/selection.svelte';
   import { resolvedTheme, toggleTheme } from '../../lib/stores/settings.svelte';
@@ -54,6 +54,11 @@
     }
     const sc = shortcutFor({ key: e.key, ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey, shiftKey: e.shiftKey, editing: isEditing(e.target) });
     if (!sc) return;
+    if (sc === 'sync') {
+      e.preventDefault();
+      if (!setup) void pullMail();
+      return;
+    }
     if (sc === 'palette') {
       e.preventDefault();
       if (setup) return;

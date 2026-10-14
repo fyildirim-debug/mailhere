@@ -192,3 +192,30 @@ test('kayıtlı arama: sonuç başlığından kaydedilir, kenar çubuğundan ça
   await page.getByRole('button', { name: 'Geri al' }).click();
   await expect(side(page).getByRole('button', { name: 'Elif ekli' })).toBeVisible();
 });
+
+test('Postaları al: düğme ve F5 bağlantıları yeniler; F5 sayfayı yenilemez', async ({ page }) => {
+  await page.goto('/#/main');
+  await expect(list(page).getByText('Cumartesi kahvaltı?')).toBeVisible();
+  await page.evaluate(() => {
+    const mh = window.__mh;
+    const orig = mh.call.bind(mh);
+    const w = window as unknown as { __pulls: number; __kalici: boolean };
+    w.__pulls = 0;
+    w.__kalici = true;
+    mh.call = ((name: string, args?: unknown) => {
+      if (name === 'sync_reconnect') w.__pulls++;
+      return (orig as (n: string, a?: unknown) => Promise<unknown>)(name, args);
+    }) as typeof mh.call;
+  });
+  const pulls = () => page.evaluate(() => (window as unknown as { __pulls: number }).__pulls);
+  const pull = list(page).getByRole('button', { name: 'Postaları al' });
+  await expect(pull).toHaveAttribute('title', 'Postaları al (F5)');
+  await pull.click();
+  await expect.poll(pulls).toBe(1);
+  // Düğme eşitleme sürerken meşgul görünür, sonra bırakır.
+  await expect(pull).toHaveAttribute('aria-busy', 'true');
+  await expect(pull).toHaveAttribute('aria-busy', 'false', { timeout: 5000 });
+  await page.keyboard.press('F5');
+  await expect.poll(pulls).toBe(2);
+  expect(await page.evaluate(() => (window as unknown as { __kalici?: boolean }).__kalici)).toBe(true);
+});

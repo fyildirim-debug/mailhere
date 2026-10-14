@@ -8,7 +8,7 @@
   import { showToast } from '../../lib/ui/toast.svelte';
   import { emptyState, groupLabel, groupOf, isInboxView, listTitle, orderRows } from '../../lib/mail/listing';
   import { buildLayout, scrollToReveal, visibleEntries } from '../../lib/ui/virtual';
-  import { loadMore, mail, markAllRead, rowsOf, setCategory, setOnly, setView } from '../../lib/stores/mail.svelte';
+  import { loadMore, mail, markAllRead, pullMail, rowsOf, setCategory, setOnly, setView, syncing } from '../../lib/stores/mail.svelte';
   import { settings, updateSettings } from '../../lib/stores/settings.svelte';
   import { tagById } from '../../lib/stores/tags.svelte';
   import MessageRow from './MessageRow.svelte';
@@ -114,9 +114,19 @@
     <div class="title-row">
       <h1 class="trunc">{title}</h1>
       <span class="meta num">{unread ? t('list.unread', { n: unread }) : t('list.allRead')}</span>
+      <button
+        class="btn-icon mark pull"
+        class:busy={syncing()}
+        aria-label={t('list.pull')}
+        aria-busy={syncing()}
+        title={t('list.pullHint')}
+        onclick={() => pullMail()}
+      >
+        <Icon name="refresh" />
+      </button>
       {#if mail.search != null}
         <button
-          class="btn-icon mark"
+          class="btn-icon"
           aria-label={t('saved.save')}
           title={t('saved.save')}
           aria-haspopup="dialog"
@@ -133,7 +143,7 @@
       {/if}
       {#if mail.search == null}
         <button
-          class="btn-icon mark"
+          class="btn-icon"
           class:on={mail.only != null}
           aria-label={t('list.filterBy')}
           title={t('list.filterBy')}
@@ -279,6 +289,24 @@
   .mark:disabled {
     opacity: 0.4;
     background: transparent;
+  }
+
+  /* Eşitleme sürerken simge döner; azaltılmış harekette yalnız soluklaşır. */
+  .pull.busy :global(svg) {
+    animation: pull-spin calc(var(--t-panel) * 3) linear infinite;
+  }
+
+  @keyframes pull-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .pull.busy :global(svg) {
+      animation: none;
+      opacity: 0.55;
+    }
   }
 
   .scroller {

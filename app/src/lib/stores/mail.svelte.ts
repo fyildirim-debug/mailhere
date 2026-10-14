@@ -519,6 +519,30 @@ export async function snooze(ids: MessageId[], until: number) {
   }
 }
 
+/** Elle eşitleme ("Postaları al") sürüyor; hesap durumu gelene kadar düğme meşgul görünür. */
+let pulling = $state(false);
+
+/** Herhangi bir hesap eşitleniyor ya da elle eşitleme yeni istendi. */
+export function syncing(): boolean {
+  return pulling || Object.values(mail.sync).some((s) => s.state === 'syncing');
+}
+
+/**
+ * Postaları hemen al: bağlantılar baştan kurulur (yarı ölü IDLE beklenmez),
+ * gelen kutuları eşitlenir. Sık basılırsa arka uç yalnız eşitler.
+ */
+export async function pullMail() {
+  pulling = true;
+  try {
+    await call('sync_reconnect');
+  } catch (e) {
+    errorToast(e);
+  } finally {
+    // Arka uçtan eşitleme durumu gelene kadar kısa bir geri bildirim.
+    setTimeout(() => (pulling = false), 1200);
+  }
+}
+
 export async function markAllRead() {
   const ids = mail.items.filter((m) => m.unread).map((m) => m.id);
   if (!ids.length) return;

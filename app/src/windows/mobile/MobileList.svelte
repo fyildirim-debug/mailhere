@@ -99,7 +99,8 @@
     refreshing = true;
     pull = 56;
     try {
-      await call('sync_now');
+      // Elle yenileme: yarı ölü bağlantı beklenmeden baştan kurulur.
+      await call('sync_reconnect');
       await refreshList();
       await refreshCounts();
     } finally {

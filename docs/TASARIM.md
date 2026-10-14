@@ -165,6 +165,7 @@ Boş durumlar ve hatalar her zaman iki şey söyler: **ne oldu** ve **ne yapıla
 | Ctrl A | Görünen tüm satırları seç |
 | Enter | Seçili postayı aç |
 | Ctrl K | Komut paleti |
+| F5 | Postaları al (bağlantılar yenilenir, gelen kutuları eşitlenir) |
 | Ctrl Enter | Gönder |
 | Ctrl Z | Son işlemi geri al |
 | Esc | Seçimi bırak / kapat / geri |

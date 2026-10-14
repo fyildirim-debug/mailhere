@@ -17,6 +17,13 @@ describe('kısayollar', () => {
     expect(shortcutFor({ key: 'Escape', editing: true })).toBe('escape');
   });
 
+  it('F5 postaları alır; yazarken de çalışır, değiştiriciyle çalışmaz', () => {
+    expect(shortcutFor({ key: 'F5' })).toBe('sync');
+    expect(shortcutFor({ key: 'F5', editing: true })).toBe('sync');
+    expect(shortcutFor({ key: 'F5', ctrlKey: true })).toBeNull();
+    expect(shortcutFor({ key: 'F5', shiftKey: true })).toBeNull();
+  });
+
   it('değiştirici tuşlarla tek harf tetiklenmez', () => {
     expect(shortcutFor({ key: 'r', ctrlKey: true })).toBeNull();
     expect(shortcutFor({ key: 'z', ctrlKey: true })).toBe('undo');

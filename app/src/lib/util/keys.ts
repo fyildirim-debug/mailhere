@@ -23,7 +23,9 @@ export type Shortcut =
   /** Shift J / Shift ↓: seçimi sonraki satıra genişlet. */
   | 'extendNext'
   /** Shift K / Shift ↑: seçimi önceki satıra genişlet. */
-  | 'extendPrev';
+  | 'extendPrev'
+  /** F5: postaları hemen al (sayfa yenilenmez). */
+  | 'sync';
 
 export interface KeyLike {
   key: string;
@@ -55,6 +57,8 @@ export function shortcutFor(e: KeyLike): Shortcut | null {
   const key = e.key.length === 1 ? e.key.toLocaleLowerCase('en') : e.key;
   if (mod && !e.altKey && key === 'k') return 'palette';
   if (key === 'Escape') return 'escape';
+  // Metin yazarken de çalışır; tarayıcının sayfa yenilemesinin yerine geçer.
+  if (key === 'F5' && !mod && !e.altKey && !e.shiftKey) return 'sync';
   if (e.editing) return null;
   if (mod && !e.altKey && !e.shiftKey && key === 'z') return 'undo';
   if (mod && !e.altKey && !e.shiftKey && key === 'a') return 'selectAll';

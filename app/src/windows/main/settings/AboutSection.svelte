@@ -28,6 +28,7 @@
     ['Ctrl K', 'keys.palette'],
     ['Ctrl Z', 'keys.undo'],
     ['Ctrl ,', 'keys.settings'],
+    ['F5', 'keys.sync'],
   ];
 </script>
 
