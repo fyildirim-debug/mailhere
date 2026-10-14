@@ -10,7 +10,7 @@ const detail: MessageDetail = {
   subject: 'Bütçe & plan <2026>', snippet: 'özet', date: 0, unread: false, starred: false, hasAttachments: true, category: 'people',
   snoozedUntil: null, messageIdHeader: null, references: [], bodyText: 'Merhaba\n\n> alıntı\n> satır\n\nSon', bodyHtml: null,
   hasRemoteContent: false, remoteAllowed: false, attachments: [{ index: 0, name: 'Butce.xlsx', mime: 'x', size: 2048 }], thread: [],
-  unsubscribe: null, invite: null, followUp: null,
+  unsubscribe: null, invite: null, followUp: null, pinned: false, tags: [],
 };
 
 const input = { detail, labels, when: 'Bugün 09:42', fileSize: (n: number) => `${n} B` };

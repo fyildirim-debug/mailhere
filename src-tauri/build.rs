@@ -70,6 +70,12 @@ fn main() {
         "followups_list",
         "screener_list",
         "screener_decide",
+        "messages_by_sender",
+        "messages_pin",
+        "tags_list",
+        "tag_save",
+        "tag_delete",
+        "messages_tag",
     ];
     tauri_build::try_build(
         tauri_build::Attributes::new()

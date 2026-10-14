@@ -270,6 +270,8 @@ pub struct RulePlan {
     pub moves: Vec<MoveDest>,
     /// İletmeler: (kural kimliği, adres).
     pub forwards: Vec<(String, String)>,
+    /// Eklenecek yerel etiketlerin kimlikleri (tekrarsız).
+    pub tags: Vec<String>,
 }
 
 impl RulePlan {
@@ -293,6 +295,11 @@ impl RulePlan {
                 RuleAction::Star => self.star = true,
                 RuleAction::Mute => self.mute = true,
                 RuleAction::Forward { to } => self.forwards.push((rule.id.clone(), to.clone())),
+                RuleAction::Tag { tag_id } => {
+                    if !self.tags.contains(tag_id) {
+                        self.tags.push(tag_id.clone());
+                    }
+                }
             }
         }
     }
@@ -711,7 +718,16 @@ mod tests {
         let arsiv = rule(
             "arsiv",
             vec![RuleCondition::HasAttachment],
-            vec![RuleAction::Archive, RuleAction::Mute],
+            vec![
+                RuleAction::Archive,
+                RuleAction::Mute,
+                RuleAction::Tag {
+                    tag_id: "e1".into(),
+                },
+                RuleAction::Tag {
+                    tag_id: "e1".into(),
+                },
+            ],
         );
         let mut dur = rule(
             "dur",
@@ -739,6 +755,7 @@ mod tests {
             p.forwards,
             vec![("tasi".to_string(), "muhasebe@ornek.com".to_string())]
         );
+        assert_eq!(p.tags, vec!["e1".to_string()], "etiket bir kez");
         // Son geçerli taşıma: arşiv.
         assert_eq!(p.destination(|_| true), Some(MoveDest::Archive));
 

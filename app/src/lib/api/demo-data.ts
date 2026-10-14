@@ -1,13 +1,21 @@
 // Tarayıcı modu, testler ve ekran görüntüleri için örnek veri.
 // İçerik onaylı tasarımdaki postalarla aynıdır; gerçek kişi ya da kurum değildir.
 
-import type { Account, Address, Attachment, Category, Invite, Mailbox, MailboxRole, MessageDetail, Unsubscribe } from './types';
+import type { Account, Address, Attachment, Category, Invite, Mailbox, MailboxRole, MessageDetail, Tag, Unsubscribe } from './types';
 
 export interface DemoData {
   accounts: Account[];
   mailboxes: Mailbox[];
   messages: MessageDetail[];
+  /** Yerel etiketler (örnek). */
+  tags: Tag[];
 }
+
+/** Örnek etiketler; m7 "Fatura" etiketini taşır. */
+const TAGS: Tag[] = [
+  { id: 'etiket-fatura', name: 'Fatura', color: '#D08A1E' },
+  { id: 'etiket-proje', name: 'Proje', color: '#4C6FD8' },
+];
 
 const A_WORK = 'demo-is';
 const A_HOME = 'demo-kisisel';
@@ -67,6 +75,8 @@ interface Seed {
   remote?: boolean;
   unsubscribe?: Unsubscribe;
   invite?: Invite;
+  /** Etiket kimlikleri. */
+  tags?: string[];
 }
 
 function snippetOf(text: string): string {
@@ -171,7 +181,7 @@ export function createDemoData(now = new Date()): DemoData {
       subject: 'Ekim faturanız hazır',
       body:
         'Sayın müşterimiz,\n\nEkim dönemine ait faturanız oluşturuldu.\n\nTutar: 1.240,00 ₺\nSon ödeme: 24 Ekim\n\nOtomatik ödeme talimatınız varsa ek bir işlem yapmanıza gerek yok.',
-      date: at(now, -1, 11, 2), category: 'notifications',
+      date: at(now, -1, 11, 2), category: 'notifications', tags: ['etiket-fatura'],
       attachments: [{ index: 0, name: 'Fatura_Ekim.pdf', mime: 'application/pdf', size: 94_208 }],
     },
     {
@@ -272,6 +282,8 @@ export function createDemoData(now = new Date()): DemoData {
       category: s.category,
       snoozedUntil: null,
       followUp: null,
+      pinned: false,
+      tags: s.tags ?? [],
       cc: s.cc ?? [],
       bcc: [],
       replyTo: [],
@@ -288,5 +300,5 @@ export function createDemoData(now = new Date()): DemoData {
     };
   });
 
-  return { accounts, mailboxes, messages };
+  return { accounts, mailboxes, messages, tags: TAGS.map((t) => ({ ...t })) };
 }

@@ -249,6 +249,8 @@ mod tests {
             category: Category::People,
             snoozed_until: None,
             follow_up: Some(10),
+            pinned: false,
+            tags: Vec::new(),
         }
     }
 

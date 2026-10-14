@@ -22,16 +22,24 @@ import {
   type MessageSummary,
   type Rule,
   type RuleCondition,
+  type SavedSearch,
   type ScheduledItem,
   type ScreenedSender,
   type ServerConfig,
   type Settings,
   type Signature,
+  type Tag,
   type Template,
   type Vacation,
   type View,
   QUICK_REPLIES_MAX,
   QUICK_REPLY_CHARS,
+  SAVED_SEARCHES_MAX,
+  SAVED_SEARCH_NAME_CHARS,
+  SAVED_SEARCH_QUERY_CHARS,
+  TAGS_MAX,
+  TAG_COLORS,
+  TAG_NAME_CHARS,
 } from './types';
 
 type Handler = (payload: unknown) => void;
@@ -61,6 +69,7 @@ export interface MockBackend {
     screened: MessageId[];
     /** Bilinen göndericiler: "hesap|adres". */
     known: string[];
+    tags: Tag[];
   };
 }
 
@@ -76,9 +85,38 @@ function lower(s: string): string {
 
 function summary(m: MessageDetail, followUp: number | null = m.followUp): MessageSummary {
   const {
-    id, accountId, mailboxId, threadId, from, to, subject, snippet, date, unread, starred, hasAttachments, category, snoozedUntil,
+    id, accountId, mailboxId, threadId, from, to, subject, snippet, date, unread, starred, hasAttachments, category, snoozedUntil, pinned, tags,
   } = m;
-  return { id, accountId, mailboxId, threadId, from, to, subject, snippet, date, unread, starred, hasAttachments, category, snoozedUntil, followUp };
+  return { id, accountId, mailboxId, threadId, from, to, subject, snippet, date, unread, starred, hasAttachments, category, snoozedUntil, followUp, pinned, tags };
+}
+
+/** Arka uçtaki `normalize_tag_name` ile aynı: denetim/yön karakterleri atılır, boşluklar teke iner, en çok 40 karakter. */
+export function cleanTagName(name: string): string {
+  // eslint-disable-next-line no-control-regex
+  const line = name.replace(/[\u0000-\u001f‎‏‪-‮⁦-⁩]/g, (c) => (/\s/.test(c) ? ' ' : '')).replace(/\s+/g, ' ');
+  return [...line.trim()].slice(0, TAG_NAME_CHARS).join('').trim();
+}
+
+/** Arka uçtaki `normalize_saved_searches` ile aynı kurallar. */
+export function cleanSavedSearches(list: SavedSearch[]): SavedSearch[] {
+  const seen = new Set<string>();
+  const out: SavedSearch[] = [];
+  const clip = (s: string, max: number) => [...s.replace(/\s+/g, ' ').trim()].slice(0, max).join('').trim();
+  for (const s of list) {
+    const query = clip(s.query, SAVED_SEARCH_QUERY_CHARS);
+    if (!query) continue;
+    const name = clip(s.name, SAVED_SEARCH_NAME_CHARS) || [...query].slice(0, SAVED_SEARCH_NAME_CHARS).join('');
+    const id = s.id.trim() && !seen.has(s.id.trim()) ? s.id.trim() : newId('arama');
+    seen.add(id);
+    out.push({ id, name, query });
+    if (out.length === SAVED_SEARCHES_MAX) break;
+  }
+  return out;
+}
+
+/** Sabitlenenler önce gelen görünümler (arka uçtaki `pinned_first`). */
+function pinnedFirst(view: View): boolean {
+  return view.kind === 'inbox' || view.kind === 'mailbox';
 }
 
 /** Arka uçtaki `normalize_settings` ile aynı kurallar. */
@@ -195,6 +233,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     followUps: {} as Record<number, { at: number; createdAt: number }>,
     screened: [] as MessageId[],
     known: [] as string[],
+    tags: opts.empty ? [] : data.tags,
   };
   const scheduled = new Map<string, { item: ScheduledItem; msg: OutgoingMessage; timer: ReturnType<typeof setTimeout> }>();
   const vacations = new Map<string, Vacation>();
@@ -249,9 +288,27 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
         return followUpOf(m.id) != null && role !== 'trash' && role !== 'junk';
       case 'screener':
         return isScreened(m.id);
+      case 'tag':
+        return m.tags.includes(view.id) && role !== 'trash' && role !== 'junk';
       default:
         return role === view.kind;
     }
+  }
+
+  function tagOf(id: string): Tag {
+    const tg = state.tags.find((x) => x.id === id);
+    if (!tg) fail('notFound', 'Etiket bulunamadı; silinmiş olabilir.');
+    return tg;
+  }
+
+  /** Etiketi denetler (arka uçtaki `normalize_tag`). */
+  function checkTag(tag: Tag): Tag {
+    const name = cleanTagName(tag.name);
+    if (!name) fail('invalid', 'Etikete bir ad ver.');
+    const color = TAG_COLORS.find((c) => c.toLowerCase() === tag.color.trim().toLowerCase());
+    if (!color) fail('invalid', 'Etiket rengi paletten seçilmeli.');
+    if (state.tags.some((x) => x.id !== tag.id && lower(x.name) === lower(name))) fail('invalid', 'Bu adda bir etiket zaten var.');
+    return { id: tag.id.trim(), name, color };
   }
 
   function counts(): Counts {
@@ -347,7 +404,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       id, accountId: account.id, mailboxId: boxFor(account.id, 'drafts'), threadId: `draft-${id}`,
       from: { name: account.displayName, email: account.email }, to: msg.to, subject: msg.subject,
       snippet: msg.bodyText.replace(/\s+/g, ' ').slice(0, 200), date: now(), unread: false, starred: false,
-      hasAttachments: msg.attachments.length > 0, category: 'people', snoozedUntil: null, followUp: null, cc: msg.cc, bcc: msg.bcc, replyTo: [],
+      hasAttachments: msg.attachments.length > 0, category: 'people', snoozedUntil: null, followUp: null, pinned: false, tags: [], cc: msg.cc, bcc: msg.bcc, replyTo: [],
       messageIdHeader: null, references: [], bodyText: msg.bodyText, bodyHtml: null, hasRemoteContent: false,
       remoteAllowed: false, attachments: [], thread: [], unsubscribe: null, invite: null,
     };
@@ -368,7 +425,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
         id: sentId, accountId: account.id, mailboxId: boxFor(account.id, 'sent'), threadId: original?.threadId ?? `out-${id}`,
         from: { name: account.displayName, email: account.email }, to: msg.to, subject: msg.subject,
         snippet: msg.bodyText.replace(/\s+/g, ' ').slice(0, 200), date: now(), unread: false, starred: false,
-        hasAttachments: msg.attachments.length > 0, category: 'people', snoozedUntil: null, followUp: null, cc: msg.cc, bcc: [], replyTo: [],
+        hasAttachments: msg.attachments.length > 0, category: 'people', snoozedUntil: null, followUp: null, pinned: false, tags: [], cc: msg.cc, bcc: [], replyTo: [],
         messageIdHeader: null, references: [], bodyText: msg.bodyText, bodyHtml: null, hasRemoteContent: false,
         remoteAllowed: false, attachments: [], thread: [], unsubscribe: null, invite: null,
       });
@@ -398,6 +455,9 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
         if (!state.mailboxes.some((b) => b.id === a.mailboxId && b.accountId === rule.accountId)) fail('invalid', 'Taşınacak klasör bu hesapta yok.');
       }
       if (a.kind === 'forward' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(a.to.trim())) fail('invalid', 'İletilecek adres geçerli bir e-posta adresi olmalı.');
+      if (a.kind === 'tag' && !state.tags.some((x) => x.id === a.tagId.trim())) {
+        fail('invalid', 'Eklenecek etiket bulunamadı; silinmiş olabilir. Başka bir etiket seç.');
+      }
     }
     return { ...rule, name };
   }
@@ -443,20 +503,24 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     },
     counts: () => counts(),
     messages_list: ({ query }) => {
+      // Gelen kutusu ve klasörde sabitlenenler önce; imleç o zaman üç parçalı ("tarih:kimlik:sabit").
+      const pinFirst = pinnedFirst(query.view);
+      const rank = (m: MessageDetail) => (pinFirst && m.pinned ? 1 : 0);
       let items = state.messages
         .filter((m) => inView(m, query.view))
         .filter((m) => !query.accountId || m.accountId === query.accountId)
         .filter((m) => !query.category || m.category === query.category)
         .filter((m) => (query.only === 'unread' ? m.unread : query.only === 'starred' ? m.starred : query.only === 'attachments' ? m.hasAttachments : true))
-        .sort((a, b) => b.date - a.date || b.id - a.id);
+        .sort((a, b) => rank(b) - rank(a) || b.date - a.date || b.id - a.id);
       // Yanıt bekleyenler: hatırlatma anına göre, imleçsiz (küçük liste).
       if (query.view.kind === 'followups') {
         items.sort((a, b) => followUpOf(a.id)! - followUpOf(b.id)! || a.id - b.id);
         return { items: items.map((m) => summary(m, followUpOf(m.id))), nextCursor: null };
       }
       if (query.cursor) {
-        const [d, i] = query.cursor.split(':').map(Number);
-        items = items.filter((m) => m.date < d || (m.date === d && m.id < i));
+        const [d, i, p = 0] = query.cursor.split(':').map(Number);
+        const after = (m: MessageDetail) => m.date < d || (m.date === d && m.id < i);
+        items = items.filter((m) => (pinFirst ? rank(m) < p || (rank(m) === p && after(m)) : after(m)));
       }
       const page = items.slice(0, query.limit);
       const last = page[page.length - 1];
@@ -469,7 +533,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       }
       return {
         items: out,
-        nextCursor: items.length > query.limit && last ? `${last.date}:${last.id}` : null,
+        nextCursor: items.length > query.limit && last ? `${last.date}:${last.id}${pinFirst ? `:${rank(last)}` : ''}` : null,
       };
     },
     message_get: ({ id }) => detail(find(id)),
@@ -509,12 +573,19 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       return null;
     },
     search: ({ q, limit }) => {
-      // Arka uçtaki işleçlerin sade karşılığı: from:, to:, konu:, has:ek, is:okunmamış, is:yıldızlı, in:.
+      // Arka uçtaki işleçlerin sade karşılığı: from:, to:, konu:, has:ek, is:okunmamış, is:yıldızlı, in:, tag:.
       const tests: ((m: MessageDetail) => boolean)[] = [];
       let inBox = false;
       const free = q.replace(/(\S+?):("([^"]*)"|\S+)/g, (all, op: string, _v: string, quoted: string | undefined) => {
         const v = lower(quoted ?? _v);
         const o = lower(op);
+        if (o === 'tag' || o === 'etiket') {
+          // Tam ad varsa yalnız o; yoksa önek eşleşmesi.
+          const exact = state.tags.filter((x) => lower(x.name) === v).map((x) => x.id);
+          const ids = exact.length ? exact : state.tags.filter((x) => lower(x.name).startsWith(v)).map((x) => x.id);
+          tests.push((m) => m.tags.some((id) => ids.includes(id)));
+          return ' ';
+        }
         if (o === 'from') tests.push((m) => lower(`${m.from.name ?? ''} ${m.from.email}`).includes(v));
         else if (o === 'to') tests.push((m) => [...m.to, ...m.cc].some((a) => lower(`${a.name ?? ''} ${a.email}`).includes(v)));
         else if (o === 'subject' || o === 'konu') tests.push((m) => lower(m.subject).includes(v));
@@ -572,7 +643,12 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     },
     settings_get: () => structuredClone(state.settings),
     settings_set: ({ settings }) => {
-      state.settings = { ...settings, templates: cleanTemplates(settings.templates ?? []), quickReplies: cleanQuickReplies(settings.quickReplies) };
+      state.settings = {
+        ...settings,
+        templates: cleanTemplates(settings.templates ?? []),
+        quickReplies: cleanQuickReplies(settings.quickReplies),
+        savedSearches: cleanSavedSearches(settings.savedSearches ?? []),
+      };
       if (opts.persist) {
         try {
           localStorage.setItem(SETTINGS_KEY, JSON.stringify(state.settings));
@@ -739,10 +815,62 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
           else if (a.kind === 'archive') m.mailboxId = boxFor(m.accountId, 'archive');
           else if (a.kind === 'trash') m.mailboxId = boxFor(m.accountId, 'trash');
           else if (a.kind === 'move') m.mailboxId = a.mailboxId;
+          // Silinmiş etiket sessizce atlanır.
+          else if (a.kind === 'tag' && state.tags.some((x) => x.id === a.tagId) && !m.tags.includes(a.tagId)) m.tags.push(a.tagId);
         }
       }
       emit(EVENTS.changed, { mailboxIds: [] });
       return n;
+    },
+    messages_by_sender: ({ accountId, email, view }) => {
+      // Adres karşılaştırması ASCII büyük/küçük harf duyarsız (Türkçe I/ı kuralı uygulanmaz).
+      const who = email.trim().toLowerCase();
+      if (!who) return [];
+      const scope = (m: MessageDetail) => {
+        if (view?.kind === 'mailbox') return m.mailboxId === view.id;
+        if (view?.kind === 'tag') return m.tags.includes(view.id) && roleOf(m.mailboxId) !== 'trash' && roleOf(m.mailboxId) !== 'junk';
+        return roleOf(m.mailboxId) === 'inbox';
+      };
+      return state.messages
+        .filter((m) => scope(m) && m.from.email.trim().toLowerCase() === who && (!accountId || m.accountId === accountId))
+        .sort((a, b) => b.date - a.date || b.id - a.id)
+        .map((m) => m.id);
+    },
+    messages_pin: ({ ids, pinned }) => {
+      for (const id of ids) find(id).pinned = pinned;
+      emit(EVENTS.changed, { mailboxIds: [] });
+      return null;
+    },
+    tags_list: () => structuredClone(state.tags),
+    tag_save: ({ tag }) => {
+      const clean = checkTag(tag);
+      if (clean.id) {
+        const i = state.tags.findIndex((x) => x.id === clean.id);
+        if (i < 0) fail('notFound', 'Etiket bulunamadı; silinmiş olabilir.');
+        state.tags[i] = clean;
+      } else {
+        if (state.tags.length >= TAGS_MAX) fail('invalid', 'En çok 50 etiket olabilir. Kullanmadıklarını sil.');
+        clean.id = newId('etiket');
+        state.tags.push(clean);
+      }
+      emit(EVENTS.changed, { mailboxIds: [] });
+      return structuredClone(clean);
+    },
+    tag_delete: ({ id }) => {
+      state.tags = state.tags.filter((x) => x.id !== id);
+      for (const m of state.messages) m.tags = m.tags.filter((x) => x !== id);
+      emit(EVENTS.changed, { mailboxIds: [] });
+      return null;
+    },
+    messages_tag: ({ ids, tagId, on }) => {
+      const tg = tagOf(tagId.trim());
+      for (const id of ids) {
+        const m = find(id);
+        if (on && !m.tags.includes(tg.id)) m.tags.push(tg.id);
+        if (!on) m.tags = m.tags.filter((x) => x !== tg.id);
+      }
+      emit(EVENTS.changed, { mailboxIds: [] });
+      return null;
     },
     outbox_list: () => [...scheduled.values()].map((e) => e.item).sort((a, b) => a.sendAt - b.sendAt),
     outbox_send_now: ({ id }) => {
@@ -871,7 +999,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
         snippet: `${account.displayName} daveti yanıtladı: ${m.invite.summary}`, date: now(), unread: false, starred: false,
         hasAttachments: false, category: 'people', snoozedUntil: null, cc: [], bcc: [], replyTo: [],
         messageIdHeader: null, references: [], bodyText: `${account.displayName} daveti yanıtladı: ${m.invite.summary}`, bodyHtml: null,
-        hasRemoteContent: false, remoteAllowed: false, attachments: [], thread: [], unsubscribe: null, invite: null, followUp: null,
+        hasRemoteContent: false, remoteAllowed: false, attachments: [], thread: [], unsubscribe: null, invite: null, followUp: null, pinned: false, tags: [],
       });
       emit(EVENTS.changed, { mailboxIds: [] });
       return null;

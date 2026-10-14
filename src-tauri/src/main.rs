@@ -8,6 +8,7 @@ mod cmd_cert;
 mod cmd_drafts;
 mod cmd_files;
 mod cmd_jmap;
+mod cmd_list;
 mod cmd_mailbox;
 mod cmd_oauth;
 mod cmd_outbox;
@@ -169,6 +170,12 @@ fn main() {
             followups::followups_list,
             screener::screener_list,
             screener::screener_decide,
+            cmd_list::messages_by_sender,
+            cmd_list::messages_pin,
+            cmd_list::tags_list,
+            cmd_list::tag_save,
+            cmd_list::tag_delete,
+            cmd_list::messages_tag,
         ])
         .build(tauri::generate_context!())
         .expect("Mailhere başlatılamadı");

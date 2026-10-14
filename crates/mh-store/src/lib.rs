@@ -22,6 +22,7 @@ mod schema;
 mod screener;
 mod search;
 mod settings;
+mod tags;
 mod threads;
 
 use std::path::Path;
@@ -48,6 +49,7 @@ pub use rules::{
 };
 pub use screener::normalize_email;
 pub use search::{fold_loose, fts_query};
+pub use tags::{normalize_tag_name, SenderScope};
 pub use threads::THREAD_LIMIT;
 
 /// Yerel depo.

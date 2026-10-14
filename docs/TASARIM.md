@@ -156,15 +156,22 @@ Boş durumlar ve hatalar her zaman iki şey söyler: **ne oldu** ve **ne yapıla
 | H | Ertele |
 | S | Yıldızla |
 | U | Okunmadı say |
+| P | Sabitle / sabitlemeyi kaldır |
 | Del | Sil |
 | J / K | Sonraki / önceki posta |
+| Shift J / Shift K | Seçimi sonraki / önceki satıra genişlet |
+| Ctrl A | Görünen tüm satırları seç |
 | Enter | Seçili postayı aç |
 | Ctrl K | Komut paleti |
 | Ctrl Enter | Gönder |
 | Ctrl Z | Son işlemi geri al |
-| Esc | Kapat / geri |
+| Esc | Seçimi bırak / kapat / geri |
 
 Kısayollar metin girdisinde odak varken tek harfli tuşlarda çalışmaz.
+
+Çoklu seçim: Ctrl (Cmd) + tık satırı tek tek işaretler, Shift + tık aralık seçer; satırın avatarı üzerine gelince çıkan seçim düğmesi de aynı işi yapar. İşaretli satır `--sel` zemini alır. Birden çok satır işaretliyken okuma alanının yerine toplu işlem paneli gelir (sayı, Arşivle, Sil, Okundu/Okunmadı, Yıldızla, Ertele, Klasöre taşı, Etiketler, Sabitle, Seçimi bırak); her eylem sayılı bildirimle geri alınabilir.
+
+Sabitleme ve etiketler yalnız bu bilgisayarda tutulur; sunucuya bayrak ya da klasör yazılmaz. Sabitlenenler gelen kutusu ve klasör görünümlerinde "Sabitlenenler" grubunda en üstte durur. Etiket rengi hesap rengi gibi kullanıcı verisidir: sınırlı paletten seçilir (`TAG_COLORS`), listede 8 px nokta, okuma alanında renkli noktalı çip olarak görünür.
 
 ## 9. Metin ve dil
 

@@ -152,6 +152,8 @@ mod tests {
             category,
             snoozed_until: None,
             follow_up: None,
+            pinned: false,
+            tags: Vec::new(),
         }
     }
 

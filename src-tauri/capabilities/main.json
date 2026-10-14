@@ -74,6 +74,12 @@
     "allow-followup-set",
     "allow-followups-list",
     "allow-screener-list",
-    "allow-screener-decide"
+    "allow-screener-decide",
+    "allow-messages-by-sender",
+    "allow-messages-pin",
+    "allow-tags-list",
+    "allow-tag-save",
+    "allow-tag-delete",
+    "allow-messages-tag"
   ]
 }

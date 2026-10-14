@@ -201,12 +201,17 @@ fn free_uid(
     Ok(())
 }
 
-/// Özet sütunları; son sütun açık yanıt hatırlatmasının anı (`followups`).
+/// Özet sütunları: açık yanıt hatırlatmasının anı (`followups`), sabitleme
+/// ve etiketler. Etiketler, postanın etiket kimliklerinin satır sonuyla
+/// ayrılmış listesidir (etiket sırasına göre).
 pub(crate) const SUMMARY_COLS: &str = "m.id, m.account_id, m.mailbox_id, m.thread_id, m.from_addr, m.to_addrs,
     m.subject, m.snippet, m.date, m.unread, m.starred, m.has_attachments, m.category, m.snoozed_until,
-    (SELECT f.due_at FROM followups f WHERE f.message_id = m.id)";
+    (SELECT f.due_at FROM followups f WHERE f.message_id = m.id),
+    m.pinned, (SELECT group_concat(tag_id, char(10)) FROM (
+        SELECT mt.tag_id FROM message_tags mt JOIN tags g ON g.id = mt.tag_id
+        WHERE mt.message_id = m.id ORDER BY g.position, g.id))";
 /// `SUMMARY_COLS` sütun sayısı (ardına eklenen sütunların başlangıcı).
-pub(crate) const SUMMARY_LEN: usize = 15;
+pub(crate) const SUMMARY_LEN: usize = 17;
 
 pub(crate) fn row_to_summary(r: &Row<'_>) -> rusqlite::Result<MessageSummary> {
     Ok(MessageSummary {
@@ -225,6 +230,11 @@ pub(crate) fn row_to_summary(r: &Row<'_>) -> rusqlite::Result<MessageSummary> {
         category: category_from(&r.get::<_, String>(12)?),
         snoozed_until: r.get(13)?,
         follow_up: r.get(14)?,
+        pinned: r.get(15)?,
+        tags: r
+            .get::<_, Option<String>>(16)?
+            .map(|s| s.split('\n').map(str::to_owned).collect())
+            .unwrap_or_default(),
     })
 }
 
@@ -236,16 +246,27 @@ fn ids_params(ids: &[MessageId]) -> Vec<Value> {
     ids.iter().map(|i| Value::Integer(*i)).collect()
 }
 
-/// "tarih:kimlik" imlecini çözer.
-fn parse_cursor(c: &str) -> AppResult<(Millis, MessageId)> {
-    c.split_once(':')
-        .and_then(|(d, i)| Some((d.parse().ok()?, i.parse().ok()?)))
-        .ok_or_else(|| {
-            AppError::new(
-                ErrorCode::Invalid,
-                "Liste imleci geçersiz; listeyi baştan yükle.",
-            )
-        })
+/// "tarih:kimlik" ya da (sabitlenenlerin önce geldiği görünümlerde)
+/// "tarih:kimlik:sabit" imlecini çözer.
+fn parse_cursor(c: &str) -> AppResult<(Millis, MessageId, bool)> {
+    let mut parts = c.split(':');
+    let parsed = (|| {
+        let d: Millis = parts.next()?.parse().ok()?;
+        let i: MessageId = parts.next()?.parse().ok()?;
+        let pinned = match parts.next() {
+            None => false,
+            Some("1") => true,
+            Some("0") => false,
+            Some(_) => return None,
+        };
+        parts.next().is_none().then_some((d, i, pinned))
+    })();
+    parsed.ok_or_else(|| {
+        AppError::new(
+            ErrorCode::Invalid,
+            "Liste imleci geçersiz; listeyi baştan yükle.",
+        )
+    })
 }
 
 /// Adres tam mı: boş olmayan yerel kısım, `@` ve en az iki parçalı alan adı.
@@ -626,7 +647,14 @@ impl Store {
                 sql += " AND m.mailbox_id = ?";
                 p.push(Value::Text(id.clone()));
             }
+            View::Tag { id } => {
+                sql += " AND EXISTS(SELECT 1 FROM message_tags mt WHERE mt.message_id = m.id AND mt.tag_id = ?)
+                         AND b.role NOT IN ('trash', 'junk')";
+                p.push(Value::Text(id.clone()));
+            }
         }
+        // Gelen kutusu ve klasör görünümlerinde sabitlenenler en üstte.
+        let pinned_first = crate::tags::pinned_first(&q.view);
         if let Some(a) = &q.account_id {
             sql += " AND m.account_id = ?";
             p.push(Value::Text(a.clone()));
@@ -643,15 +671,25 @@ impl Store {
         };
         let first_page = q.cursor.as_deref().is_none_or(str::is_empty);
         if let Some(c) = q.cursor.as_deref().filter(|c| !c.is_empty()) {
-            let (d, i) = parse_cursor(c)?;
-            sql += " AND (m.date < ? OR (m.date = ? AND m.id < ?))";
+            let (d, i, pinned) = parse_cursor(c)?;
+            let keyset = "(m.date < ? OR (m.date = ? AND m.id < ?))";
+            if pinned_first {
+                sql += &format!(" AND (m.pinned < ? OR (m.pinned = ? AND {keyset}))");
+                p.extend([Value::Integer(pinned as i64), Value::Integer(pinned as i64)]);
+            } else {
+                sql += &format!(" AND {keyset}");
+            }
             p.extend([Value::Integer(d), Value::Integer(d), Value::Integer(i)]);
         }
         // Hatırlatma listesi küçüktür ve hatırlatma anına göre sıralanır; imleçsiz.
         if q.view == View::Followups {
             sql += " ORDER BY (SELECT f.due_at FROM followups f WHERE f.message_id = m.id), m.id LIMIT 500";
         } else {
-            sql += " ORDER BY m.date DESC, m.id DESC LIMIT ?";
+            sql += if pinned_first {
+                " ORDER BY m.pinned DESC, m.date DESC, m.id DESC LIMIT ?"
+            } else {
+                " ORDER BY m.date DESC, m.id DESC LIMIT ?"
+            };
             p.push(Value::Integer(limit + 1));
         }
 
@@ -662,7 +700,13 @@ impl Store {
         })?;
         let next_cursor = if q.view != View::Followups && items.len() as i64 > limit {
             items.truncate(limit as usize);
-            items.last().map(|m| format!("{}:{}", m.date, m.id))
+            items.last().map(|m| {
+                if pinned_first {
+                    format!("{}:{}:{}", m.date, m.id, m.pinned as u8)
+                } else {
+                    format!("{}:{}", m.date, m.id)
+                }
+            })
         } else {
             None
         };

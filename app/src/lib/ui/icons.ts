@@ -76,6 +76,8 @@ export const icons = {
   followUp: '<path d="M9 6.5L3.5 12 9 17.5"/><path d="M3.5 12h7.5"/><circle cx="16.5" cy="15" r="4"/><path d="M16.5 13.2v1.9l1.3.9"/>',
   // Elek: delikli süzgeç.
   sieve: '<path d="M3.5 7.5h17"/><path d="M5.5 7.5l1.6 8.6A2 2 0 0 0 9.1 17.8h5.8a2 2 0 0 0 2-1.7l1.6-8.6"/><circle cx="10" cy="11.5" r=".9" fill="currentColor"/><circle cx="14" cy="11.5" r=".9" fill="currentColor"/><circle cx="12" cy="14.5" r=".9" fill="currentColor"/>',
+  tag: '<path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h5.3a1.5 1.5 0 0 1 1 .4l7.7 7.7a1.5 1.5 0 0 1 0 2.1l-5.3 5.3a1.5 1.5 0 0 1-2.1 0L4.4 11.8a1.5 1.5 0 0 1-.4-1z"/><circle cx="8.5" cy="8.5" r="1.1" fill="currentColor"/>',
+  bookmark: '<path d="M7 4.5h10a1 1 0 0 1 1 1V20l-6-4-6 4V5.5a1 1 0 0 1 1-1z"/>',
 } as const;
 
 export type IconName = keyof typeof icons;

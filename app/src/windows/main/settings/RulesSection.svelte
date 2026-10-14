@@ -6,6 +6,7 @@
   import Icon from '../../../lib/ui/Icon.svelte';
   import { showToast } from '../../../lib/ui/toast.svelte';
   import { mail } from '../../../lib/stores/mail.svelte';
+  import { tagById } from '../../../lib/stores/tags.svelte';
   import RuleEditor from './RuleEditor.svelte';
 
   let rules = $state<Rule[]>([]);
@@ -131,6 +132,8 @@
       }
       case 'forward':
         return t('rule.sum.forward', { to: a.to });
+      case 'tag':
+        return t('tag.sum', { tag: tagById(a.tagId)?.name ?? t('tag.missing') });
       default:
         return t(`rule.a.${a.kind}` as MessageKey);
     }

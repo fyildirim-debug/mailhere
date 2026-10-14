@@ -521,6 +521,7 @@ pub fn normalize_settings(mut s: Settings) -> Settings {
     // Boş liste geçerlidir (kullanıcı tümünü sildi); `None` dile göre varsayılan.
     s.quick_replies = s.quick_replies.map(clean_quick_replies);
     s.templates = crate::signatures::normalize_templates(s.templates);
+    s.saved_searches = crate::cmd_list::normalize_saved_searches(s.saved_searches);
     s
 }
 
@@ -695,6 +696,8 @@ pub fn show_demo_card(app: &AppHandle) -> AppResult<()> {
             category: Category::People,
             snoozed_until: None,
             follow_up: None,
+            pinned: false,
+            tags: Vec::new(),
         },
     };
     let account = state.store.account(&message.account_id)?;

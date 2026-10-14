@@ -4,6 +4,7 @@
   import { flatten, folderLabel, folderTree } from '../../../lib/mail/folders';
   import Icon from '../../../lib/ui/Icon.svelte';
   import { mail } from '../../../lib/stores/mail.svelte';
+  import { tagStore } from '../../../lib/stores/tags.svelte';
 
   interface Props {
     rule: Rule;
@@ -48,6 +49,7 @@
     ['star', 'rule.a.star'],
     ['mute', 'rule.a.mute'],
     ['forward', 'rule.a.forward'],
+    ['tag', 'tag.rule'],
   ];
 
   const folders = $derived(
@@ -71,7 +73,9 @@
         ? { kind, mailboxId: folders[0]?.mailbox.id ?? '' }
         : kind === 'forward'
           ? { kind, to: '' }
-          : { kind };
+          : kind === 'tag'
+            ? { kind, tagId: tagStore.list[0]?.id ?? '' }
+            : { kind };
   }
 
   // Hesap değişince başka hesabın klasörü seçili kalmasın.
@@ -89,7 +93,9 @@
       r.actions.length > 0 &&
       !needsAccount &&
       r.conditions.every((c) => !('op' in c) || !!c.value.trim()) &&
-      r.actions.every((a) => (a.kind === 'move' ? !!a.mailboxId : a.kind === 'forward' ? /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(a.to.trim()) : true)),
+      r.actions.every((a) =>
+        a.kind === 'move' ? !!a.mailboxId : a.kind === 'forward' ? /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(a.to.trim()) : a.kind === 'tag' ? !!a.tagId : true,
+      ),
   );
 </script>
 
@@ -152,6 +158,10 @@
           </select>
         {:else if a.kind === 'forward'}
           <input class="input small grow" type="email" aria-label={t('rule.forwardTo')} placeholder="ad@alanadi.com" bind:value={a.to} />
+        {:else if a.kind === 'tag'}
+          <select class="input small grow" aria-label={t('tag.name')} bind:value={a.tagId} disabled={!tagStore.list.length}>
+            {#each tagStore.list as tg (tg.id)}<option value={tg.id}>{tg.name}</option>{/each}
+          </select>
         {:else}
           <span class="grow"></span>
         {/if}
@@ -165,6 +175,7 @@
     </button>
     {#if needsAccount}<p class="hint warn">{t('rule.needsAccount')}</p>{/if}
     {#if r.actions.some((x) => x.kind === 'forward')}<p class="hint">{t('rule.forwardNote')}</p>{/if}
+    {#if r.actions.some((x) => x.kind === 'tag') && !tagStore.list.length}<p class="hint warn">{t('tag.none')}</p>{/if}
   </div>
 
   <label class="stop">

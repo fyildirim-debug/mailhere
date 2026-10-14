@@ -7,10 +7,14 @@
   import ToastHost from '../../lib/ui/ToastHost.svelte';
   import WindowControls from '../../lib/ui/WindowControls.svelte';
   import { runToastAction } from '../../lib/ui/toast.svelte';
+  import { snoozeOptions } from '../../lib/util/format';
   import { isEditing, shortcutFor } from '../../lib/util/keys';
   import { initMail, mail, move, moveTo, select, selectedIds, setUnread, toggleStar } from '../../lib/stores/mail.svelte';
+  import { bulkMove, bulkSetUnread, bulkSnooze, bulkStar, togglePin } from '../../lib/stores/bulk.svelte';
+  import { checkAll, checkedIds, clearChecked, extendChecked, multi } from '../../lib/stores/selection.svelte';
   import { resolvedTheme, toggleTheme } from '../../lib/stores/settings.svelte';
   import { initUpdate } from '../../lib/stores/update.svelte';
+  import BulkPanel from './BulkPanel.svelte';
   import CommandPalette from './CommandPalette.svelte';
   import MessageList from './MessageList.svelte';
   import Onboarding from './Onboarding.svelte';
@@ -24,6 +28,8 @@
   // Hesap ekleme sürerken (ilk hesap dahil) uygulamanın geri kalanı açılmaz:
   // kenar çubuğu, arama ve komut paleti "Gelen kutusunu aç" ile gelir.
   const setup = $derived(!mail.accounts.length || mail.screen === 'onboarding');
+  // Birden çok satır seçiliyken okuma alanı yerine toplu işlem paneli.
+  const bulk = $derived(multi());
 
   onMount(() => {
     void initMail();
@@ -53,7 +59,9 @@
     }
     if (mail.paletteOpen) return;
     if (sc === 'escape') {
-      if (mail.screen !== 'mail' && mail.accounts.length) mail.screen = 'mail';
+      // Önce çoklu seçim bırakılır.
+      if (mail.screen === 'mail' && mail.checked.length) clearChecked();
+      else if (mail.screen !== 'mail' && mail.accounts.length) mail.screen = 'mail';
       else (document.activeElement as HTMLElement | null)?.blur();
       return;
     }
@@ -70,15 +78,36 @@
       case 'prev':
         move(-1);
         break;
+      case 'extendNext':
+        extendChecked(1);
+        break;
+      case 'extendPrev':
+        extendChecked(-1);
+        break;
+      case 'selectAll':
+        checkAll();
+        break;
       case 'undo':
         void runToastAction();
         break;
       default:
+        if (bulk) {
+          // Çoklu seçimde tek tuşlar seçili satırların tümüne uygulanır.
+          const ids = checkedIds();
+          if (sc === 'archive') void bulkMove(ids, 'archive');
+          else if (sc === 'delete') void bulkMove(ids, 'trash');
+          else if (sc === 'star') void bulkStar(ids, true);
+          else if (sc === 'unread') void bulkSetUnread(ids, true);
+          else if (sc === 'pin') void togglePin(ids);
+          else if (sc === 'snooze') void bulkSnooze(ids, snoozeOptions(Date.now()).find((o) => o.key === 'tomorrow')!.at);
+          return;
+        }
         if (id == null) return;
         if (sc === 'archive') void moveTo(selectedIds(), 'archive');
         else if (sc === 'delete') void moveTo(selectedIds(), 'trash');
         else if (sc === 'star') void toggleStar(id);
         else if (sc === 'unread') void setUnread([id], true);
+        else if (sc === 'pin') void togglePin(selectedIds());
         else if (sc === 'open') void select(id);
         else if (sc === 'reply') reader?.focusReply();
         else if (sc === 'snooze') reader?.openSnooze();
@@ -124,7 +153,11 @@
       <ScheduledView />
     {:else}
       <MessageList />
-      <Reader bind:this={reader} />
+      {#if bulk}
+        <BulkPanel />
+      {:else}
+        <Reader bind:this={reader} />
+      {/if}
     {/if}
   </div>
 
