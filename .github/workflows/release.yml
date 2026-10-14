@@ -33,7 +33,7 @@ jobs:
         os: [ubuntu-22.04, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: Etiket biçimi
@@ -62,8 +62,8 @@ jobs:
           if (-not (Test-Path $perl)) { choco install strawberryperl -y --no-progress }
           "OPENSSL_SRC_PERL=$perl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - uses: dtolnay/rust-toolchain@stable
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - run: pnpm install --frozen-lockfile
@@ -75,7 +75,7 @@ jobs:
           MAILHERE_GOOGLE_CLIENT_SECRET: ${{ secrets.MAILHERE_GOOGLE_CLIENT_SECRET }}
           MAILHERE_MICROSOFT_CLIENT_ID: ${{ secrets.MAILHERE_MICROSOFT_CLIENT_ID }}
         run: pnpm tauri build -- --locked
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: paket-${{ runner.os }}
           path: |
@@ -96,15 +96,15 @@ jobs:
     runs-on: ubuntu-latest
     environment: yayin
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
           sparse-checkout: package.json
           sparse-checkout-cone-mode: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: paket-*
           path: paketler
@@ -128,7 +128,7 @@ jobs:
               mkdir -p "imzalar/$(dirname "$rel")"
               mv "$f.sig" "imzalar/$rel.sig"
             done
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: imzalar
           path: imzalar
@@ -144,18 +144,18 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: paket-*
           path: paketler
           merge-multiple: true
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         continue-on-error: true
         with:
           name: imzalar
@@ -183,7 +183,7 @@ jobs:
           fi
       # Doğrudan yayımlanır: uygulama içi güncelleme "en son sürüm"deki
       # latest.json'u okur (taslak sürüm görünmez).
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           name: Mailhere ${{ env.ETIKET }}
           tag_name: ${{ env.ETIKET }}
