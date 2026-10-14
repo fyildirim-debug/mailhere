@@ -1,11 +1,15 @@
 <script lang="ts">
   // Kişi kartı: gönderenle yazışmanın özeti ve kişiye yönelik eylemler.
-  // Sabit konumlu açılır pencere; Esc ya da dışarı tıklama kapatır.
+  // Sabit konumlu açılır pencere; Esc ya da dışarı tıklama kapatır. Mobil
+  // kabukta alt sayfa (Sheet) olarak açılır; konum yok sayılır.
   import { call, toAppError, type Address, type ContactInfo } from '../api';
   import { t, when } from '../i18n/index.svelte';
+  import { isMobileShell } from '../shell';
   import Avatar from '../ui/Avatar.svelte';
   import Icon from '../ui/Icon.svelte';
+  import Sheet from '../ui/Sheet.svelte';
   import { showToast } from '../ui/toast.svelte';
+  import { openCompose } from './open';
   import { displayName } from '../util/format';
   import { blockSender, newRuleFrom, searchAll, select } from '../stores/mail.svelte';
   import { settings, updateSettings } from '../stores/settings.svelte';
@@ -45,7 +49,7 @@
   });
 
   $effect(() => {
-    if (!el) return;
+    if (!el || isMobileShell) return;
     const r = el.getBoundingClientRect();
     pos = {
       left: Math.max(8, Math.min(at.x, window.innerWidth - r.width - 8)),
@@ -89,9 +93,7 @@
 
   function compose() {
     onclose();
-    void call('open_compose', {
-      prefill: { mode: 'new', messageId: null, to: [{ name: info?.name ?? address.name, email: address.email }], accountId },
-    });
+    openCompose({ mode: 'new', messageId: null, to: [{ name: info?.name ?? address.name, email: address.email }], accountId });
   }
 
   function rule() {
@@ -128,14 +130,7 @@
   }
 </script>
 
-<div
-  class="popover card"
-  role="dialog"
-  aria-label={t('contact.title')}
-  tabindex="-1"
-  bind:this={el}
-  style="left:{pos?.left ?? at.x}px;top:{pos?.top ?? at.y}px"
->
+{#snippet body()}
   <div class="head">
     <Avatar {address} size={40} />
     <div class="id">
@@ -150,7 +145,7 @@
   {:else if !info}
     <p class="meta note">{t('contact.loading')}</p>
   {:else}
-    <p class="meta note num">{t('contact.total', { n: info.total })}{#if info.lastDate != null} · {t('contact.last', { when: when(info.lastDate) })}{/if}</p>
+    <p class="meta note num">{t('contact.total', { n: info.total })}{#if info.lastDate != null}{' · '}{t('contact.last', { when: when(info.lastDate) })}{/if}</p>
     {#if info.recent.length}
       <div class="recent-h">{t('contact.recent')}</div>
       <ul class="recent">
@@ -175,7 +170,24 @@
     <button class="menu-item" onclick={rule}><Icon name="rules" size={16} />{t('contact.rule')}</button>
     <button class="menu-item danger" onclick={block}><Icon name="block" size={16} />{t('contact.block')}</button>
   </div>
-</div>
+{/snippet}
+
+{#if isMobileShell}
+  <Sheet label={t('contact.title')} {onclose}>
+    <div class="m">{@render body()}</div>
+  </Sheet>
+{:else}
+  <div
+    class="popover card"
+    role="dialog"
+    aria-label={t('contact.title')}
+    tabindex="-1"
+    bind:this={el}
+    style="left:{pos?.left ?? at.x}px;top:{pos?.top ?? at.y}px"
+  >
+    {@render body()}
+  </div>
+{/if}
 
 <style>
   .card {
@@ -265,5 +277,26 @@
   .star {
     display: inline-flex;
     color: var(--amber);
+  }
+
+  /* Alt sayfada: geniş başlık, 44 px konuşma satırları, 48 px eylemler (mobile.css). */
+  .m .head {
+    padding: 2px 12px 12px;
+  }
+
+  .m .note,
+  .m .recent-h {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .m .recent-btn {
+    height: 44px;
+    padding: 0 16px;
+  }
+
+  .m .actions .menu-item {
+    padding: 0 12px;
+    gap: 14px;
   }
 </style>

@@ -19,7 +19,10 @@
 <script lang="ts">
   // Açılır menü: sağ tık menüsü ve düğme menüleri. Ok tuşlarıyla gezilir,
   // Esc ya da dışarı tıklama kapatır; seçimden sonra kendiliğinden kapanır.
+  // Mobil kabukta aynı öğeler alt sayfada (Sheet) listelenir; konum yok sayılır.
+  import { isMobileShell } from '../shell';
   import Icon from './Icon.svelte';
+  import Sheet from './Sheet.svelte';
 
   interface Props {
     items: MenuItem[];
@@ -37,7 +40,7 @@
   let pos = $state<{ left: number; top: number } | null>(null);
 
   $effect(() => {
-    if (!menu) return;
+    if (!menu || isMobileShell) return;
     if (at) {
       // Pencereden taşmasın.
       const r = menu.getBoundingClientRect();
@@ -85,17 +88,7 @@
   }
 </script>
 
-<div
-  class="popover menu"
-  class:fixed={!!at}
-  role="menu"
-  tabindex="-1"
-  aria-label={label ?? title}
-  bind:this={menu}
-  style={at ? `left:${pos?.left ?? at.x}px;top:${pos?.top ?? at.y}px` : style}
-  onkeydown={onKeydown}
->
-  {#if title}<div class="menu-title">{title}</div>{/if}
+{#snippet rows(iconSize: number)}
   {#each items as item (item.key ?? item.label)}
     <button
       class="menu-item"
@@ -105,12 +98,34 @@
       disabled={item.disabled}
       onclick={() => pick(item)}
     >
-      {#if item.icon}<Icon name={item.icon} size={16} />{/if}
+      {#if item.icon}<Icon name={item.icon} size={iconSize} />{/if}
       <span class="grow trunc">{item.label}</span>
-      {#if item.checked}<Icon name="check" size={16} class="tick" />{:else if item.hint}<span class="meta num">{item.hint}</span>{/if}
+      {#if item.checked}<Icon name="check" size={iconSize} class="tick" />{:else if item.hint}<span class="meta num">{item.hint}</span>{/if}
     </button>
   {/each}
-</div>
+{/snippet}
+
+{#if isMobileShell}
+  <Sheet {title} label={label ?? title} {onclose}>
+    <div class="sheet-menu" role="menu" tabindex="-1" aria-label={label ?? title} bind:this={menu} onkeydown={onKeydown}>
+      {@render rows(20)}
+    </div>
+  </Sheet>
+{:else}
+  <div
+    class="popover menu"
+    class:fixed={!!at}
+    role="menu"
+    tabindex="-1"
+    aria-label={label ?? title}
+    bind:this={menu}
+    style={at ? `left:${pos?.left ?? at.x}px;top:${pos?.top ?? at.y}px` : style}
+    onkeydown={onKeydown}
+  >
+    {#if title}<div class="menu-title">{title}</div>{/if}
+    {@render rows(16)}
+  </div>
+{/if}
 
 <style>
   .menu {
@@ -135,7 +150,22 @@
     background: transparent;
   }
 
-  .menu :global(.tick) {
+  .menu :global(.tick),
+  .sheet-menu :global(.tick) {
     color: var(--accent-text);
+  }
+
+  /* Alt sayfada satırlar 48 px, ikonlar soluk ve biraz daha geniş aralıklı. */
+  .sheet-menu .menu-item {
+    padding: 0 12px;
+    gap: 14px;
+  }
+
+  .sheet-menu .menu-item :global(.icon:not(.tick)) {
+    color: var(--ink-3);
+  }
+
+  .sheet-menu .menu-item.danger :global(.icon) {
+    color: var(--danger);
   }
 </style>

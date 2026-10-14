@@ -119,10 +119,10 @@ test('arama: yazdıkça sonuç, sonuca dokunmak postayı açar, Enter listeyi s�
   await expect(page.getByRole('heading', { level: 1, name: 'Gelen Kutusu' })).toBeVisible();
 });
 
-test('yeni posta düğmesi yazma ekranını iter; geri liste', async ({ page }) => {
+test('yeni posta düğmesi yazma ekranını iter; kapat liste', async ({ page }) => {
   await page.getByRole('button', { name: 'Yeni posta' }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'Yeni posta' })).toBeVisible();
-  await page.getByRole('button', { name: 'Geri', exact: true }).click();
+  await page.getByRole('button', { name: 'Yazmayı kapat' }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'Gelen Kutusu' })).toBeVisible();
 });
 

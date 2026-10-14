@@ -1,29 +1,34 @@
 <script lang="ts">
   // Mobil kabuğun kökü: gezinme yığını (nav.svelte.ts), çekmece, liste ve
-  // üstüne itilen ekranlar. Açılış akışı masaüstüyle aynı (initMail); hesap
-  // yoksa mevcut hesap ekleme bileşeni gelir.
+  // üstüne itilen ekranlar (okuma, yazma, arama, ayarlar). Açılış akışı
+  // masaüstüyle aynı (initMail); hesap yoksa mevcut hesap ekleme bileşeni gelir.
   //
-  // Bu pakette okuma ekranı mevcut Reader'ı tam ekran gösterir; yazma ekranı
-  // sonraki pakette (MobileCompose) gelir. Ayarlar (MobileSettings) ve
-  // planlananlar (ScheduledView `embedded`) yığına itilen ekranlardır.
+  // Ayarlar (MobileSettings) ve planlananlar (ScheduledView `embedded`) yığına
+  // itilen ekranlardır. Alt sayfalar (menüler) ve yazma ekranı açılışta gezinme
+  // yığınına bağlanır: Sheet katmanı `nav.open('sheet')`, yazma istekleri
+  // (`openCompose`, Android'in `mh:navigate` olayı) yığına itilen MobileCompose.
   import '../../styles/mobile.css';
   import { onMount } from 'svelte';
-  import { call, EVENTS, on, type ListOnly, type MessageSummary } from '../../lib/api';
+  import { call, EVENTS, on, type ComposePrefill, type ListOnly, type MessageSummary } from '../../lib/api';
   import { t, type MessageKey } from '../../lib/i18n/index.svelte';
   import { listTitle } from '../../lib/mail/listing';
+  import { bindComposeOpener } from '../../lib/mail/open';
   import Icon from '../../lib/ui/Icon.svelte';
   import Menu, { type MenuItem } from '../../lib/ui/Menu.svelte';
+  import { bindSheetLayer } from '../../lib/ui/sheet-layer';
   import ToastHost from '../../lib/ui/ToastHost.svelte';
   import { initMail, mail, markAllRead, rowsOf, select, setOnly, setView, type Row } from '../../lib/stores/mail.svelte';
+  import { parseRoute } from '../../lib/stores/route.svelte';
   import { checkAll, clearChecked } from '../../lib/stores/selection.svelte';
   import { tagById } from '../../lib/stores/tags.svelte';
   import Onboarding from '../main/Onboarding.svelte';
-  import Reader from '../main/Reader.svelte';
   import ScheduledView from '../main/ScheduledView.svelte';
   import AppBar from './AppBar.svelte';
   import Drawer from './Drawer.svelte';
   import MobileBulkBar from './MobileBulkBar.svelte';
+  import MobileCompose from './MobileCompose.svelte';
   import MobileList from './MobileList.svelte';
+  import MobileReader from './MobileReader.svelte';
   import MobileSearch from './MobileSearch.svelte';
   import MobileSettings from './MobileSettings.svelte';
   import { nav, type MobileScreen } from './nav.svelte';
@@ -44,16 +49,46 @@
     void initMail();
     const onPop = (e: PopStateEvent) => nav.onPopState(e.state);
     window.addEventListener('popstate', onPop);
+    // Alt sayfalar yığının katmanı olur: geri tuşu önce onları kapatır.
+    bindSheetLayer({
+      get active() {
+        return nav.layer === 'sheet';
+      },
+      show: () => nav.open('sheet'),
+      hide: () => nav.close(),
+    });
+    // Yazma istekleri (okuma ekranı, kişi kartı) yeni pencere yerine yığına.
+    bindComposeOpener((p) => openCompose(composeScreen(p)));
     // Bildirimden açılan posta okuma ekranına iter.
-    const off = on(EVENTS.open, (p) => {
+    const offOpen = on(EVENTS.open, (p) => {
       if (nav.current.name === 'read') nav.replace({ name: 'read', id: p.id });
       else nav.push({ name: 'read', id: p.id });
     });
+    // Android kabuğu (Platform::open_compose) yazma rotasını olayla verir.
+    const offNav = on(EVENTS.navigate, (p) => {
+      const r = parseRoute(p.route);
+      if (r.name === 'compose') openCompose({ name: 'compose', mode: r.mode, id: r.id, to: r.to, from: r.from });
+    });
     return () => {
       window.removeEventListener('popstate', onPop);
-      off();
+      bindSheetLayer(null);
+      bindComposeOpener(null);
+      offOpen();
+      offNav();
     };
   });
+
+  type ComposeScreen = Extract<MobileScreen, { name: 'compose' }>;
+
+  function composeScreen(p: ComposePrefill): ComposeScreen {
+    return { name: 'compose', mode: p.mode, id: p.messageId, to: p.to ?? [], from: p.accountId ?? null };
+  }
+
+  /** Yazma ekranını iter; zaten yazılıyorsa yerine geçer (eskisi sökülürken taslağa yazılır). */
+  function openCompose(screen: ComposeScreen) {
+    if (nav.current.name === 'compose') nav.replace(screen);
+    else nav.push(screen);
+  }
 
   // Görev çubuğu / sekme başlığında okunmamış sayısı.
   $effect(() => {
@@ -192,7 +227,7 @@
       {#if selecting}
         <MobileBulkBar />
       {:else}
-        <button class="btn-primary m-fab" aria-label={t('act.compose')} title={t('act.compose')} onclick={() => nav.push({ name: 'compose', mode: 'new', id: null })}>
+        <button class="btn-primary m-fab" aria-label={t('act.compose')} title={t('act.compose')} onclick={() => openCompose({ name: 'compose', mode: 'new', id: null, to: [], from: null })}>
           <Icon name="pen" size={24} />
         </button>
       {/if}
@@ -202,23 +237,19 @@
 
     {#if screen.name === 'read'}
       <div class="m-screen pushed">
-        <AppBar leading="back" {title} onleading={() => nav.back()} />
-        <div class="m-read"><Reader /></div>
+        <MobileReader id={screen.id} />
       </div>
     {:else if screen.name === 'search'}
       <div class="m-screen pushed">
         <MobileSearch bind:q={searchQ} onback={() => nav.back()} onsubmit={() => nav.back()} onopen={openFromSearch} />
       </div>
     {:else if screen.name === 'compose'}
-      <!-- Yer tutucu: 3c paketinde MobileCompose (ComposeWindow `embedded`) gelir. -->
-      <div class="m-screen pushed">
-        <AppBar leading="back" title={t('act.compose')} onleading={() => nav.back()} />
-        <div class="m-empty">
-          <span class="m-empty-icon"><Icon name="pen" size={28} /></span>
-          <div class="m-empty-title">{t('mob.composeSoonTitle')}</div>
-          <div class="m-empty-body">{t('mob.composeSoonBody')}</div>
+      <!-- Her yazma isteği yeni ekran: yerine geçen istek eskisini söker (taslağa yazar). -->
+      {#key screen}
+        <div class="m-screen pushed">
+          <MobileCompose mode={screen.mode} id={screen.id} to={screen.to} from={screen.from} />
         </div>
-      </div>
+      {/key}
     {:else if screen.name === 'settings'}
       <!-- Her bölüm ayrı itilen ekran: `screen` nesnesi değişince yeniden kurulur ve giriş hareketi oynar. -->
       {#key screen}
@@ -273,33 +304,6 @@
     width: 20px;
     z-index: 4;
     touch-action: pan-y;
-  }
-
-  .m-read {
-    flex: 1;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    background: var(--paper);
-  }
-
-  /* Mevcut okuma alanı dar ekrana uyarlanır; 3b paketi MobileReader'ı yazar. */
-  .m-read :global(.reader .toolbar) {
-    padding: 0 8px;
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-
-  .m-read :global(.reader .toolbar::-webkit-scrollbar) {
-    display: none;
-  }
-
-  .m-read :global(.reader .article) {
-    padding: 20px 16px 16px;
-  }
-
-  .m-read :global(.reader .reply-wrap) {
-    padding: 8px 12px calc(12px + var(--sab));
   }
 
   .m-sched {

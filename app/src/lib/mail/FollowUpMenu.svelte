@@ -4,7 +4,9 @@
   // penceresinde gönder menüsünün içine gömülü (`embedded`).
   import { untrack } from 'svelte';
   import { t, when, type MessageKey } from '../i18n/index.svelte';
+  import { isMobileShell } from '../shell';
   import Icon from '../ui/Icon.svelte';
+  import Sheet from '../ui/Sheet.svelte';
   import { followUpOptions, parseLocalDateTime, toLocalDateTime, type FollowUpKey } from '../util/followup';
 
   interface Props {
@@ -40,7 +42,8 @@
   let pos = $state<{ left: number; top: number } | null>(null);
 
   $effect(() => {
-    if (embedded) return;
+    // Gömülü ve alt sayfadaki menünün kendi konumu ve dışarı tıklaması yoktur.
+    if (embedded || isMobileShell) return;
     if (menu && at) {
       // Pencereden taşmasın.
       const r = menu.getBoundingClientRect();
@@ -73,20 +76,12 @@
   }
 </script>
 
-<div
-  class={embedded ? 'embedded' : 'popover'}
-  class:fixed={!embedded && !!at}
-  role={embedded ? 'group' : 'menu'}
-  aria-label={t('follow.menu')}
-  bind:this={menu}
-  style={embedded ? '' : at ? `left:${pos?.left ?? at.x}px;top:${pos?.top ?? at.y}px` : style}
->
-  <div class="menu-title">{t('follow.menu')}</div>
+{#snippet rows(iconSize: number)}
   {#each opts as o (o.key)}
     <button class="menu-item" role="menuitemcheckbox" aria-checked={current === o.at} onclick={() => onpick(o.at)}>
-      <Icon name="followUp" size={16} />
+      <Icon name="followUp" size={iconSize} />
       <span class="grow">{t(labels[o.key])}</span>
-      {#if current === o.at}<Icon name="check" size={16} class="tick" />{:else}<span class="meta num">{when(o.at, now)}</span>{/if}
+      {#if current === o.at}<Icon name="check" size={iconSize} class="tick" />{:else}<span class="meta num">{when(o.at, now)}</span>{/if}
     </button>
   {/each}
   {#if custom}
@@ -96,17 +91,35 @@
     </div>
   {:else}
     <button class="menu-item" role="menuitem" onclick={() => (custom = true)}>
-      <Icon name="calendar" size={16} />
+      <Icon name="calendar" size={iconSize} />
       <span class="grow">{t('follow.custom')}</span>
     </button>
   {/if}
   {#if current != null && onclear}
     <button class="menu-item clear" role="menuitem" onclick={() => onclear?.()}>
-      <Icon name="x" size={16} />
+      <Icon name="x" size={iconSize} />
       <span class="grow">{t('follow.clear')}</span>
     </button>
   {/if}
-</div>
+{/snippet}
+
+{#if !embedded && isMobileShell}
+  <Sheet title={t('follow.menu')} {onclose}>
+    <div class="sheet-menu" role="menu" aria-label={t('follow.menu')}>{@render rows(20)}</div>
+  </Sheet>
+{:else}
+  <div
+    class={embedded ? 'embedded' : 'popover'}
+    class:fixed={!embedded && !!at}
+    role={embedded ? 'group' : 'menu'}
+    aria-label={t('follow.menu')}
+    bind:this={menu}
+    style={embedded ? '' : at ? `left:${pos?.left ?? at.x}px;top:${pos?.top ?? at.y}px` : style}
+  >
+    <div class="menu-title">{t('follow.menu')}</div>
+    {@render rows(16)}
+  </div>
+{/if}
 
 <style>
   .popover {
@@ -130,6 +143,15 @@
 
   .menu-item :global(.tick) {
     color: var(--accent-text);
+  }
+
+  .sheet-menu .menu-item {
+    padding: 0 12px;
+    gap: 14px;
+  }
+
+  .sheet-menu .custom {
+    padding: 8px 12px 10px;
   }
 
   .grow {

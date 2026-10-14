@@ -1,6 +1,10 @@
 <script lang="ts">
+  // Erteleme menüsü: akşam / yarın / hafta sonu / haftaya. Masaüstünde açılır
+  // menü, mobil kabukta alt sayfa (Sheet).
   import { t, when, type MessageKey } from '../i18n/index.svelte';
+  import { isMobileShell } from '../shell';
   import Icon from '../ui/Icon.svelte';
+  import Sheet from '../ui/Sheet.svelte';
   import { snoozeOptions } from '../util/format';
 
   interface Props {
@@ -24,6 +28,7 @@
   let menu = $state<HTMLDivElement>();
 
   $effect(() => {
+    if (isMobileShell) return;
     menu?.querySelector<HTMLButtonElement>('button')?.focus();
     const onDoc = (e: MouseEvent) => {
       if (menu && !menu.contains(e.target as Node)) onclose();
@@ -43,16 +48,26 @@
   });
 </script>
 
-<div class="popover" role="menu" bind:this={menu} {style}>
-  <div class="menu-title">{t('snooze.title')}</div>
+{#snippet rows(iconSize: number)}
   {#each opts as o (o.key)}
     <button class="menu-item" role="menuitem" onclick={() => onpick(o.at)}>
-      <Icon name="clock" size={16} />
+      <Icon name="clock" size={iconSize} />
       <span class="grow">{t(labels[o.key])}</span>
       <span class="meta num">{when(o.at, now)}</span>
     </button>
   {/each}
-</div>
+{/snippet}
+
+{#if isMobileShell}
+  <Sheet title={t('snooze.title')} {onclose}>
+    <div class="sheet-menu" role="menu" aria-label={t('snooze.title')}>{@render rows(20)}</div>
+  </Sheet>
+{:else}
+  <div class="popover" role="menu" aria-label={t('snooze.title')} bind:this={menu} {style}>
+    <div class="menu-title">{t('snooze.title')}</div>
+    {@render rows(16)}
+  </div>
+{/if}
 
 <style>
   .popover {
@@ -61,6 +76,11 @@
 
   .menu-item :global(.icon) {
     color: var(--ink-3);
+  }
+
+  .sheet-menu .menu-item {
+    padding: 0 12px;
+    gap: 14px;
   }
 
   .grow {

@@ -11,9 +11,10 @@
   import SnoozeMenu from '../../lib/mail/SnoozeMenu.svelte';
   import { printDocument, printInFrame } from '../../lib/mail/print';
   import FollowUpMenu from '../../lib/mail/FollowUpMenu.svelte';
-  import { followUpDue } from '../../lib/util/followup';
-  import { fillVariables } from '../../lib/util/variables';
-  import { displayName, fileSize, foreignReplyDomains } from '../../lib/util/format';
+  import QuickReply from '../../lib/mail/QuickReply.svelte';
+  import ReaderNotes from '../../lib/mail/ReaderNotes.svelte';
+  import { openCompose } from '../../lib/mail/open';
+  import { displayName, fileSize } from '../../lib/util/format';
   import {
     blockSender,
     mail,
@@ -21,33 +22,25 @@
     moveToFolder,
     newRuleFrom,
     openSettings,
-    quickReplyTargets,
-    screenerDecide,
     select,
     selectedIds,
-    sendQuickReply,
     setFollowUp,
     setUnread,
-    setView,
     snooze,
     unsubscribe,
   } from '../../lib/stores/mail.svelte';
-  import { quickReplies, settings } from '../../lib/stores/settings.svelte';
+  import { settings } from '../../lib/stores/settings.svelte';
   import { bulkMove, senderMessages, setTag, togglePin } from '../../lib/stores/bulk.svelte';
   import { tagStore, tagsOf } from '../../lib/stores/tags.svelte';
 
-  let reply = $state('');
-  let sending = $state(false);
   let snoozeOpen = $state(false);
-  let replyBox = $state<HTMLTextAreaElement>();
+  /** Hızlı yanıt kutusu (odak için). */
+  let quick = $state<QuickReply>();
   /** "Yanıt gelmezse hatırlat" menüsünün konumu (açıkken). */
   let followAt = $state<{ x: number; y: number } | null>(null);
 
   const d = $derived(mail.detail);
   const account = $derived(d ? mail.accounts.find((a) => a.id === d.accountId) : undefined);
-  // Yanıt alıcıları adresleriyle gösterilir: gizli bir Reply-To fark edilsin.
-  const replyList = $derived(d ? quickReplyTargets(d, account).map((a) => a.email).join(', ') : '');
-  const replyForeign = $derived(d ? foreignReplyDomains(d) : []);
   const isDraft = $derived(d ? mail.mailboxes.find((b) => b.id === d.mailboxId)?.role === 'drafts' : false);
   /** Konuşma görünümü: ayar açık ve taslak değil. */
   const conversation = $derived(settings.value.conversationView && !isDraft);
@@ -56,47 +49,19 @@
   const screening = $derived(mail.view.kind === 'screener' && mail.search == null);
   /** Göndericiye göre temizlik yalnız arka ucun kapsadığı görünümlerde: gelen kutusu, klasör, etiket (arama dışı). */
   const senderScope = $derived(mail.search == null && (mail.view.kind === 'inbox' || mail.view.kind === 'mailbox' || mail.view.kind === 'tag'));
-  const chips = $derived(quickReplies(settings.value));
-
-  /** Hızlı yanıt değişkenleri: yanıtlanan kişi ve hesabın gönderen adı. */
-  function useChip(text: string) {
-    if (!d) return;
-    reply = fillVariables(text, {
-      recipient: quickReplyTargets(d, account)[0] ?? null,
-      sender: account ? { name: account.displayName, email: account.email } : null,
-      locale: locale(),
-    });
-    replyBox?.focus();
-  }
   const tags = $derived(d ? tagsOf(d.tags) : []);
 
   export function focusReply() {
     if (isDraft) editDraft();
-    else replyBox?.focus();
+    else quick?.focus();
   }
 
   function editDraft() {
-    if (d) void call('open_compose', { prefill: { mode: 'draft', messageId: d.id } });
+    if (d) openCompose({ mode: 'draft', messageId: d.id });
   }
 
   export function openSnooze() {
     snoozeOpen = true;
-  }
-
-  async function send() {
-    if (!d || !reply.trim() || sending) return;
-    sending = true;
-    const text = reply;
-    const ok = await sendQuickReply(d, text, (back) => (reply = back));
-    if (ok) reply = '';
-    sending = false;
-  }
-
-  function onKey(e: KeyboardEvent) {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-      e.preventDefault();
-      void send();
-    }
   }
 
   /** Başlıklar ve gövde yalıtılmış bir çerçevede yazdırılır; arayüz basılmaz. */
@@ -233,44 +198,9 @@
   }
 
   function compose(mode: 'replyAll' | 'forward') {
-    if (d) void call('open_compose', { prefill: { mode, messageId: d.id } });
+    if (d) openCompose({ mode, messageId: d.id });
   }
 </script>
-
-{#snippet tagChips()}
-  {#if tags.length}
-    <div class="tagchips" role="group" aria-label={t('list.tagsOf', { list: tags.map((x) => x.name).join(', ') })}>
-      {#each tags as tg (tg.id)}
-        <button class="tagchip" title={t('tag.open')} onclick={() => setView({ kind: 'tag', id: tg.id })}>
-          <span class="tdot" style:background={tg.color}></span>{tg.name}
-        </button>
-      {/each}
-    </div>
-  {/if}
-{/snippet}
-
-{#snippet notes()}
-  {#if d}
-    {#if d.followUp != null}
-      <div class="strip follow" role="note">
-        <Icon name="followUp" size={16} />
-        <span class="grow">{followUpDue(d.followUp, Date.now()) ? t('follow.dueSince', { when: when(d.followUp) }) : t('follow.pending', { when: when(d.followUp) })}</span>
-        <button class="link small" onclick={() => d && setFollowUp(d.id, null)}>{t('follow.clear')}</button>
-      </div>
-    {/if}
-    {#if screening}
-      <div class="strip screen" role="note">
-        <Icon name="sieve" size={16} />
-        <span class="grow">
-          <span class="screen-title">{t('screen.first', { name: displayName(d.from) })}</span>
-          <span class="meta">{t('screen.firstHint')}</span>
-        </span>
-        <button class="btn-primary small" onclick={() => d && screenerDecide(d.accountId, d.from.email, true)}>{t('screen.allow')}</button>
-        <button class="btn-soft small danger" onclick={() => d && screenerDecide(d.accountId, d.from.email, false)}>{t('screen.block')}</button>
-      </div>
-    {/if}
-  {/if}
-{/snippet}
 
 <main class="reader">
   {#if d}
@@ -335,8 +265,7 @@
               <h2 class="selectable">{d.subject || '—'}</h2>
               {#if account && mail.accounts.length > 1}<span class="tag">{account.name}</span>{/if}
             </div>
-            {@render tagChips()}
-            {@render notes()}
+            <ReaderNotes detail={d} {screening} />
             <Conversation selected={d} />
           </article>
         {/key}
@@ -348,8 +277,7 @@
               {#if account && mail.accounts.length > 1}<span class="tag">{account.name}</span>{/if}
             </div>
             <div class="meta">{t('read.thread', { n: d.thread.length + 1 })} · {d.from.email}</div>
-            {@render tagChips()}
-            {@render notes()}
+            <ReaderNotes detail={d} {screening} />
 
             {#if d.thread.length}
               <div class="thread">
@@ -371,34 +299,7 @@
       {/if}
     </div>
 
-    {#if !isDraft}<div class="reply-wrap">
-      {#if replyForeign.length}
-        <p class="reply-warn" role="note">{t('read.replyElsewhere', { domains: replyForeign.join(', ') })}</p>
-      {/if}
-      {#if chips.length && !reply}
-        <div class="chips" role="group" aria-label={t('qr.title')}>
-          {#each chips as c (c)}
-            <button class="chip" onclick={() => useChip(c)}>{c}</button>
-          {/each}
-        </div>
-      {/if}
-      <div class="replybox">
-        <textarea
-          bind:this={replyBox}
-          bind:value={reply}
-          rows="2"
-          placeholder={t('read.replyPlaceholder')}
-          aria-label={t('read.replyPlaceholder')}
-          onkeydown={onKey}
-        ></textarea>
-        <div class="reply-bar">
-          <span class="meta trunc" title={replyList}>{t('read.replyTo', { list: replyList })}</span>
-          <span class="grow"></span>
-          <span class="meta">{t('read.sendHint')}</span>
-          <button class="btn-primary small" disabled={!reply.trim() || sending} onclick={send}><Icon name="send" size={16} />{t('act.send')}</button>
-        </div>
-      </div>
-    </div>{/if}
+    {#if !isDraft}<div class="reply-wrap"><QuickReply bind:this={quick} detail={d} /></div>{/if}
   {:else if mail.detailError}
     <div class="empty">
       <Icon name="mail" size={28} />
@@ -438,84 +339,6 @@
 {/if}
 
 <style>
-  .strip {
-    margin-top: 18px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 8px 12px;
-    border-radius: var(--r-row);
-    background: var(--surface);
-    border: 1px solid var(--line);
-    color: var(--ink-2);
-    font-size: var(--fs-meta);
-  }
-
-  .strip + .strip {
-    margin-top: 8px;
-  }
-
-  .strip.follow :global(.icon) {
-    color: var(--accent-text);
-  }
-
-  .strip.screen {
-    padding: 10px 12px;
-    color: var(--ink);
-    font-size: var(--fs-body);
-  }
-
-  .strip.screen > .grow {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-width: 0;
-  }
-
-  .screen-title {
-    font-weight: 500;
-  }
-
-  .btn-soft.danger {
-    color: var(--danger);
-  }
-
-  .chips {
-    max-width: 680px;
-    margin: 0 auto 8px;
-    display: flex;
-    gap: 6px;
-    overflow-x: auto;
-  }
-
-  .chip {
-    flex: none;
-    height: 28px;
-    padding: 0 12px;
-    border-radius: 999px;
-    border: 1px solid var(--line-strong);
-    background: var(--paper);
-    color: var(--ink-2);
-    font-size: var(--fs-meta);
-    white-space: nowrap;
-    transition:
-      background var(--t-fast),
-      border-color var(--t-fast),
-      color var(--t-fast);
-  }
-
-  .chip:hover {
-    background: var(--surface);
-    border-color: var(--ink-3);
-    color: var(--ink);
-  }
-
-  .reply-warn {
-    margin: 0 0 8px;
-    font-size: var(--fs-meta);
-    color: var(--amber);
-  }
-
   .reader {
     flex: 1;
     min-width: 0;
@@ -582,39 +405,6 @@
     margin-top: 6px;
   }
 
-  .tagchips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-top: 10px;
-  }
-
-  .tagchip {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    height: 24px;
-    padding: 0 10px 0 8px;
-    border: 1px solid var(--line);
-    border-radius: 999px;
-    background: var(--surface);
-    color: var(--ink-2);
-    font-size: var(--fs-meta);
-    font-weight: 500;
-    transition: border-color var(--t-fast);
-  }
-
-  .tagchip:hover {
-    border-color: var(--line-strong);
-    color: var(--ink);
-  }
-
-  .tdot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-  }
-
   .thread {
     margin-top: 20px;
     border-top: 1px solid var(--line);
@@ -654,43 +444,6 @@
   .reply-wrap {
     flex: none;
     padding: 12px 40px 20px;
-  }
-
-  .replybox {
-    max-width: 680px;
-    margin: 0 auto;
-    border: 1px solid var(--line-strong);
-    border-radius: var(--r-float);
-    background: var(--paper);
-    transition:
-      border-color var(--t-state),
-      box-shadow var(--t-state);
-  }
-
-  .replybox:focus-within {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-soft);
-  }
-
-  textarea {
-    display: block;
-    width: 100%;
-    min-height: 46px;
-    max-height: 220px;
-    padding: 12px 14px 4px;
-    border: 0;
-    outline: none;
-    resize: none;
-    background: transparent;
-    line-height: 1.5;
-    field-sizing: content;
-  }
-
-  .reply-bar {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 6px 8px 8px 14px;
   }
 
   .empty {

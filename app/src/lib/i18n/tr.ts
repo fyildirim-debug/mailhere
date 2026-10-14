@@ -700,7 +700,6 @@ export const tr = {
   'var.tarih': 'Bugünün tarihi',
   'var.gun': 'Bugünün günü',
 
-
   // liste: çoklu seçim, toplu işlemler, sabitleme, etiketler, kayıtlı aramalar
   'list.selectRow': '{subject} postasını seç',
   'list.pinnedGroup': 'Sabitlenenler',
@@ -792,8 +791,6 @@ export const tr = {
   'mob.swipeArchive': 'Sola kaydır: arşivle',
   'mob.swipeSnooze': 'Sağa kaydır: yarına ertele',
   'mob.longPress': 'Basılı tutarak seç',
-  'mob.composeSoonTitle': 'Telefondan yazma henüz hazır değil',
-  'mob.composeSoonBody': 'Bu sürümde yeni posta yalnız bilgisayardan yazılır. Okuma, arşivleme ve erteleme burada çalışır.',
   'mob.loading': 'Postalar yükleniyor…',
 
   // mobil: ayarlar, hesap ekleme, planlananlar
@@ -811,6 +808,18 @@ export const tr = {
   'mob.settings.tagLead': 'Postalarını kendi renkli etiketlerinle gruplarsın. Etiketler yalnız bu telefonda tutulur; sunucuya yazılmaz.',
   'mob.settings.pinLocal': 'Sabitleme yalnız bu telefonda tutulur; sunucuya yazılmaz.',
   'mob.onboarding.keyring': 'Android anahtar deposunda şifreli saklanır; bu telefondan çıkmaz.',
+
+  // Mobil okuma, yazma ve alt sayfa (3b / 3c)
+  'mob.sheet.label': 'Seçenekler',
+  'mob.read.actions': 'Posta eylemleri',
+  'mob.read.editDraft': 'Düzenle',
+  'mob.read.counting': 'Göndericinin postaları sayılıyor…',
+  'mob.compose.reply': 'Yanıt',
+  'mob.compose.forward': 'İlet',
+  'mob.compose.draft': 'Taslak',
+  'mob.compose.close': 'Yazmayı kapat',
+  'mob.compose.draftSaved': 'Taslaklara kaydedildi',
+  'mob.compose.restored': 'Gönderim geri alındı; taslak olarak açıldı',
 } as const;
 
 export type MessageKey = keyof typeof tr;

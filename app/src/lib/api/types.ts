@@ -663,6 +663,7 @@ export const EVENTS = {
   open: 'mh:open',
   update: 'mh:update',
   transfer: 'mh:transfer',
+  navigate: 'mh:navigate',
 } as const;
 
 export interface NotifyEvent {
@@ -680,6 +681,15 @@ export interface ChangedEvent {
   mailboxIds: string[];
 }
 
+/**
+ * Mobil kabuk bu rotayı açmalı (Android `Platform::open_compose`, yeni pencere
+ * yerine). Biçim yazma penceresi rotasıyla aynı, karma işareti olmadan:
+ * `compose/<kip>/<id>?from=<hesap>&to=<Ad <adres>>` (`route.svelte.ts` çözer).
+ */
+export interface NavigateEvent {
+  route: string;
+}
+
 export interface OutboxEvent {
   id: string;
   ok: boolean;
@@ -695,6 +705,7 @@ export interface EventPayloads {
   'mh:open': OpenEvent;
   'mh:update': UpdateInfo;
   'mh:transfer': TransferState;
+  'mh:navigate': NavigateEvent;
 }
 
 // -------------------------------------------------------------------- hatalar
