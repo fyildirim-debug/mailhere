@@ -24,11 +24,12 @@ import { t, when } from '../i18n/index.svelte';
 import { showToast } from '../ui/toast.svelte';
 import { baseSubject, displayName, replyTargets } from '../util/format';
 import { settings } from './settings.svelte';
+import { loadTags } from './tags.svelte';
 
 export type Screen = 'mail' | 'settings' | 'onboarding' | 'scheduled';
 
 /** Ayarlar sayfasının bölümü; hesap sayfası `account:<kimlik>`. */
-export type SettingsSection = 'general' | 'notifications' | 'compose' | 'accounts' | 'rules' | 'privacy' | 'about' | `account:${string}`;
+export type SettingsSection = 'general' | 'notifications' | 'compose' | 'accounts' | 'rules' | 'tags' | 'privacy' | 'about' | `account:${string}`;
 
 const PAGE = 100;
 
@@ -54,6 +55,8 @@ export const mail = $state({
   loading: false,
 
   selectedId: null as MessageId | null,
+  /** Çoklu seçim: işaretli satırların kimlikleri (satır = konuşmanın en yeni iletisi). Mantık `selection.svelte.ts`. */
+  checked: [] as MessageId[],
   detail: null as MessageDetail | null,
   detailLoading: false,
   detailError: null as string | null,
@@ -117,6 +120,7 @@ export async function initMail() {
   on(EVENTS.changed, () => scheduleRefresh());
   on(EVENTS.sync, (s) => (mail.sync = { ...mail.sync, [s.accountId]: s }));
   on(EVENTS.open, (p) => void openById(p.id));
+  void loadTags();
   await reloadAccounts();
   mail.ready = true;
 }
@@ -215,6 +219,7 @@ export function setView(view: View, accountId: string | null = null) {
   mail.accountId = accountId;
   mail.screen = 'mail';
   mail.selectedId = null;
+  mail.checked = [];
   mail.detail = null;
   void refreshList(false);
 }
@@ -224,6 +229,7 @@ export function searchAll(q: string) {
   mail.search = q.trim() || null;
   mail.screen = 'mail';
   mail.selectedId = null;
+  mail.checked = [];
   mail.detail = null;
   void refreshList(false);
 }
@@ -324,18 +330,19 @@ export function move(delta: 1 | -1) {
 
 // ---------------------------------------------------------- eylemler
 
-function patchLocal(ids: MessageId[], patch: Partial<MessageSummary>) {
+export function patchLocal(ids: MessageId[], patch: Partial<MessageSummary>) {
   const set = new Set(ids);
   mail.items = mail.items.map((m) => (set.has(m.id) ? { ...m, ...patch } : m));
   if (mail.detail && set.has(mail.detail.id)) mail.detail = { ...mail.detail, ...patch };
 }
 
-/** Postaları listeden çıkarır; seçili olan çıkarsa sıradakine geçer. Geri alma için eski durumu döner. */
-function takeOut(ids: MessageId[]) {
+/** Postaları listeden çıkarır; seçili olan çıkarsa sıradakine geçer. Çoklu seçimden de düşer. */
+export function takeOut(ids: MessageId[]) {
   const set = new Set(ids);
   const before = currentRows();
   const idx = before.findIndex((r) => r.ids.some((x) => set.has(x)));
   mail.items = mail.items.filter((m) => !set.has(m.id));
+  if (mail.checked.length) mail.checked = mail.checked.filter((id) => !set.has(id));
   if (mail.selectedId != null && set.has(mail.selectedId)) {
     const keep = (r: Row) => !r.ids.every((x) => set.has(x));
     const rest = before.slice(idx + 1).find(keep) ?? [...before.slice(0, Math.max(idx, 0))].reverse().find(keep);

@@ -17,14 +17,18 @@
     moveTo,
     moveToFolder,
     newRuleFrom,
+    openSettings,
     select,
     selectedIds,
     sendQuickReply,
     setUnread,
+    setView,
     snooze,
     toggleStar,
     unsubscribe,
   } from '../../lib/stores/mail.svelte';
+  import { bulkMove, senderMessages, setTag, togglePin } from '../../lib/stores/bulk.svelte';
+  import { tagStore, tagsOf } from '../../lib/stores/tags.svelte';
 
   let reply = $state('');
   let sending = $state(false);
@@ -43,6 +47,7 @@
   const replyForeign = $derived(d ? foreignReplyDomains(d) : []);
   const totalSize = $derived(d ? d.attachments.reduce((s, a) => s + a.size, 0) : 0);
   const isDraft = $derived(d ? mail.mailboxes.find((b) => b.id === d.mailboxId)?.role === 'drafts' : false);
+  const tags = $derived(d ? tagsOf(d.tags) : []);
 
   export function focusReply() {
     if (isDraft) editDraft();
@@ -104,16 +109,62 @@
     };
   }
 
+  function tagMenu(e: MouseEvent) {
+    if (!d) return;
+    const msg = d;
+    const items: MenuItem[] = tagStore.list.map((tg) => {
+      const has = msg.tags.includes(tg.id);
+      return { label: tg.name, checked: has, onclick: () => void setTag(selectedIds(), tg, !has) };
+    });
+    items.push({ label: t('tag.manage'), icon: 'settings', onclick: () => openSettings('tags') });
+    menu = { at: anchorOf(e), title: t('tag.menu'), items };
+  }
+
+  /**
+   * Göndericiye göre toplu temizlik: kapsamdaki postalar bulunur, sayı
+   * gösterilip onay istenir, sonra geri alınabilir toplu taşıma yapılır.
+   */
+  async function senderAction(mode: 'archive' | 'trash' | 'keepLatest', at: { x: number; y: number }) {
+    if (!d) return;
+    const msg = d;
+    let ids: number[];
+    try {
+      ids = await senderMessages(msg.accountId, msg.from.email);
+    } catch (e) {
+      showToast({ text: t('toast.error', { message: toAppError(e).message }) });
+      return;
+    }
+    // En yenisini tut: liste yeniden eskiye gelir, ilki kalır.
+    if (mode === 'keepLatest') ids = ids.slice(1);
+    if (!ids.length) {
+      showToast({ text: t(mode === 'keepLatest' ? 'bulk.senderOnlyLatest' : 'bulk.senderNone') });
+      return;
+    }
+    const target = mode === 'trash' ? 'trash' : 'archive';
+    menu = {
+      at,
+      title: t(target === 'trash' ? 'bulk.confirmTrash' : 'bulk.confirmArchive', { n: ids.length }),
+      items: [
+        { label: t('bulk.confirmGo'), icon: target === 'trash' ? 'trash' : 'archive', danger: target === 'trash', onclick: () => void bulkMove(ids, target) },
+        { label: t('act.cancel'), icon: 'x', onclick: () => {} },
+      ],
+    };
+  }
+
   function moreMenu(e: MouseEvent) {
     if (!d) return;
     const msg = d;
     const sender = msg.from.email;
+    const at = anchorOf(e);
     menu = {
-      at: anchorOf(e),
+      at,
       items: [
         { label: t('act.markUnread'), icon: 'mail', hint: 'U', onclick: () => void setUnread([msg.id], true) },
         { label: t('read.openQuick'), icon: 'external', onclick: () => void call('open_quick', { id: msg.id }) },
         ...(msg.unsubscribe ? [{ label: t('read.unsubscribe'), icon: 'unsubscribe' as const, onclick: () => void unsubscribe(msg) }] : []),
+        { label: t('bulk.senderArchive'), icon: 'archive', onclick: () => void senderAction('archive', at) },
+        { label: t('bulk.senderKeepLatest'), icon: 'archive', onclick: () => void senderAction('keepLatest', at) },
+        { label: t('bulk.senderTrash'), icon: 'trash', onclick: () => void senderAction('trash', at) },
         {
           label: t('read.ruleFromSender'),
           icon: 'rules',
@@ -168,6 +219,19 @@
       <button class="btn-icon" aria-label={t('act.markUnread')} title="{t('act.markUnread')} · U" onclick={() => setUnread([d.id], true)}>
         <Icon name="mail" />
       </button>
+      <button
+        class="btn-icon"
+        class:on={d.pinned}
+        aria-label={d.pinned ? t('pin.unpin') : t('pin.pin')}
+        aria-pressed={d.pinned}
+        title="{d.pinned ? t('pin.unpin') : t('pin.pin')} · P"
+        onclick={() => togglePin(selectedIds())}
+      >
+        <Icon name="pin" />
+      </button>
+      <button class="btn-icon" class:on={tags.length > 0} aria-label={t('tag.menu')} title={t('tag.menu')} aria-haspopup="menu" onclick={tagMenu}>
+        <Icon name="tag" />
+      </button>
       <span class="grow"></span>
       {#if isDraft}
         <button class="btn-primary small" title="{t('read.editDraft')} · R" onclick={editDraft}><Icon name="pen" size={16} />{t('read.editDraft')}</button>
@@ -189,6 +253,15 @@
             {#if account && mail.accounts.length > 1}<span class="tag">{account.name}</span>{/if}
           </div>
           <div class="meta">{t('read.thread', { n: d.thread.length + 1 })} · {d.from.email}</div>
+          {#if tags.length}
+            <div class="chips" aria-label={t('list.tagsOf', { list: tags.map((x) => x.name).join(', ') })}>
+              {#each tags as tg (tg.id)}
+                <button class="chip" title={t('tag.open')} onclick={() => setView({ kind: 'tag', id: tg.id })}>
+                  <span class="tdot" style:background={tg.color}></span>{tg.name}
+                </button>
+              {/each}
+            </div>
+          {/if}
 
           {#if d.thread.length}
             <div class="thread">
@@ -371,6 +444,39 @@
 
   .article > .meta {
     margin-top: 6px;
+  }
+
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 10px;
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 24px;
+    padding: 0 10px 0 8px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--ink-2);
+    font-size: var(--fs-meta);
+    font-weight: 500;
+    transition: border-color var(--t-fast);
+  }
+
+  .chip:hover {
+    border-color: var(--line-strong);
+    color: var(--ink);
+  }
+
+  .tdot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
   }
 
   .thread {

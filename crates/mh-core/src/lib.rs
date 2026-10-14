@@ -354,7 +354,37 @@ pub struct MessageSummary {
     pub has_attachments: bool,
     pub category: Category,
     pub snoozed_until: Option<Millis>,
+    /// Kullanıcı listede en üste sabitledi. Yalnız yerelde tutulur; sunucuya
+    /// yazılmaz.
+    #[serde(default)]
+    pub pinned: bool,
+    /// Postanın etiketlerinin kimlikleri (`Tag::id`). Yalnız yereldir.
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
+
+/// Kullanıcının yerel, renkli etiketi. Sunucuya yazılmaz; hesaplar arası
+/// ortaktır.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Tag {
+    /// Yeni etikette boş; arka uç kimlik verir.
+    pub id: String,
+    /// En çok `TAG_NAME_CHARS` karakter; etiketler arasında tek.
+    pub name: String,
+    /// `TAG_COLORS` paletinden bir renk (#RRGGBB).
+    pub color: String,
+}
+
+/// Etiket renk paleti (hesap renkleri gibi kullanıcı verisi; jeton değil).
+/// Arayüzdeki `TAG_COLORS` ile birebir aynıdır.
+pub const TAG_COLORS: [&str; 8] = [
+    "#4C6FD8", "#2E9A61", "#D08A1E", "#9A5BD6", "#D0566E", "#2A9BA8", "#B3882A", "#6B7280",
+];
+/// Etiket adının üst sınırı (karakter).
+pub const TAG_NAME_CHARS: usize = 40;
+/// En çok etiket sayısı.
+pub const TAGS_MAX: usize = 50;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -440,7 +470,13 @@ pub enum View {
     Sent,
     Archive,
     Trash,
-    Mailbox { id: String },
+    Mailbox {
+        id: String,
+    },
+    /// Bu etiketi taşıyan postalar (çöp ve istenmeyen hariç).
+    Tag {
+        id: String,
+    },
 }
 
 /// Listede hızlı süzgeç.
@@ -602,6 +638,11 @@ pub enum RuleAction {
     /// Postayı bu adrese iletir (postayı alan hesaptan).
     Forward {
         to: String,
+    },
+    /// Postaya yerel etiket ekler.
+    Tag {
+        #[serde(rename = "tagId")]
+        tag_id: String,
     },
 }
 
@@ -766,7 +807,27 @@ pub struct Settings {
     pub dark_mail: bool,
     /// Yazma penceresinde eklenebilen hazır metinler (en çok 50).
     pub templates: Vec<Template>,
+    /// Kenar çubuğundan tek tıkla çalıştırılan aramalar (en çok
+    /// `SAVED_SEARCHES_MAX`).
+    pub saved_searches: Vec<SavedSearch>,
 }
+
+/// Kayıtlı arama: ad ve arama sorgusu (işleçler dahil).
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SavedSearch {
+    /// Yeni kayıtta boş; arka uç kimlik verir.
+    pub id: String,
+    /// En çok `SAVED_SEARCH_NAME_CHARS` karakter.
+    pub name: String,
+    /// En çok `SAVED_SEARCH_QUERY_CHARS` karakter.
+    pub query: String,
+}
+
+/// Kayıtlı arama sınırları (arayüzle aynı).
+pub const SAVED_SEARCHES_MAX: usize = 30;
+pub const SAVED_SEARCH_NAME_CHARS: usize = 60;
+pub const SAVED_SEARCH_QUERY_CHARS: usize = 300;
 
 /// Hazır posta şablonu.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
@@ -853,6 +914,7 @@ impl Default for Settings {
             quick_replies: None,
             dark_mail: true,
             templates: Vec::new(),
+            saved_searches: Vec::new(),
         }
     }
 }
@@ -1000,6 +1062,35 @@ mod tests {
         assert_eq!(v, serde_json::json!({"kind": "mailbox", "id": "a:INBOX"}));
         let v = serde_json::to_value(View::Inbox).unwrap();
         assert_eq!(v, serde_json::json!({"kind": "inbox"}));
+        let v = serde_json::to_value(View::Tag { id: "e1".into() }).unwrap();
+        assert_eq!(v, serde_json::json!({"kind": "tag", "id": "e1"}));
+    }
+
+    #[test]
+    fn etiket_ve_kayitli_arama_json_bicimi() {
+        let tag = Tag {
+            id: "e1".into(),
+            name: "Fatura".into(),
+            color: TAG_COLORS[0].into(),
+        };
+        assert_eq!(
+            serde_json::to_value(&tag).unwrap(),
+            serde_json::json!({"id": "e1", "name": "Fatura", "color": "#4C6FD8"})
+        );
+        let s: Settings = serde_json::from_str(
+            r#"{"savedSearches":[{"id":"k1","name":"Elif'ten ekli","query":"from:elif has:ek"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(s.saved_searches.len(), 1);
+        assert_eq!(s.saved_searches[0].query, "from:elif has:ek");
+        assert!(Settings::default().saved_searches.is_empty());
+        assert_eq!(
+            serde_json::to_value(Settings::default()).unwrap()["savedSearches"],
+            serde_json::json!([])
+        );
+        for c in TAG_COLORS {
+            assert!(c.len() == 7 && c.starts_with('#'), "{c}");
+        }
     }
 
     #[test]
@@ -1043,6 +1134,8 @@ mod tests {
             has_attachments: false,
             category: Category::People,
             snoozed_until: None,
+            pinned: false,
+            tags: Vec::new(),
         };
         let d = MessageDetail {
             summary: s,
@@ -1067,15 +1160,21 @@ mod tests {
         assert_eq!(v["subject"], "Merhaba");
         assert_eq!(v["hasRemoteContent"], false);
         assert_eq!(v["category"], "people");
+        assert_eq!(v["pinned"], false);
+        assert_eq!(v["tags"], serde_json::json!([]));
         assert_eq!(
             v["unsubscribe"],
             serde_json::json!({"url": "https://bulten.ornek.com/cik?u=1", "mailto": null, "oneClick": true})
         );
-        // Alanı bilmeyen eski veri `None` okunur.
+        // Alanı bilmeyen eski veri `None` okunur; sabitleme ve etiket boş.
         let mut old = v.clone();
-        old.as_object_mut().unwrap().remove("unsubscribe");
+        for k in ["unsubscribe", "pinned", "tags"] {
+            old.as_object_mut().unwrap().remove(k);
+        }
         let back: MessageDetail = serde_json::from_value(old).unwrap();
         assert_eq!(back.unsubscribe, None);
+        assert!(!back.summary.pinned);
+        assert!(back.summary.tags.is_empty());
         assert_eq!(
             serde_json::to_value(UnsubscribeResult::Browser).unwrap(),
             "browser"
@@ -1196,7 +1295,8 @@ mod tests {
                 {"kind": "markRead"},
                 {"kind": "star"},
                 {"kind": "mute"},
-                {"kind": "forward", "to": "muhasebe@ornek.com"}
+                {"kind": "forward", "to": "muhasebe@ornek.com"},
+                {"kind": "tag", "tagId": "e1"}
             ],
             "stop": true
         });
@@ -1213,6 +1313,12 @@ mod tests {
             RuleCondition::Subject {
                 op: RuleOp::NotContains,
                 value: "reklam".into()
+            }
+        );
+        assert_eq!(
+            rule.actions[7],
+            RuleAction::Tag {
+                tag_id: "e1".into()
             }
         );
         assert_eq!(serde_json::to_value(&rule).unwrap(), json);

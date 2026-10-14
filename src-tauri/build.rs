@@ -61,6 +61,12 @@ fn main() {
         "outbox_list",
         "outbox_send_now",
         "outbox_to_draft",
+        "messages_by_sender",
+        "messages_pin",
+        "tags_list",
+        "tag_save",
+        "tag_delete",
+        "messages_tag",
     ];
     tauri_build::try_build(
         tauri_build::Attributes::new()

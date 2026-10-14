@@ -130,6 +130,8 @@ enum Filter {
     Before(Millis),
     /// Bu andan sonra ya da bu anda (yerel gün başı).
     After(Millis),
+    /// Katlanmış etiket adı parçası (`tag:` / `etiket:`).
+    Tag(String),
 }
 
 /// İşleçlerine ayrılmış sorgu.
@@ -214,6 +216,7 @@ fn filter_of(key: &str, raw: &str) -> Option<Filter> {
         }),
         "before" | "once" => Filter::Before(day_start(value)?),
         "after" | "sonra" => Filter::After(day_start(value)?),
+        "tag" | "etiket" => Filter::Tag(folded),
         _ => return None,
     })
 }
@@ -303,6 +306,18 @@ impl Store {
                         sql += " AND m.date >= ?";
                         p.push(Value::Integer(*at));
                     }
+                    Filter::Tag(name) => {
+                        let ids = tags_named(c, name)?;
+                        if ids.is_empty() {
+                            return Ok(Vec::new());
+                        }
+                        sql += &format!(
+                            " AND EXISTS(SELECT 1 FROM message_tags mt WHERE mt.message_id = m.id
+                                         AND mt.tag_id IN ({}))",
+                            vec!["?"; ids.len()].join(",")
+                        );
+                        p.extend(ids.into_iter().map(Value::Text));
+                    }
                 }
             }
             if !placed {
@@ -318,6 +333,25 @@ impl Store {
             rows.collect()
         })
     }
+}
+
+/// Adı (katlanmış) `name` ile başlayan etiketler ("fat" → "Fatura"); tam ad
+/// varsa yalnız o.
+fn tags_named(c: &Connection, name: &str) -> rusqlite::Result<Vec<String>> {
+    let mut st = c.prepare_cached("SELECT id, name FROM tags")?;
+    let rows = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+    let mut exact = Vec::new();
+    let mut prefix = Vec::new();
+    for row in rows {
+        let (id, n) = row?;
+        let folded = fold_loose(&n);
+        if folded == name {
+            exact.push(id);
+        } else if folded.starts_with(name) {
+            prefix.push(id);
+        }
+    }
+    Ok(if exact.is_empty() { prefix } else { exact })
 }
 
 /// Adı (katlanmış) `name` parçasını içeren kutular.
@@ -416,6 +450,60 @@ mod tests {
             parse_query("from:\"Ayşe Dem").filters,
             vec![Filter::From("ayse dem".into())]
         );
+        assert_eq!(
+            parse_query("tag:Fatura etiket:\"Proje X\"").filters,
+            vec![Filter::Tag("fatura".into()), Filter::Tag("proje x".into())]
+        );
+    }
+
+    #[test]
+    fn etiket_isleci() {
+        let s = store_with_account("a");
+        s.upsert_mailbox("a", "INBOX", "INBOX", MailboxRole::Inbox, None, false)
+            .unwrap();
+        let tag = |id: &str, name: &str| mh_core::Tag {
+            id: id.into(),
+            name: name.into(),
+            color: "#4C6FD8".into(),
+        };
+        s.tag_insert(&tag("e1", "Fatura")).unwrap();
+        s.tag_insert(&tag("e2", "Faturalar 2025")).unwrap();
+        s.tag_insert(&tag("e3", "Proje Işık")).unwrap();
+        let m1 = s
+            .upsert_message(&msg("a", "a:INBOX", "Ekim faturası", 10))
+            .unwrap()
+            .id;
+        let m2 = s
+            .upsert_message(&msg("a", "a:INBOX", "Eski fatura", 11))
+            .unwrap()
+            .id;
+        let m3 = s
+            .upsert_message(&msg("a", "a:INBOX", "Proje notu", 12))
+            .unwrap()
+            .id;
+        s.upsert_message(&msg("a", "a:INBOX", "Etiketsiz fatura", 13))
+            .unwrap();
+        s.set_message_tag(&[m1], "e1", true).unwrap();
+        s.set_message_tag(&[m2], "e2", true).unwrap();
+        s.set_message_tag(&[m3], "e3", true).unwrap();
+        let ids = |q: &str| {
+            s.search(q, 50)
+                .unwrap()
+                .into_iter()
+                .map(|m| m.id)
+                .collect::<Vec<_>>()
+        };
+        // Tam ad varsa yalnız o; yoksa önek eşleşmesi.
+        assert_eq!(ids("tag:fatura"), vec![m1]);
+        assert_eq!(ids("tag:FATURA"), vec![m1]);
+        assert_eq!(ids("tag:fat"), vec![m2, m1]);
+        assert_eq!(ids("etiket:\"faturalar 2025\""), vec![m2]);
+        assert_eq!(ids("tag:\"proje isik\""), vec![m3], "aksansız yazım");
+        // Serbest metinle birlikte.
+        assert_eq!(ids("fatura tag:fat"), vec![m2, m1]);
+        assert_eq!(ids("ekim tag:fatura"), vec![m1]);
+        assert!(ids("tag:yok").is_empty());
+        assert!(ids("tag:\"' OR 1=1\"").is_empty());
     }
 
     #[test]

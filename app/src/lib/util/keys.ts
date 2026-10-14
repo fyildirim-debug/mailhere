@@ -15,7 +15,15 @@ export type Shortcut =
   | 'open'
   | 'palette'
   | 'undo'
-  | 'escape';
+  | 'escape'
+  /** P: sabitle / sabitlemeyi kaldır. */
+  | 'pin'
+  /** Ctrl A: görünen tüm satırları seç. */
+  | 'selectAll'
+  /** Shift J / Shift ↓: seçimi sonraki satıra genişlet. */
+  | 'extendNext'
+  /** Shift K / Shift ↑: seçimi önceki satıra genişlet. */
+  | 'extendPrev';
 
 export interface KeyLike {
   key: string;
@@ -38,6 +46,7 @@ const SINGLE: Record<string, Shortcut> = {
   u: 'unread',
   j: 'next',
   k: 'prev',
+  p: 'pin',
   '#': 'delete',
 };
 
@@ -48,9 +57,13 @@ export function shortcutFor(e: KeyLike): Shortcut | null {
   if (key === 'Escape') return 'escape';
   if (e.editing) return null;
   if (mod && !e.altKey && !e.shiftKey && key === 'z') return 'undo';
+  if (mod && !e.altKey && !e.shiftKey && key === 'a') return 'selectAll';
   if (mod || e.altKey) return null;
   if (key === 'Delete') return 'delete';
   if (key === 'Enter') return 'open';
+  // Shift ile gezinme seçimi genişletir.
+  if (e.shiftKey && (key === 'j' || key === 'ArrowDown')) return 'extendNext';
+  if (e.shiftKey && (key === 'k' || key === 'ArrowUp')) return 'extendPrev';
   if (key === 'ArrowDown') return 'next';
   if (key === 'ArrowUp') return 'prev';
   return SINGLE[key] ?? null;

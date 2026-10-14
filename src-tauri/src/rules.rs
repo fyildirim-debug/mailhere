@@ -169,6 +169,12 @@ impl<'a> Engines<'a> {
         if unread.is_some() || starred.is_some() {
             touched.extend(self.set_flags(ids, unread, starred)?);
         }
+        // Yerel etiketler: silinmiş etiket sessizce atlanır.
+        for tag in &plan.tags {
+            if self.store.tag(tag)?.is_some() {
+                touched.extend(self.store.set_message_tag(ids, tag, true)?);
+            }
+        }
         let dest = plan.destination(|id| self.mailbox_role(id, account_id).is_some());
         let removed = match dest {
             None => false,
@@ -892,6 +898,13 @@ mod tests {
     #[tokio::test]
     async fn elle_calistirma() {
         let env = env();
+        env.store
+            .tag_insert(&mh_core::Tag {
+                id: "e1".into(),
+                name: "Fatura".into(),
+                color: "#4C6FD8".into(),
+            })
+            .unwrap();
         let mut r = rule(
             "r",
             vec![from_has("muhasebe")],
@@ -903,6 +916,12 @@ mod tests {
                 },
                 RuleAction::Move {
                     mailbox_id: "a:Faturalar".into(),
+                },
+                RuleAction::Tag {
+                    tag_id: "e1".into(),
+                },
+                RuleAction::Tag {
+                    tag_id: "silinmis".into(),
                 },
             ],
         );
@@ -933,6 +952,11 @@ mod tests {
         assert!(touched.contains(&"a:Faturalar".to_string()));
         assert_eq!(mailbox_of(&env, m1.id), "a:Faturalar");
         assert!(env.store.summary(m2.id).unwrap().unwrap().starred);
+        assert_eq!(
+            env.store.summary(m2.id).unwrap().unwrap().tags,
+            vec!["e1".to_string()],
+            "etiket eklenir, silinmiş etiket atlanır"
+        );
         assert_eq!(mailbox_of(&env, other.id), "b:INBOX");
         assert!(env.outbox.scheduled().unwrap().is_empty(), "iletme yok");
         // İkinci çalıştırma: gelen kutusunda eşleşen kalmadı.

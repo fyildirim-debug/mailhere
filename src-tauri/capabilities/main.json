@@ -65,6 +65,12 @@
     "allow-messages-move-to",
     "allow-outbox-list",
     "allow-outbox-send-now",
-    "allow-outbox-to-draft"
+    "allow-outbox-to-draft",
+    "allow-messages-by-sender",
+    "allow-messages-pin",
+    "allow-tags-list",
+    "allow-tag-save",
+    "allow-tag-delete",
+    "allow-messages-tag"
   ]
 }

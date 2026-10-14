@@ -23,7 +23,9 @@ Yeni posta geldiğinde koca bir pencere açılmaz: ekranın köşesinde küçük
 - **Kurallar** — gelen postayı göndereninden, konusundan, metninden ya da türünden tanıyıp klasöre taşır, arşivler, siler, okundu sayar, yıldızlar, bildirimsiz bırakır ya da başka bir adrese iletir (döngü korumalı). Göndericiyi tek tıkla engellersin.
 - **Planlama** — "sonra gönder" ile zamanlanan postalar Planlananlar'da durur; hemen gönderilir, düzenlenir ya da iptal edilir.
 - **Yazarken** — hesap başına birden çok imza (yeni posta ve yanıt için ayrı), şablonlar, kendi hızlı yanıtların; taslak kendiliğinden sunucuya kaydedilir, iletilen postanın ekleri de gider.
-- **Arama ve süzgeç** — `from:`, `to:`, `konu:`, `has:ek`, `is:okunmamış`, `in:klasör`, `önce:` / `sonra:` işleçleri; listede okunmamış, yıldızlı, ekli süzgeci.
+- **Arama ve süzgeç** — `from:`, `to:`, `konu:`, `has:ek`, `is:okunmamış`, `in:klasör`, `tag:etiket`, `önce:` / `sonra:` işleçleri; listede okunmamış, yıldızlı, ekli süzgeci. Sık kullandığın aramayı "Aramayı kaydet" ile kenar çubuğuna alırsın.
+- **Çoklu seçim** — Ctrl + tık, Shift + tık, Ctrl A ya da Shift J/K ile birden çok posta seç; toplu işlem paneli arşivler, siler, okundu sayar, yıldızlar, erteler, klasöre taşır, etiketler. Okuma panelinden bir göndericinin tüm postalarını tek seferde arşivler, çöpe atar ya da yalnız en yenisini bırakırsın; hepsi onaylı ve geri alınabilir.
+- **Sabitleme ve etiketler** — `P` ile sabitlenen posta gelen kutusunun ve klasörün en üstünde "Sabitlenenler" grubunda durur; renkli yerel etiketler kenar çubuğundan, kurallardan ve `tag:` işlecinden erişilir. İkisi de yalnız bu bilgisayarda tutulur, sunucuya yazılmaz.
 - **Bültenler** — abonelikten tek tıkla çıkma (RFC 8058, yalnız genel HTTPS adresine) ya da posta ile.
 - **Otomatik yanıt** — JMAP sunucularında (ör. Stalwart) sunucu tarafında tatil yanıtı; uygulama kapalıyken de çalışır.
 - **Ayrıntılı hesap ayarları** — gönderen adı, renk, hesap başına bildirim, sunucu ve parola değişikliği (önce bağlantı denenir).

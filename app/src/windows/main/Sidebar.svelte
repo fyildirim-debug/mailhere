@@ -1,18 +1,21 @@
 <script lang="ts">
-  import type { Account, Mailbox, View } from '../../lib/api';
-  import { call, toAppError } from '../../lib/api';
+  import type { Account, Mailbox, SavedSearch, Tag, View } from '../../lib/api';
+  import { call, toAppError, SAVED_SEARCH_NAME_CHARS } from '../../lib/api';
   import { t, type MessageKey } from '../../lib/i18n/index.svelte';
   import CertDialog, { type CertTarget } from '../../lib/mail/CertDialog.svelte';
   import { flatten, folderIcon, folderLabel, folderTree } from '../../lib/mail/folders';
   import Icon from '../../lib/ui/Icon.svelte';
   import type { IconName } from '../../lib/ui/icons';
   import Menu, { type MenuItem } from '../../lib/ui/Menu.svelte';
+  import NamePrompt from '../../lib/ui/NamePrompt.svelte';
   import { showToast } from '../../lib/ui/toast.svelte';
-  import { mail, openSettings, reloadMailboxes, setView, syncLabel } from '../../lib/stores/mail.svelte';
+  import { mail, openSettings, reloadMailboxes, searchAll, setView, syncLabel } from '../../lib/stores/mail.svelte';
+  import { settings, updateSettings } from '../../lib/stores/settings.svelte';
+  import { tagStore } from '../../lib/stores/tags.svelte';
   import { installUpdate, update } from '../../lib/stores/update.svelte';
 
   interface NavItem {
-    kind: Exclude<View['kind'], 'mailbox'>;
+    kind: Exclude<View['kind'], 'mailbox' | 'tag'>;
     icon: IconName;
     label: MessageKey;
     count?: () => number;
@@ -149,6 +152,64 @@
     if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) show(e);
   }
 
+  // ------------------------------------------------ etiketler ve kayıtlı aramalar
+
+  function pointOf(e: MouseEvent | KeyboardEvent) {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    return e instanceof MouseEvent && e.clientX ? { x: e.clientX, y: e.clientY } : { x: r.left + 24, y: r.bottom };
+  }
+
+  function tagActive(tg: Tag): boolean {
+    return mail.screen === 'mail' && mail.search == null && mail.view.kind === 'tag' && mail.view.id === tg.id;
+  }
+
+  function tagMenu(e: MouseEvent | KeyboardEvent, tg: Tag) {
+    e.preventDefault();
+    menu = {
+      at: pointOf(e),
+      title: tg.name,
+      items: [
+        { label: t('tag.open'), icon: 'tag', onclick: () => setView({ kind: 'tag', id: tg.id }) },
+        { label: t('tag.edit'), icon: 'settings', onclick: () => openSettings('tags') },
+      ],
+    };
+  }
+
+  let rename = $state<{ at: { x: number; y: number }; search: SavedSearch } | null>(null);
+
+  async function renameSearch(s: SavedSearch, name: string) {
+    rename = null;
+    try {
+      await updateSettings({ savedSearches: settings.value.savedSearches.map((x) => (x.id === s.id ? { ...x, name } : x)) });
+    } catch (e) {
+      showToast({ text: t('toast.error', { message: toAppError(e).message }) });
+    }
+  }
+
+  async function deleteSearch(s: SavedSearch) {
+    const before = settings.value.savedSearches;
+    try {
+      await updateSettings({ savedSearches: before.filter((x) => x.id !== s.id) });
+      showToast({ text: t('saved.deleted', { name: s.name }), action: { label: t('act.undo'), run: () => updateSettings({ savedSearches: before }) } });
+    } catch (e) {
+      showToast({ text: t('toast.error', { message: toAppError(e).message }) });
+    }
+  }
+
+  function searchMenu(e: MouseEvent | KeyboardEvent, s: SavedSearch) {
+    e.preventDefault();
+    const at = pointOf(e);
+    menu = {
+      at,
+      title: s.name,
+      items: [
+        { label: t('saved.run'), icon: 'search', onclick: () => searchAll(s.query) },
+        { label: t('saved.rename'), icon: 'pen', onclick: () => (rename = { at, search: s }) },
+        { label: t('saved.delete'), icon: 'trash', danger: true, onclick: () => void deleteSearch(s) },
+      ],
+    };
+  }
+
   const sync = $derived(syncLabel());
   let cert = $state<CertTarget[] | null>(null);
 
@@ -191,6 +252,48 @@
       </button>
     {/if}
   {/each}
+
+  {#if tagStore.list.length}
+    <div class="group">
+      <span>{t('tag.title')}</span>
+      <button class="btn-icon small" aria-label={t('tag.manage')} title={t('tag.manage')} onclick={() => openSettings('tags')}>
+        <Icon name="settings" size={14} />
+      </button>
+    </div>
+    {#each tagStore.list as tg (tg.id)}
+      {@const on = tagActive(tg)}
+      <button
+        class="nav"
+        class:active={on}
+        aria-current={on ? 'page' : undefined}
+        onclick={() => setView({ kind: 'tag', id: tg.id })}
+        oncontextmenu={(e) => tagMenu(e, tg)}
+        onkeydown={(e) => menuKey(e, (ev) => tagMenu(ev, tg))}
+      >
+        <span class="tdot" style:background={tg.color}></span>
+        <span class="trunc">{tg.name}</span>
+      </button>
+    {/each}
+  {/if}
+
+  {#if settings.value.savedSearches.length}
+    <div class="group"><span>{t('saved.nav')}</span></div>
+    {#each settings.value.savedSearches as s (s.id)}
+      {@const on = mail.screen === 'mail' && mail.search === s.query}
+      <button
+        class="nav"
+        class:active={on}
+        aria-current={on ? 'page' : undefined}
+        title={t('saved.query', { q: s.query })}
+        onclick={() => searchAll(s.query)}
+        oncontextmenu={(e) => searchMenu(e, s)}
+        onkeydown={(e) => menuKey(e, (ev) => searchMenu(ev, s))}
+      >
+        <Icon name="bookmark" />
+        <span class="trunc">{s.name}</span>
+      </button>
+    {/each}
+  {/if}
 
   <div class="group">
     <span>{t('nav.accounts')}</span>
@@ -302,6 +405,17 @@
 
 {#if cert}<CertDialog targets={cert} onclose={certClosed} />{/if}
 {#if menu}<Menu at={menu.at} title={menu.title} items={menu.items} onclose={() => (menu = null)} />{/if}
+{#if rename}
+  <NamePrompt
+    at={rename.at}
+    title={t('saved.rename')}
+    label={t('saved.name')}
+    value={rename.search.name}
+    maxlength={SAVED_SEARCH_NAME_CHARS}
+    onsave={(name) => rename && renameSearch(rename.search, name)}
+    onclose={() => (rename = null)}
+  />
+{/if}
 
 <style>
   .side {
@@ -367,6 +481,15 @@
     font-size: var(--fs-meta);
     font-weight: 500;
     color: var(--ink-2);
+  }
+
+  /* Etiket rengi kullanıcı verisidir; ikon genişliğine (18 px) hizalanır. */
+  .tdot {
+    flex: none;
+    width: 10px;
+    height: 10px;
+    margin: 0 4px;
+    border-radius: 50%;
   }
 
   .group {

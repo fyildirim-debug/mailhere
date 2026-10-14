@@ -12,12 +12,14 @@
   import NotifySection from './NotifySection.svelte';
   import PrivacySection from './PrivacySection.svelte';
   import RulesSection from './RulesSection.svelte';
+  import TagsSection from './TagsSection.svelte';
 
   const sections: { key: SettingsSection; icon: IconName; label: MessageKey }[] = [
     { key: 'general', icon: 'palette', label: 'set.nav.general' },
     { key: 'notifications', icon: 'bell', label: 'set.nav.notifications' },
     { key: 'compose', icon: 'pen', label: 'set.nav.compose' },
     { key: 'rules', icon: 'rules', label: 'set.nav.rules' },
+    { key: 'tags', icon: 'tag', label: 'tag.title' },
     { key: 'accounts', icon: 'user', label: 'set.nav.accounts' },
   ];
   const tail: { key: SettingsSection; icon: IconName; label: MessageKey }[] = [
@@ -83,6 +85,8 @@
           <ComposeSection />
         {:else if section === 'rules'}
           <RulesSection />
+        {:else if section === 'tags'}
+          <TagsSection />
         {:else if section === 'accounts'}
           <AccountsSection />
         {:else if section === 'privacy'}

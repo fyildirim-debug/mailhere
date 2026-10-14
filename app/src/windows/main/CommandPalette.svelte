@@ -5,7 +5,8 @@
   import Icon from '../../lib/ui/Icon.svelte';
   import type { IconName } from '../../lib/ui/icons';
   import { displayName, snoozeOptions } from '../../lib/util/format';
-  import { mail, moveTo, openSettings, searchAll, select, setView, snooze } from '../../lib/stores/mail.svelte';
+  import { mail, moveTo, openSettings, searchAll, select, selectedIds, setView, snooze } from '../../lib/stores/mail.svelte';
+  import { togglePin } from '../../lib/stores/bulk.svelte';
   import { resolvedTheme, toggleTheme } from '../../lib/stores/settings.svelte';
 
   interface Props {
@@ -68,6 +69,7 @@
       { key: 'compose', label: t('act.compose'), kbd: 'C', icon: 'pen', run: done(() => call('open_compose', { prefill: { mode: 'new', messageId: null } })) },
     ];
     if (sel != null) {
+      const pinned = mail.items.find((m) => m.id === sel)?.pinned ?? mail.detail?.pinned ?? false;
       list.push(
         { key: 'archive', label: t('act.archive'), kbd: 'E', icon: 'archive', run: done(() => moveTo([sel], 'archive')) },
         {
@@ -77,6 +79,7 @@
           icon: 'clock',
           run: done(() => snooze([sel], snoozeOptions(Date.now()).find((o) => o.key === 'tomorrow')!.at)),
         },
+        { key: 'pin', label: pinned ? t('pin.unpin') : t('pin.pin'), kbd: 'P', icon: 'pin', run: done(() => togglePin(selectedIds())) },
       );
     }
     list.push(
@@ -92,6 +95,7 @@
       { key: 'account', label: t('act.addAccount'), icon: 'plus', run: done(() => (mail.screen = 'onboarding')) },
       { key: 'settings', label: t('act.settings'), kbd: 'Ctrl ,', icon: 'settings', run: done(() => openSettings()) },
       { key: 'rules', label: t('palette.rules'), icon: 'rules', run: done(() => openSettings('rules')) },
+      { key: 'tags', label: t('tag.manage'), icon: 'tag', run: done(() => openSettings('tags')) },
       { key: 'templates', label: t('palette.templates'), icon: 'template', run: done(() => openSettings('compose')) },
       { key: 'scheduled', label: t('palette.scheduled'), icon: 'calendarClock', run: done(() => (mail.screen = 'scheduled')) },
     );
@@ -131,6 +135,7 @@
         ['has:ek', t('palette.op.attachment')],
         ['is:okunmamış', t('palette.op.unread')],
         ['in:arşiv', t('palette.op.in')],
+        ['tag:', t('tag.op')],
         ['after:2026-01-01', t('palette.op.after')],
       ];
       const tips = ops

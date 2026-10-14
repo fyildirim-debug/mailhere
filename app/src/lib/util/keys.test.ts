@@ -21,4 +21,17 @@ describe('kısayollar', () => {
     expect(shortcutFor({ key: 'r', ctrlKey: true })).toBeNull();
     expect(shortcutFor({ key: 'z', ctrlKey: true })).toBe('undo');
   });
+
+  it('seçim ve sabitleme kısayolları', () => {
+    expect(shortcutFor({ key: 'p' })).toBe('pin');
+    expect(shortcutFor({ key: 'a', ctrlKey: true })).toBe('selectAll');
+    expect(shortcutFor({ key: 'a', metaKey: true })).toBe('selectAll');
+    expect(shortcutFor({ key: 'a', ctrlKey: true, editing: true })).toBeNull();
+    expect(shortcutFor({ key: 'A', shiftKey: true })).toBe('replyAll');
+    expect(shortcutFor({ key: 'J', shiftKey: true })).toBe('extendNext');
+    expect(shortcutFor({ key: 'ArrowDown', shiftKey: true })).toBe('extendNext');
+    expect(shortcutFor({ key: 'K', shiftKey: true })).toBe('extendPrev');
+    expect(shortcutFor({ key: 'ArrowUp', shiftKey: true })).toBe('extendPrev');
+    expect(shortcutFor({ key: 'ArrowDown' })).toBe('next');
+  });
 });

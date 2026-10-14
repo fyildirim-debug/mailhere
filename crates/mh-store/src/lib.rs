@@ -19,6 +19,7 @@ mod scheduled;
 mod schema;
 mod search;
 mod settings;
+mod tags;
 
 use std::path::Path;
 use std::sync::Mutex;
@@ -42,6 +43,7 @@ pub use rules::{
     FORWARDS_PER_HOUR, MAX_RULES,
 };
 pub use search::{fold_loose, fts_query};
+pub use tags::{normalize_tag_name, SenderScope};
 
 /// Yerel depo.
 pub struct Store {

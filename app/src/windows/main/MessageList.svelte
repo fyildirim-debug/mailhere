@@ -1,13 +1,16 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import type { Category, ListOnly } from '../../lib/api';
+  import { toAppError, SAVED_SEARCHES_MAX, SAVED_SEARCH_NAME_CHARS, type Category, type ListOnly } from '../../lib/api';
   import { t, type MessageKey } from '../../lib/i18n/index.svelte';
   import Icon from '../../lib/ui/Icon.svelte';
   import Menu, { type MenuItem } from '../../lib/ui/Menu.svelte';
+  import NamePrompt from '../../lib/ui/NamePrompt.svelte';
+  import { showToast } from '../../lib/ui/toast.svelte';
   import { folderLabel } from '../../lib/mail/folders';
   import { dateGroup, type DateGroup } from '../../lib/util/format';
   import { loadMore, mail, markAllRead, rowsOf, setCategory, setOnly, setView } from '../../lib/stores/mail.svelte';
-  import { settings } from '../../lib/stores/settings.svelte';
+  import { settings, updateSettings } from '../../lib/stores/settings.svelte';
+  import { tagById } from '../../lib/stores/tags.svelte';
   import MessageRow from './MessageRow.svelte';
 
   const GROUP_H = 34;
@@ -37,16 +40,22 @@
     older: 'group.older',
   };
 
-  const rows = $derived(rowsOf(mail.items, mail.search == null));
+  // Gelen kutusu ve klasörde sabitlenenler "Sabitlenenler" grubunda, en üstte.
+  const pinnedView = $derived(mail.search == null && (mail.view.kind === 'inbox' || mail.view.kind === 'mailbox'));
+  const rows = $derived.by(() => {
+    const base = rowsOf(mail.items, mail.search == null);
+    // Arka uç zaten sabitlenenleri öne koyar; yerel işaret anında da aynı sıra korunur.
+    return pinnedView ? [...base.filter((r) => r.pinned), ...base.filter((r) => !r.pinned)] : base;
+  });
 
   const layout = $derived.by(() => {
     const entries: Entry[] = [];
     let top = 0;
-    let last: DateGroup | null = null;
+    let last: DateGroup | 'pinned' | null = null;
     rows.forEach((m, index) => {
-      const g = dateGroup(m.date, now);
+      const g = pinnedView && m.pinned ? 'pinned' : dateGroup(m.date, now);
       if (g !== last) {
-        entries.push({ kind: 'group', key: `g-${g}`, label: t(groupKey[g]), top, h: GROUP_H });
+        entries.push({ kind: 'group', key: `g-${g}-${index}`, label: g === 'pinned' ? t('list.pinnedGroup') : t(groupKey[g]), top, h: GROUP_H });
         top += GROUP_H;
         last = g;
       }
@@ -114,11 +123,33 @@
 
   const title = $derived.by(() => {
     if (mail.search != null) return t('list.searchTitle', { q: mail.search });
-    const box = mail.view.kind === 'mailbox' ? mail.mailboxes.find((b) => b.id === (mail.view as { id: string }).id) : undefined;
-    const base = mail.view.kind === 'mailbox' ? (box ? folderLabel(box) : '') : t(titleKey[mail.view.kind]);
+    const view = mail.view;
+    const box = view.kind === 'mailbox' ? mail.mailboxes.find((b) => b.id === view.id) : undefined;
+    const base =
+      view.kind === 'mailbox' ? (box ? folderLabel(box) : '') : view.kind === 'tag' ? (tagById(view.id)?.name ?? t('tag.title')) : t(titleKey[view.kind]);
     const acc = mail.accounts.find((a) => a.id === mail.accountId);
     return acc ? `${base} · ${acc.name}` : base;
   });
+
+  // Arama sonucunu kenar çubuğuna kaydet.
+  let savePrompt = $state<{ x: number; y: number } | null>(null);
+
+  async function saveSearch(name: string) {
+    const q = mail.search;
+    savePrompt = null;
+    if (!q) return;
+    const list = settings.value.savedSearches;
+    if (list.length >= SAVED_SEARCHES_MAX) {
+      showToast({ text: t('saved.full', { n: SAVED_SEARCHES_MAX }) });
+      return;
+    }
+    try {
+      await updateSettings({ savedSearches: [...list, { id: '', name, query: q }] });
+      showToast({ text: t('saved.saved', { name }) });
+    } catch (e) {
+      showToast({ text: t('toast.error', { message: toAppError(e).message }) });
+    }
+  }
 
   const unread = $derived(rows.filter((m) => m.unread).length);
 
@@ -146,7 +177,19 @@
       <h1 class="trunc">{title}</h1>
       <span class="meta num">{unread ? t('list.unread', { n: unread }) : t('list.allRead')}</span>
       {#if mail.search != null}
-        <button class="btn-icon mark" aria-label={t('list.clearSearch')} title={t('list.clearSearch')} onclick={() => setView(mail.view, mail.accountId)}>
+        <button
+          class="btn-icon mark"
+          aria-label={t('saved.save')}
+          title={t('saved.save')}
+          aria-haspopup="dialog"
+          onclick={(e) => {
+            const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+            savePrompt = { x: r.right - 300, y: r.bottom + 4 };
+          }}
+        >
+          <Icon name="bookmark" />
+        </button>
+        <button class="btn-icon" aria-label={t('list.clearSearch')} title={t('list.clearSearch')} onclick={() => setView(mail.view, mail.accountId)}>
           <Icon name="x" />
         </button>
       {/if}
@@ -200,13 +243,26 @@
       <div class="empty">
         <Icon name="check" size={28} />
         <div class="empty-title">{t('list.emptyTitle')}</div>
-        <div class="empty-body">{mail.category || mail.only ? t('list.emptyFilteredBody') : t('list.emptyBody')}</div>
+        <div class="empty-body">
+          {mail.view.kind === 'tag' && mail.search == null ? t('tag.emptyBody') : mail.category || mail.only ? t('list.emptyFilteredBody') : t('list.emptyBody')}
+        </div>
       </div>
     {/if}
   </div>
 </section>
 
 {#if filterMenu}<Menu at={filterMenu} title={t('list.filterBy')} items={filterItems} onclose={() => (filterMenu = null)} />{/if}
+{#if savePrompt}
+  <NamePrompt
+    at={savePrompt}
+    title={t('saved.save')}
+    label={t('saved.name')}
+    value={mail.search ?? ''}
+    maxlength={SAVED_SEARCH_NAME_CHARS}
+    onsave={saveSearch}
+    onclose={() => (savePrompt = null)}
+  />
+{/if}
 
 <style>
   .list {

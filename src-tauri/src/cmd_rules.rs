@@ -123,6 +123,14 @@ pub fn normalize_rule(store: &Store, mut rule: Rule) -> AppResult<Rule> {
                     ));
                 }
             }
+            RuleAction::Tag { tag_id } => {
+                *tag_id = tag_id.trim().to_owned();
+                if store.tag(tag_id)?.is_none() {
+                    return Err(invalid(
+                        "Eklenecek etiket bulunamadı; silinmiş olabilir. Başka bir etiket seç.",
+                    ));
+                }
+            }
             RuleAction::Archive
             | RuleAction::Trash
             | RuleAction::MarkRead
@@ -423,6 +431,37 @@ mod tests {
             r.actions = vec![RuleAction::Archive, RuleAction::Mute];
         });
         save_rule(&s, ok).unwrap();
+        // Etiket eylemi var olan bir etiketi ister; kimlik kırpılır.
+        assert_eq!(
+            err(
+                &s,
+                with(&|r| r.actions = vec![RuleAction::Tag {
+                    tag_id: "yok".into()
+                }])
+            ),
+            "Eklenecek etiket bulunamadı; silinmiş olabilir. Başka bir etiket seç."
+        );
+        s.tag_insert(&mh_core::Tag {
+            id: "e1".into(),
+            name: "Fatura".into(),
+            color: "#4C6FD8".into(),
+        })
+        .unwrap();
+        let saved = save_rule(
+            &s,
+            with(&|r| {
+                r.actions = vec![RuleAction::Tag {
+                    tag_id: " e1 ".into(),
+                }]
+            }),
+        )
+        .unwrap();
+        assert_eq!(
+            saved.actions,
+            vec![RuleAction::Tag {
+                tag_id: "e1".into()
+            }]
+        );
     }
 
     #[test]

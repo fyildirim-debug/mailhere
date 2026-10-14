@@ -160,7 +160,26 @@ export interface MessageSummary {
   hasAttachments: boolean;
   category: Category;
   snoozedUntil: Millis | null;
+  /** Kullanıcı listede en üste sabitledi. Yalnız yerelde tutulur; sunucuya yazılmaz. */
+  pinned: boolean;
+  /** Postanın etiketlerinin kimlikleri (`Tag.id`). Yalnız yereldir. */
+  tags: string[];
 }
+
+/** Kullanıcının yerel, renkli etiketi. Sunucuya yazılmaz; hesaplar arası ortaktır. */
+export interface Tag {
+  /** Yeni etikette boş; arka uç kimlik verir. */
+  id: string;
+  /** En çok TAG_NAME_CHARS karakter; etiketler arasında tek. */
+  name: string;
+  /** TAG_COLORS paletinden bir renk (#RRGGBB). */
+  color: string;
+}
+
+/** Etiket renk paleti (hesap renkleri gibi kullanıcı verisi; jeton değil). Arka uçtaki `TAG_COLORS` ile birebir aynı. */
+export const TAG_COLORS = ['#4C6FD8', '#2E9A61', '#D08A1E', '#9A5BD6', '#D0566E', '#2A9BA8', '#B3882A', '#6B7280'] as const;
+export const TAG_NAME_CHARS = 40;
+export const TAGS_MAX = 50;
 
 export interface Attachment {
   index: number;
@@ -213,7 +232,9 @@ export type View =
   | { kind: 'sent' }
   | { kind: 'archive' }
   | { kind: 'trash' }
-  | { kind: 'mailbox'; id: string };
+  | { kind: 'mailbox'; id: string }
+  /** Bu etiketi taşıyan postalar (çöp ve istenmeyen hariç). */
+  | { kind: 'tag'; id: string };
 
 /** Listede hızlı süzgeç. */
 export type ListOnly = 'unread' | 'starred' | 'attachments';
@@ -295,7 +316,9 @@ export type RuleAction =
   | { kind: 'star' }
   /** Kart ve bildirim gösterilmez. */
   | { kind: 'mute' }
-  | { kind: 'forward'; to: string };
+  | { kind: 'forward'; to: string }
+  /** Postaya yerel etiket ekler. */
+  | { kind: 'tag'; tagId: string };
 
 /** Gelen kutusuna yeni düşen postaya sırayla uygulanan kural. */
 export interface Rule {
@@ -378,7 +401,22 @@ export interface Settings {
   /** Koyu temada kendi zemini olmayan postalar koyu zeminde gösterilir. */
   darkMail: boolean;
   templates: Template[];
+  /** Kenar çubuğundan tek tıkla çalıştırılan aramalar (en çok SAVED_SEARCHES_MAX). */
+  savedSearches: SavedSearch[];
 }
+
+/** Kayıtlı arama: ad ve arama sorgusu (işleçler dahil). */
+export interface SavedSearch {
+  /** Yeni kayıtta boş; arka uç kimlik verir. */
+  id: string;
+  name: string;
+  query: string;
+}
+
+/** Kayıtlı arama sınırları (arka uçla aynı). */
+export const SAVED_SEARCHES_MAX = 30;
+export const SAVED_SEARCH_NAME_CHARS = 60;
+export const SAVED_SEARCH_QUERY_CHARS = 300;
 
 /** Hızlı yanıt sınırları (arka uçla aynı). */
 export const QUICK_REPLIES_MAX = 8;
@@ -427,6 +465,7 @@ export const defaultSettings: Settings = {
   quickReplies: null,
   darkMail: true,
   templates: [],
+  savedSearches: [],
 };
 
 // ------------------------------------------------------------------- olaylar
@@ -591,6 +630,22 @@ export interface Commands {
   update_check: [Record<string, never>, UpdateInfo | null];
   /** İndirir, kurar ve uygulamayı yeniden başlatır. */
   update_install: [Record<string, never>, null];
+
+  // Liste: göndericiye göre seçim, sabitleme, etiketler (hepsi yerel)
+  /**
+   * Gönderenin kapsamdaki postaları, yeniden eskiye. Kapsam: `view` klasör ya da
+   * etiket görünümüyse o, yoksa gelen kutusu; `accountId` verilirse yalnız o hesap.
+   */
+  messages_by_sender: [{ accountId: AccountId | null; email: string; view: View | null }, MessageId[]];
+  /** Sabitler ya da sabitlemeyi kaldırır; sunucuya yazılmaz. */
+  messages_pin: [{ ids: MessageId[]; pinned: boolean }, null];
+  tags_list: [Record<string, never>, Tag[]];
+  /** Kaydeder (id boşsa yeni); sadeleştirilmiş etiketi döner. */
+  tag_save: [{ tag: Tag }, Tag];
+  /** Etiketi siler; postalardan da kalkar. */
+  tag_delete: [{ id: string }, null];
+  /** Etiketi postalara ekler (`on`) ya da kaldırır. */
+  messages_tag: [{ ids: MessageId[]; tagId: string; on: boolean }, null];
 }
 
 export type CommandName = keyof Commands;

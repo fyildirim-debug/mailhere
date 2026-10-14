@@ -5,7 +5,7 @@ import { rowsOf } from './mail.svelte';
 function m(id: number, thread: string, unread = false): MessageSummary {
   return {
     id, accountId: 'a', mailboxId: 'a:INBOX', threadId: thread, from: { name: null, email: 'x@y.z' }, to: [], subject: thread,
-    snippet: '', date: 1000 - id, unread, starred: false, hasAttachments: false, category: 'people', snoozedUntil: null,
+    snippet: '', date: 1000 - id, unread, starred: false, hasAttachments: false, category: 'people', snoozedUntil: null, pinned: false, tags: [],
   };
 }
 

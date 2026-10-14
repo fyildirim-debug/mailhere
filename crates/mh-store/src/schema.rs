@@ -202,6 +202,28 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX rule_forwards_at ON rule_forwards(rule_id, at);
     "#,
+    // 8: sabitleme ve yerel etiketler. İkisi de yalnız bu bilgisayarda
+    // tutulur, sunucuya yazılmaz. Etiketler hesaplar arası ortaktır; posta
+    // silinince ya da etiket silinince bağ da gider.
+    r#"
+    ALTER TABLE messages ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;
+    CREATE INDEX messages_pinned ON messages(mailbox_id, pinned) WHERE pinned = 1;
+
+    CREATE TABLE tags (
+        id        TEXT PRIMARY KEY,
+        name      TEXT NOT NULL,
+        color     TEXT NOT NULL,
+        position  INTEGER NOT NULL
+    );
+    CREATE INDEX tags_position ON tags(position);
+
+    CREATE TABLE message_tags (
+        message_id  INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+        tag_id      TEXT NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+        PRIMARY KEY (message_id, tag_id)
+    );
+    CREATE INDEX message_tags_tag ON message_tags(tag_id, message_id);
+    "#,
 ];
 
 /// Dallar ayrı geliştirilirken ana dalın ara sürümleri bazı geçişleri yer
@@ -327,5 +349,42 @@ mod tests {
             })
             .unwrap();
         assert_eq!(hidden, 0);
+    }
+
+    #[test]
+    fn sabitleme_ve_etiket_gecisi_eski_postalari_korur() {
+        // 7. sürümde bir posta; 8. geçiş sonradan uygulanır.
+        let mut conn = Connection::open_in_memory().unwrap();
+        for sql in &MIGRATIONS[..7] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 7i64).unwrap();
+        conn.execute_batch(
+            "INSERT INTO accounts (id, name, email, display_name, color, kind, created_at)
+             VALUES ('a', 'İş', 'a@ornek.com', 'A', '#4C6FD8', 'imap', 1);
+             INSERT INTO mailboxes (id, account_id, path, name, role)
+             VALUES ('a:INBOX', 'a', 'INBOX', 'INBOX', 'inbox');
+             INSERT INTO messages (account_id, mailbox_id, thread_id, from_addr, date)
+             VALUES ('a', 'a:INBOX', 't', '{\"name\":null,\"email\":\"x@y.z\"}', 5);",
+        )
+        .unwrap();
+        migrate(&mut conn).unwrap();
+        let pinned: i64 = conn
+            .query_row("SELECT pinned FROM messages", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(pinned, 0, "eski postalar sabitlenmemiş");
+        assert!(table_exists(&conn, "tags").unwrap());
+        assert!(table_exists(&conn, "message_tags").unwrap());
+        // Etiket bağı posta silinince gider.
+        conn.execute_batch(
+            "INSERT INTO tags (id, name, color, position) VALUES ('e1', 'Fatura', '#4C6FD8', 0);
+             INSERT INTO message_tags (message_id, tag_id) SELECT id, 'e1' FROM messages;
+             DELETE FROM messages;",
+        )
+        .unwrap();
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM message_tags", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0);
     }
 }
