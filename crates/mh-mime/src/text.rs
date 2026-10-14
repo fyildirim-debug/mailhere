@@ -200,8 +200,116 @@ pub fn snippet(text: &str) -> String {
         .map(str::trim)
         .filter(|l| !l.starts_with('>'))
         .collect();
-    let flat = collapse_ws(&body.join(" "));
+    let flat = clean_preview(&body.join(" "));
     truncate_words(&flat, SNIPPET_LEN)
+}
+
+/// Önizlemede okunmayan parçaları atar: bültenlerin görünmez dolgu
+/// karakterleri, doldurulmamış şablon değişkenleri (`{PREHEADER}`,
+/// `{{ad}}`, `*|MC_PREVIEW_TEXT|*`, `%%preheader%%`), bağlantılar ve
+/// bağlantıdan geriye kalan boş ayraçlar. Boşluklar sadeleşir.
+fn clean_preview(s: &str) -> String {
+    let visible: String = s.chars().filter(|&c| !is_invisible(c)).collect();
+    let mut t = strip_between(&visible, "{{", "}}");
+    t = strip_between(&t, "{%", "%}");
+    t = strip_between(&t, "*|", "|*");
+    t = strip_between(&t, "%%", "%%");
+    let words: Vec<&str> = t
+        .split_whitespace()
+        .filter(|w| !is_link(w) && !is_template_token(w))
+        .collect();
+    // Bağlantı atılınca `( )`, `< >`, `[ ]` kalır; yalnız boş ayraç çiftleri gider.
+    let mut kept: Vec<&str> = Vec::with_capacity(words.len());
+    for w in words {
+        if is_empty_brackets(w) {
+            continue;
+        }
+        if let Some(&prev) = kept.last() {
+            if closes(prev, w) {
+                kept.pop();
+                continue;
+            }
+        }
+        kept.push(w);
+    }
+    // Atılan değişkenden sonra yalnız kalan noktalama öncekine yapışır ("Merhaba ,").
+    let mut out = String::with_capacity(t.len());
+    for w in kept {
+        let punct = w
+            .chars()
+            .all(|c| matches!(c, ',' | '.' | ';' | ':' | '!' | '?'));
+        if !out.is_empty() && !punct {
+            out.push(' ');
+        }
+        out.push_str(w);
+    }
+    out
+}
+
+/// Görünmez biçim karakterleri: bülten önizleme dolgusu (U+034F, U+200C),
+/// sıfır genişlikli boşluklar, yumuşak tire, BOM.
+fn is_invisible(c: char) -> bool {
+    matches!(
+        c,
+        '\u{00AD}' | '\u{034F}' | '\u{180E}' | '\u{200B}'..='\u{200D}' | '\u{2060}' | '\u{FEFF}'
+    )
+}
+
+/// `open … close` arasını (en çok 60 karakter, satır sonu yok) atar; kapanmayan
+/// açılış olduğu gibi kalır.
+fn strip_between(s: &str, open: &str, close: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(i) = rest.find(open) {
+        let after = &rest[i + open.len()..];
+        match after.find(close) {
+            Some(j) if after[..j].chars().count() <= 60 && !after[..j].contains('\n') => {
+                out.push_str(&rest[..i]);
+                out.push(' ');
+                rest = &after[j + close.len()..];
+            }
+            _ => {
+                out.push_str(&rest[..i + open.len()]);
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Bağlantı sözcüğü mü (`https://…`, `www.…`, `mailto:…`; önündeki ayraçla)?
+fn is_link(word: &str) -> bool {
+    let w = word.trim_start_matches(['(', '<', '[', '"', '\'']);
+    let head: String = w.chars().take(8).collect::<String>().to_ascii_lowercase();
+    head.starts_with("http://")
+        || head.starts_with("https://")
+        || head.starts_with("www.")
+        || head.starts_with("mailto:")
+}
+
+/// Doldurulmamış büyük harfli şablon değişkeni: `{PREHEADER}`, `{FIRST_NAME},`.
+/// Küçük harfli `{ad}` gibi metinler sayılmaz.
+fn is_template_token(word: &str) -> bool {
+    let w = word.trim_end_matches(['.', ',', ':', ';', '!', '?']);
+    let Some(inner) = w.strip_prefix('{').and_then(|r| r.strip_suffix('}')) else {
+        return false;
+    };
+    (2..=40).contains(&inner.len())
+        && inner.chars().any(|c| c.is_ascii_uppercase())
+        && inner
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_' || c == '-')
+}
+
+fn is_empty_brackets(word: &str) -> bool {
+    matches!(word, "()" | "[]" | "<>" | "{}" | "( )" | "[ ]" | "< >")
+}
+
+/// `prev` açılış, `w` eşi olan kapanış ayracı mı (arası boş kalmış)?
+fn closes(prev: &str, w: &str) -> bool {
+    let w = w.trim_end_matches(['.', ',', ':', ';']);
+    matches!((prev, w), ("(", ")") | ("[", "]") | ("<", ">"))
 }
 
 fn truncate_words(s: &str, max: usize) -> String {
@@ -321,6 +429,37 @@ mod tests {
         let s = snippet(&long);
         assert!(s.chars().count() <= SNIPPET_LEN);
         assert!(s.ends_with("kelime"));
+    }
+
+    #[test]
+    fn onizleme_sablon_artigini_ve_baglantilari_atar() {
+        assert_eq!(
+            snippet("{PREHEADER} E-Posta adresini doğrula"),
+            "E-Posta adresini doğrula"
+        );
+        assert_eq!(
+            snippet("( https://www-new.yemeksepeti.com/ )\nSiparişin yolda."),
+            "Siparişin yolda."
+        );
+        assert_eq!(
+            snippet("Merhaba {{ first_name }}, *|MC_PREVIEW_TEXT|* kampanya %%preheader%% başladı"),
+            "Merhaba, kampanya başladı"
+        );
+        assert_eq!(
+            snippet("LinkedIn <https://linkedin.com/x> Profilin 6 kez görüntülendi"),
+            "LinkedIn Profilin 6 kez görüntülendi"
+        );
+        assert_eq!(
+            snippet("Fatura hazır\u{034f}\u{200c} \u{034f}\u{200c} \u{00ad}Ödeme bağlantısı: www.ornek.com."),
+            "Fatura hazır Ödeme bağlantısı:"
+        );
+        // Anlamlı metin korunur: küçük harfli süslü ayraç, parantez içi metin,
+        // kapanmayan şablon açılışı.
+        assert_eq!(
+            snippet("Biçim {ad} soyad (yarın) {{ eksik"),
+            "Biçim {ad} soyad (yarın) {{ eksik"
+        );
+        assert_eq!(snippet("Hata kodu {X}"), "Hata kodu {X}");
     }
 
     #[test]

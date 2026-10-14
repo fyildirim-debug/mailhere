@@ -276,13 +276,14 @@ pub fn setup_core(
     // Yanıt hatırlatmaları: açılışta kaçan süreler değerlendirilir, sonra dakikada bir.
     rt.spawn(crate::followups::ticker(handle.clone()));
     crate::screener::start(&handle, &rt);
-    // Önceki sürümlerde HTML kaynağıyla kaydedilmiş önizlemeler onarılır.
+    // Önceki sürümlerin kaydettiği HTML kaynaklı, şablon artıklı ya da
+    // bağlantılı önizlemeler onarılır.
     {
         let (store, app) = (core.store.clone(), handle.clone());
-        rt.spawn_blocking(move || match store.repair_html_snippets() {
+        rt.spawn_blocking(move || match store.repair_snippets() {
             Ok(0) => {}
             Ok(n) => {
-                tracing::info!(n, "HTML kaynaklı önizlemeler onarıldı");
+                tracing::info!(n, "önizlemeler onarıldı");
                 crate::sink::changed(&app, Vec::new());
             }
             Err(e) => tracing::warn!(error = %e.message, "önizlemeler onarılamadı"),

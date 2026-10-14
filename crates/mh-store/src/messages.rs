@@ -533,37 +533,52 @@ impl Store {
         })
     }
 
-    /// HTML kaynağı taşıyan önizlemeleri onarır: düz metin bölümüne HTML
-    /// koyan göndericilerin daha önce kaydedilmiş postaları. Gövdesi yerelde
-    /// olan posta yeniden ayrıştırılır (önizleme, arama metni); olmayanın
-    /// önizlemesi kendinden metne çevrilir, gövde inince yeniden hesaplanır.
-    /// Onarılan posta sayısını döner.
-    pub fn repair_html_snippets(&self) -> AppResult<usize> {
-        let ids: Vec<(MessageId, String)> = self.with(|c| {
-            let mut st =
-                c.prepare("SELECT id, snippet FROM messages WHERE ltrim(snippet) LIKE '<%'")?;
+    /// Eski sürümlerin kaydettiği önizlemeleri onarır. HTML kaynağı taşıyan
+    /// önizleme (düz metin bölümüne HTML koyan göndericiler) gövde yerelde
+    /// varsa yeniden ayrıştırılır (önizleme, arama metni), yoksa kendinden
+    /// metne çevrilir. Şablon artığı (`{PREHEADER}`), bağlantı ya da görünmez
+    /// dolgu taşıyan önizleme kendi üstünde temizlenir; binlerce gövdeyi
+    /// yeniden ayrıştırmak açılışı yavaşlatırdı. Temizlenmiş önizleme bir
+    /// sonraki açılışta değişmez. Onarılan posta sayısını döner.
+    pub fn repair_snippets(&self) -> AppResult<usize> {
+        let rows: Vec<(MessageId, String)> = self.with(|c| {
+            let mut st = c.prepare(
+                "SELECT id, snippet FROM messages
+                 WHERE ltrim(snippet) LIKE '<%' OR snippet LIKE '%http%' OR snippet LIKE '%www.%'
+                    OR snippet LIKE '%mailto:%' OR snippet LIKE '%{%' OR snippet LIKE '%*|%'
+                    OR snippet LIKE '%!%!%%' ESCAPE '!'
+                    OR instr(snippet, char(173)) > 0 OR instr(snippet, char(847)) > 0
+                    OR instr(snippet, char(6158)) > 0 OR instr(snippet, char(8203)) > 0
+                    OR instr(snippet, char(8204)) > 0 OR instr(snippet, char(8205)) > 0
+                    OR instr(snippet, char(8288)) > 0 OR instr(snippet, char(65279)) > 0",
+            )?;
             let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
             rows.collect()
         })?;
         let mut fixed = 0;
-        for (id, snip) in ids {
-            if !mh_mime::looks_like_html(&snip) {
+        for (id, snip) in rows {
+            if mh_mime::looks_like_html(&snip) {
+                let raw = self.raw(id)?;
+                if let Some((r, p)) = raw
+                    .as_deref()
+                    .and_then(|r| mh_mime::parse(r, false).map(|p| (r, p)))
+                {
+                    self.store_parsed_body(id, r, Some(p))?;
+                    fixed += 1;
+                    continue;
+                }
+            }
+            let clean = mh_mime::snippet(&snip);
+            if clean == snip {
                 continue;
             }
-            let raw = self.raw(id)?;
-            match raw
-                .as_deref()
-                .and_then(|r| mh_mime::parse(r, false).map(|p| (r, p)))
-            {
-                Some((r, p)) => self.store_parsed_body(id, r, Some(p))?,
-                None => self.with(|c| {
-                    c.execute(
-                        "UPDATE messages SET snippet = ?2 WHERE id = ?1",
-                        params![id, mh_mime::snippet(&snip)],
-                    )?;
-                    Ok(())
-                })?,
-            }
+            self.with(|c| {
+                c.execute(
+                    "UPDATE messages SET snippet = ?2 WHERE id = ?1",
+                    params![id, clean],
+                )?;
+                Ok(())
+            })?;
             fixed += 1;
         }
         Ok(fixed)
@@ -1823,7 +1838,7 @@ pub(crate) mod tests {
             Ok(())
         })
         .unwrap();
-        assert_eq!(s.repair_html_snippets().unwrap(), 2);
+        assert_eq!(s.repair_snippets().unwrap(), 2);
         assert_eq!(s.summary(id).unwrap().unwrap().snippet, "Kodun: 42");
         assert!(!s.summary(other).unwrap().unwrap().snippet.contains('<'));
         assert_eq!(
@@ -1831,6 +1846,50 @@ pub(crate) mod tests {
             "<ayse@ornek.com> yazdı: merhaba"
         );
         // İkinci açılışta yapılacak iş kalmaz.
-        assert_eq!(s.repair_html_snippets().unwrap(), 0);
+        assert_eq!(s.repair_snippets().unwrap(), 0);
+    }
+
+    #[test]
+    fn sablon_ve_baglanti_artigi_onizleme_temizlenir() {
+        let s = crate::testutil::store_with_account("a");
+        s.upsert_mailbox("a", "INBOX", "INBOX", MailboxRole::Inbox, None, false)
+            .unwrap();
+        let pre = s
+            .upsert_message(&msg("a", "a:INBOX", "Doğrula", 1_000))
+            .unwrap()
+            .id;
+        let link = s
+            .upsert_message(&msg("a", "a:INBOX", "Sipariş", 2_000))
+            .unwrap()
+            .id;
+        let clean = s
+            .upsert_message(&msg("a", "a:INBOX", "Selam", 3_000))
+            .unwrap()
+            .id;
+        s.with(|c| {
+            c.execute(
+                "UPDATE messages SET snippet = '{PREHEADER} E-Posta adresini doğrula' WHERE id = ?1",
+                [pre],
+            )?;
+            c.execute(
+                "UPDATE messages SET snippet = '( https://www-new.yemeksepeti.com/ ) Siparişin yolda' WHERE id = ?1",
+                [link],
+            )?;
+            // Aday sayılır (küçük harfli ayraç) ama temiz: yazılmaz.
+            c.execute("UPDATE messages SET snippet = 'Biçim {ad} soyad' WHERE id = ?1", [clean])?;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(s.repair_snippets().unwrap(), 2);
+        assert_eq!(
+            s.summary(pre).unwrap().unwrap().snippet,
+            "E-Posta adresini doğrula"
+        );
+        assert_eq!(s.summary(link).unwrap().unwrap().snippet, "Siparişin yolda");
+        assert_eq!(
+            s.summary(clean).unwrap().unwrap().snippet,
+            "Biçim {ad} soyad"
+        );
+        assert_eq!(s.repair_snippets().unwrap(), 0);
     }
 }
