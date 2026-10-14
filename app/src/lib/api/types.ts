@@ -534,6 +534,101 @@ export interface UpdateInfo {
   date: string | null;
 }
 
+// ------------------------------------------------------- aktarım (QR ile)
+
+/**
+ * QR kodun modül matrisi: `rows` tam `size` satır, her satır `size` karakterlik
+ * '1'/'0' dizgisi ('1' koyu modül). Sessiz bölge dahil değildir; arayüz kenar
+ * boşluğunu kendisi bırakır ve her '1' için bir `rect` çizer.
+ */
+export interface QrMatrix {
+  size: number;
+  rows: string[];
+}
+
+/** Bilgisayarın açtığı aktarım teklifi. `text` anahtarı içerir; günlüğe yazılmaz. */
+export interface TransferOffer {
+  /** `mailhere://aktar?v=1&h=…&p=…&t=…&k=…` (QR'ın içeriği). */
+  text: string;
+  qr: QrMatrix;
+  /** Kodda duyurulan yerel adresler (bilgi amaçlı; en çok 6). */
+  hosts: string[];
+  port: number;
+  /** Teklifin düştüğü an (geri sayım için). */
+  expiresAt: Millis;
+}
+
+/** Telefonun aldığı paketin özeti; uygulanmadan önce kullanıcı seçer. */
+export interface TransferPreview {
+  /** Bellekte bekleyen paketin kimliği (`transfer_apply` ile verilir; 5 dk). */
+  previewId: string;
+  /** Paketi hazırlayan Mailhere sürümü ("0.4.0"). */
+  fromVersion: string;
+  /** Paketi hazırlayan platform ("windows", "linux", "android"). */
+  fromPlatform: string;
+  createdAt: Millis;
+  accounts: TransferPreviewAccount[];
+  /** Paketteki kural sayısı. */
+  rules: number;
+  /** Paketteki etiket sayısı. */
+  tags: number;
+  /** Pakette ayarlar var mı. */
+  settings: boolean;
+}
+
+export interface TransferPreviewAccount {
+  id: AccountId;
+  name: string;
+  email: string;
+  kind: AccountKind;
+  auth: AuthKind;
+  /** Parola ya da yenileme jetonu pakette var. */
+  hasSecret: boolean;
+  /** Aynı kimlikli hesap bu cihazda zaten var (uygulanırsa güncellenir). */
+  exists: boolean;
+}
+
+/** Kullanıcının uygulama seçimi (`transfer_apply` girdisi). */
+export interface TransferChoice {
+  /** Uygulanacak hesapların kimlikleri (önizlemedeki `id`). */
+  accounts: AccountId[];
+  rules: boolean;
+  tags: boolean;
+  settings: boolean;
+}
+
+/** Uygulama sonucu (`transfer_apply` dönüşü). */
+export interface TransferReport {
+  accountsAdded: number;
+  accountsUpdated: number;
+  /** Gizli değeri olmayan hesapların e-posta adresleri; parola yeniden istenir. */
+  accountsWithoutSecret: string[];
+  rules: number;
+  /** Hesabı bu cihazda olmadığı için atlanan kurallar. */
+  rulesSkipped: number;
+  tags: number;
+  settings: boolean;
+}
+
+/**
+ * Teklif durumu (bilgisayar tarafı): waiting → connected → delivered → applied;
+ * failed / expired / cancelled bitiştir.
+ */
+export type TransferStateKind =
+  | 'waiting'
+  | 'connected'
+  | 'delivered'
+  | 'applied'
+  | 'failed'
+  | 'expired'
+  | 'cancelled';
+
+export interface TransferState {
+  state: TransferStateKind;
+  /** Kullanıcıya gösterilebilir açıklama (gizli değer içermez). */
+  message: string | null;
+}
+
 export const defaultSettings: Settings = {
   theme: 'system',
   language: 'tr',
@@ -567,6 +662,7 @@ export const EVENTS = {
   settings: 'mh:settings',
   open: 'mh:open',
   update: 'mh:update',
+  transfer: 'mh:transfer',
 } as const;
 
 export interface NotifyEvent {
@@ -598,6 +694,7 @@ export interface EventPayloads {
   'mh:settings': Settings;
   'mh:open': OpenEvent;
   'mh:update': UpdateInfo;
+  'mh:transfer': TransferState;
 }
 
 // -------------------------------------------------------------------- hatalar

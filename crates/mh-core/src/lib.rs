@@ -8,6 +8,8 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+pub mod net;
+
 /// Hesap kimliği (UUID metni).
 pub type AccountId = String;
 /// Yerel posta kimliği (SQLite satır kimliği).
@@ -39,9 +41,10 @@ pub struct ServerConfig {
     pub username: String,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum AccountKind {
+    #[default]
     Imap,
     Jmap,
 }
@@ -1018,6 +1021,168 @@ pub struct UpdateInfo {
     pub date: Option<String>,
 }
 
+// ------------------------------------------------------- aktarım (QR ile)
+
+/// QR kodun modül matrisi. `rows` tam `size` satırdır; her satır `size`
+/// karakterlik bir `'1'`/`'0'` dizgisidir (`'1'` koyu modül). Sessiz bölge
+/// (kenar boşluğu) dahil değildir; arayüz kenar boşluğunu kendisi bırakır
+/// ve her `'1'` için bir `rect` çizer. Biçim bilerek yalın tutuldu: 57×57'lik
+/// bir kod JSON'da ~3,5 KB'dir ve arayüzde çözme adımı gerektirmez.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct QrMatrix {
+    pub size: u32,
+    pub rows: Vec<String>,
+}
+
+/// Bilgisayarın açtığı aktarım teklifi (`transfer_begin` dönüşü). `text`
+/// kodun tamamıdır ve şifreleme anahtarını içerir: yalnız QR ve "kodu
+/// kopyala" için kullanılır, günlüğe yazılmaz; `Debug` çıktısında gizlenir.
+#[derive(Serialize, Deserialize, Clone, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TransferOffer {
+    /// `mailhere://aktar?v=1&h=…&p=…&t=…&k=…` (QR'ın içeriği).
+    pub text: String,
+    pub qr: QrMatrix,
+    /// Kodda duyurulan yerel adresler (bilgi amaçlı; en çok 6).
+    pub hosts: Vec<String>,
+    pub port: u16,
+    /// Teklifin düştüğü an (geri sayım için).
+    pub expires_at: Millis,
+}
+
+impl std::fmt::Debug for TransferOffer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TransferOffer")
+            .field("text", &"<gizli>")
+            .field("qr", &format_args!("QrMatrix({})", self.qr.size))
+            .field("hosts", &self.hosts)
+            .field("port", &self.port)
+            .field("expires_at", &self.expires_at)
+            .finish()
+    }
+}
+
+/// Telefonun aldığı paketin özeti (`transfer_receive` dönüşü); uygulanmadan
+/// önce kullanıcı seçer. Gizli değerler burada yoktur, yalnız var/yok bilgisi.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TransferPreview {
+    /// Bellekte bekleyen paketin kimliği (`transfer_apply` ile verilir; 5 dk).
+    pub preview_id: String,
+    /// Paketi hazırlayan Mailhere sürümü ("0.4.0").
+    pub from_version: String,
+    /// Paketi hazırlayan platform ("windows", "linux", "android").
+    pub from_platform: String,
+    /// Paketin hazırlandığı an.
+    pub created_at: Millis,
+    pub accounts: Vec<TransferPreviewAccount>,
+    /// Paketteki kural sayısı.
+    pub rules: u32,
+    /// Paketteki etiket sayısı.
+    pub tags: u32,
+    /// Pakette ayarlar var mı.
+    pub settings: bool,
+}
+
+/// Önizlemedeki bir hesap.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TransferPreviewAccount {
+    pub id: AccountId,
+    pub name: String,
+    pub email: String,
+    pub kind: AccountKind,
+    pub auth: AuthKind,
+    /// Parola ya da yenileme jetonu pakette var.
+    pub has_secret: bool,
+    /// Aynı kimlikli hesap bu cihazda zaten var (uygulanırsa güncellenir).
+    pub exists: bool,
+}
+
+/// Kullanıcının uygulama seçimi (`transfer_apply` girdisi).
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TransferChoice {
+    /// Uygulanacak hesapların kimlikleri (önizlemedeki `id`).
+    pub accounts: Vec<AccountId>,
+    pub rules: bool,
+    pub tags: bool,
+    pub settings: bool,
+}
+
+/// Uygulama sonucu (`transfer_apply` dönüşü).
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TransferReport {
+    pub accounts_added: u32,
+    pub accounts_updated: u32,
+    /// Gizli değeri olmayan ya da yazılamayan hesapların e-posta adresleri;
+    /// bunlar için parola yeniden istenir.
+    pub accounts_without_secret: Vec<String>,
+    pub rules: u32,
+    /// Hesabı bu cihazda olmadığı için atlanan kurallar.
+    pub rules_skipped: u32,
+    pub tags: u32,
+    pub settings: bool,
+}
+
+/// Aktarım teklifinin durumu (`mh:transfer` olayı; bilgisayar tarafı).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TransferStateKind {
+    /// QR gösteriliyor, telefon bekleniyor.
+    #[default]
+    Waiting,
+    /// Telefon bağlandı ve kimliğini doğruladı; paket gönderiliyor.
+    Connected,
+    /// Paket telefona ulaştı; telefonda uygulanması bekleniyor.
+    Delivered,
+    /// Telefon uyguladığını bildirdi (bitiş).
+    Applied,
+    /// Hata: çok sayıda hatalı deneme, gönderim hatası ya da telefon
+    /// uygulayamadı (bitiş).
+    Failed,
+    /// Süre doldu: telefon bağlanmadı ya da onay gelmedi (bitiş).
+    Expired,
+    /// Kullanıcı vazgeçti (bitiş).
+    Cancelled,
+}
+
+impl TransferStateKind {
+    /// Bu durumdan sonra teklif kapanmıştır.
+    pub fn is_final(self) -> bool {
+        matches!(
+            self,
+            Self::Applied | Self::Failed | Self::Expired | Self::Cancelled
+        )
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TransferState {
+    pub state: TransferStateKind,
+    /// Kullanıcıya gösterilebilir Türkçe açıklama (gizli değer içermez).
+    pub message: Option<String>,
+}
+
+impl TransferState {
+    pub fn new(state: TransferStateKind) -> Self {
+        Self {
+            state,
+            message: None,
+        }
+    }
+
+    pub fn with_message(state: TransferStateKind, message: impl Into<String>) -> Self {
+        Self {
+            state,
+            message: Some(message.into()),
+        }
+    }
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -1063,6 +1228,8 @@ pub mod events {
     pub const OPEN: &str = "mh:open";
     /// `UpdateInfo`: yeni sürüm bulundu.
     pub const UPDATE: &str = "mh:update";
+    /// `TransferState`: QR aktarım teklifinin durumu değişti.
+    pub const TRANSFER: &str = "mh:transfer";
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -1619,5 +1786,85 @@ mod tests {
             Address::new(Some("Kerem Aydın"), "k@o.com").label(),
             "Kerem Aydın"
         );
+    }
+
+    #[test]
+    fn aktarim_json_bicimi() {
+        // Teklif: camelCase alanlar, QR matrisi düz satırlar.
+        let offer = TransferOffer {
+            text: "mailhere://aktar?v=1&h=192.168.1.20&p=51234&t=AA&k=BB".into(),
+            qr: QrMatrix {
+                size: 2,
+                rows: vec!["10".into(), "01".into()],
+            },
+            hosts: vec!["192.168.1.20".into()],
+            port: 51234,
+            expires_at: 1_700_000_000_000,
+        };
+        let v = serde_json::to_value(&offer).unwrap();
+        assert_eq!(v["qr"]["size"], 2);
+        assert_eq!(v["qr"]["rows"][1], "01");
+        assert_eq!(v["expiresAt"], 1_700_000_000_000i64);
+        assert_eq!(v["hosts"][0], "192.168.1.20");
+        let back: TransferOffer = serde_json::from_value(v).unwrap();
+        assert_eq!(back, offer);
+        // Debug kodu (anahtarı) göstermez.
+        let dbg = format!("{offer:?}");
+        assert!(!dbg.contains("k=BB") && dbg.contains("<gizli>"), "{dbg}");
+
+        // Önizleme ve seçim: eksik alanlar varsayılana düşer (ileri uyumluluk).
+        let p: TransferPreview = serde_json::from_str(
+            r#"{"previewId":"p1","fromVersion":"0.4.0","accounts":[{"id":"a","name":"İş","email":"a@o.com","kind":"jmap","auth":"google","hasSecret":true,"exists":false}],"rules":3,"yeniAlan":1}"#,
+        )
+        .unwrap();
+        assert_eq!(p.preview_id, "p1");
+        assert_eq!(p.accounts[0].kind, AccountKind::Jmap);
+        assert_eq!(p.accounts[0].auth, AuthKind::Google);
+        assert!(p.accounts[0].has_secret && !p.accounts[0].exists);
+        assert_eq!((p.rules, p.tags, p.settings), (3, 0, false));
+        assert_eq!(p.from_platform, "");
+        let c: TransferChoice =
+            serde_json::from_str(r#"{"accounts":["a"],"settings":true}"#).unwrap();
+        assert_eq!(c.accounts, vec!["a".to_string()]);
+        assert!(c.settings && !c.rules && !c.tags);
+        let v = serde_json::to_value(TransferPreviewAccount::default()).unwrap();
+        assert_eq!(v["kind"], "imap");
+        assert_eq!(v["hasSecret"], false);
+
+        // Rapor.
+        let r = TransferReport {
+            accounts_added: 1,
+            accounts_without_secret: vec!["b@o.com".into()],
+            rules_skipped: 2,
+            ..Default::default()
+        };
+        let v = serde_json::to_value(&r).unwrap();
+        assert_eq!(v["accountsAdded"], 1);
+        assert_eq!(v["accountsWithoutSecret"][0], "b@o.com");
+        assert_eq!(v["rulesSkipped"], 2);
+        assert_eq!(v["settings"], false);
+
+        // Durum olayı: `state` küçük harf; `message` isteğe bağlı.
+        let s = TransferState::with_message(TransferStateKind::Failed, "Beş hatalı deneme.");
+        let v = serde_json::to_value(&s).unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!({"state":"failed","message":"Beş hatalı deneme."})
+        );
+        let s: TransferState = serde_json::from_str(r#"{"state":"waiting"}"#).unwrap();
+        assert_eq!(s, TransferState::new(TransferStateKind::Waiting));
+        for (kind, name) in [
+            (TransferStateKind::Waiting, "waiting"),
+            (TransferStateKind::Connected, "connected"),
+            (TransferStateKind::Delivered, "delivered"),
+            (TransferStateKind::Applied, "applied"),
+            (TransferStateKind::Failed, "failed"),
+            (TransferStateKind::Expired, "expired"),
+            (TransferStateKind::Cancelled, "cancelled"),
+        ] {
+            assert_eq!(serde_json::to_value(kind).unwrap(), name);
+        }
+        assert!(TransferStateKind::Applied.is_final() && !TransferStateKind::Delivered.is_final());
+        assert_eq!(events::TRANSFER, "mh:transfer");
     }
 }
