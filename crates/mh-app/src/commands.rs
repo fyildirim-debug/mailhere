@@ -147,8 +147,9 @@ pub fn messages_list(state: State<'_, AppState>, query: ListQuery) -> Res<Page<M
     state.store.list(&query, now_ms())
 }
 
-/// Gövde yerelde yoksa sunucudan indirir.
-pub(crate) async fn ensure_body(state: &AppState, id: MessageId) -> AppResult<()> {
+/// Gövde yerelde yoksa sunucudan indirir. Kabuğa özgü ek komutları
+/// (Android: `attachment_share`, `attachment_save`) da kullanır.
+pub async fn ensure_body(state: &AppState, id: MessageId) -> AppResult<()> {
     let loc = state.store.location(id)?.ok_or_else(|| {
         AppError::new(
             ErrorCode::NotFound,

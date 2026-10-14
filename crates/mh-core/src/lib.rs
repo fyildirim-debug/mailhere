@@ -1230,6 +1230,9 @@ pub mod events {
     pub const UPDATE: &str = "mh:update";
     /// `TransferState`: QR aktarım teklifinin durumu değişti.
     pub const TRANSFER: &str = "mh:transfer";
+    /// `NavigateEvent`: tek pencereli kabuk (Android) bu rotayı yığına itmeli
+    /// (`index.html#/<rota>`; ör. yazma: `compose/reply/7`).
+    pub const NAVIGATE: &str = "mh:navigate";
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -1244,6 +1247,15 @@ pub struct NotifyEvent {
 #[serde(rename_all = "camelCase")]
 pub struct OpenEvent {
     pub id: MessageId,
+}
+
+/// Tek pencereli kabukta (Android) ayrı pencere yerine rota değişimi
+/// (`Platform::open_compose`).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct NavigateEvent {
+    /// `index.html#/<route>` biçimindeki rota.
+    pub route: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
