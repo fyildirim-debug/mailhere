@@ -65,6 +65,8 @@ test('hızlı yanıt değişkenleri hızlı okumada ve okuma panelinde doldurulu
 
 test('yazma: gönder menüsünden yanıt hatırlatması seçilir ve gönderimle kurulur', async ({ page }) => {
   await page.goto('/#/main');
+  // Sahte arka uç ilk komutta kurulur; hazır olmadan çağrılmasın.
+  await page.waitForFunction(() => !!window.__mh);
   await page.evaluate(() => window.__mh.call('settings_set', { settings: { ...window.__mh.state.settings, undoSendSeconds: 0 } }));
   await page.goto('/#/compose/new/0');
   const to = page.locator('#compose-to');

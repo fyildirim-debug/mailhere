@@ -65,6 +65,8 @@ test('güvenilmeyen sertifika: parmak izi gösterilir, onayla hesap eklenir', as
 
 test('ayarlar: hesap adı, rengi ve imzaları düzenlenir; güvenilen sertifika listelenir', async ({ page }) => {
   await page.goto('/#/main');
+  // Sahte arka uç ilk komutta kurulur; hazır olmadan çağrılmasın.
+  await page.waitForFunction(() => !!window.__mh);
   await page.evaluate(() => window.__mh.call('cert_trust', { host: 'posta.ornek.dev', port: 993, sha256: 'AA:BB:CC:DD:EE:FF:00:11:22:33' }));
   await page.getByRole('button', { name: 'Ayarlar' }).click();
   const nav = page.getByRole('navigation', { name: 'Ayarlar' });
