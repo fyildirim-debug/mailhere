@@ -385,6 +385,11 @@ fn parse_rrule(v: &str, start: NaiveDateTime) -> Option<YearlyRule> {
             "BYMONTHDAY" => rule.monthday = Some(val.split(',').next()?.trim().parse().ok()?),
             "BYDAY" => {
                 let d = val.split(',').next()?.trim().to_ascii_uppercase();
+                // Gün kısaltması ASCII'dir; değilse bayt indeksiyle bölmek
+                // karakter ortasına düşüp panik üretirdi.
+                if !d.is_ascii() {
+                    return None;
+                }
                 let split = d.len().checked_sub(2)?;
                 let (ord, day) = d.split_at(split);
                 let ord: i8 = if ord.is_empty() { 1 } else { ord.parse().ok()? };
@@ -1033,6 +1038,21 @@ END:VCALENDAR
             .unwrap()
             .and_utc()
             .timestamp_millis()
+    }
+
+    #[test]
+    fn ascii_olmayan_byday_paniklemez() {
+        let start = NaiveDate::from_ymd_opt(2026, 3, 29)
+            .unwrap()
+            .and_hms_opt(3, 0, 0)
+            .unwrap();
+        for v in [
+            "FREQ=YEARLY;BYDAY=ÜX",
+            "FREQ=YEARLY;BYDAY=ğ",
+            "FREQ=YEARLY;BYDAY=-1ŞU",
+        ] {
+            assert!(parse_rrule(v, start).is_none(), "{v}");
+        }
     }
 
     #[test]

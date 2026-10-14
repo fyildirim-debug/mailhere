@@ -35,6 +35,8 @@ struct Open {
     thread_id: String,
     /// Gönderilmiş postanın tarihi; yanıt bundan sonra gelmiş olmalı.
     sent_at: Millis,
+    /// Gönderilmiş postanın Message-ID'si: yanıtı tarihten bağımsız tanır.
+    message_id_header: Option<String>,
 }
 
 fn not_found() -> AppError {
@@ -196,7 +198,9 @@ impl Store {
     pub fn followups_close_answered(&self, own: &[String]) -> AppResult<Vec<MessageId>> {
         let open: Vec<Open> = self.with(|c| {
             let mut st = c.prepare_cached(
-                "SELECT f.message_id, f.account_id, f.thread_id, m.date
+                // Konuşma kimliği postanın güncel satırından okunur: JMAP
+                // eşitlemesi yerel kopyanın konuşmasını sunucununkiyle değiştirir.
+                "SELECT f.message_id, f.account_id, m.thread_id, m.date, m.message_id_header
                  FROM followups f JOIN messages m ON m.id = f.message_id",
             )?;
             let rows = st.query_map([], |r| {
@@ -205,6 +209,7 @@ impl Store {
                     account_id: r.get(1)?,
                     thread_id: r.get(2)?,
                     sent_at: r.get(3)?,
+                    message_id_header: r.get(4)?,
                 })
             })?;
             rows.collect()
@@ -217,12 +222,23 @@ impl Store {
         for o in open {
             let answered = self.with(|c| {
                 let mut st = c.prepare_cached(
+                    // Aynı konuşmada sonra gelen ya da (karşı tarafın saati geride
+                    // olsa da) In-Reply-To / References ile bu postaya bağlı ileti.
                     "SELECT m.from_addr FROM messages m JOIN mailboxes b ON b.id = m.mailbox_id
-                     WHERE m.account_id = ?1 AND m.thread_id = ?2 AND m.id != ?3 AND m.date >= ?4
-                       AND b.role != 'drafts' LIMIT 100",
+                     WHERE m.account_id = ?1 AND m.id != ?3 AND b.role != 'drafts'
+                       AND ((m.thread_id = ?2 AND m.date >= ?4)
+                         OR (?5 IS NOT NULL AND (m.in_reply_to = ?5
+                             OR instr(m.refs, json_quote(?5)) > 0)))
+                     LIMIT 100",
                 )?;
                 let rows = st.query_map(
-                    params![o.account_id, o.thread_id, o.message_id, o.sent_at],
+                    params![
+                        o.account_id,
+                        o.thread_id,
+                        o.message_id,
+                        o.sent_at,
+                        o.message_id_header
+                    ],
                     |r| from_json::<mh_core::Address>(0, &r.get::<_, String>(0)?),
                 )?;
                 let mut hit = false;
@@ -491,10 +507,6 @@ mod tests {
         s.upsert_message(&reply("a:Drafts", "kerem@ornek.com.tr", "t1@x", 1_600))
             .unwrap();
         assert!(s.followups_close_answered(&own).unwrap().is_empty());
-        // Konuşmadaki eski bir posta (gönderimden önce) kapatmaz.
-        s.upsert_message(&reply("a:INBOX", "kerem@ornek.com.tr", "t1@x", 900))
-            .unwrap();
-        assert!(s.followups_close_answered(&own).unwrap().is_empty());
 
         // Karşıdan gelen yanıt kapatır.
         let r = s
@@ -508,5 +520,18 @@ mod tests {
         assert_eq!(s.followups_close_answered(&own).unwrap(), vec![id]);
         assert!(s.followups_list().unwrap().is_empty());
         assert_eq!(s.summary(id).unwrap().unwrap().follow_up, None);
+    }
+
+    #[test]
+    fn saati_geride_yanit_message_id_ile_tanir() {
+        let s = setup();
+        let own = vec![ME.to_owned()];
+        let id = s.upsert_message(&sent("Teklif", "t2@x", 1_000)).unwrap().id;
+        s.followup_set(id, Some(5_000), 1_200).unwrap();
+        // Karşı tarafın saati geride: tarih gönderimden önce görünür ama
+        // In-Reply-To bu postayı gösterir.
+        s.upsert_message(&reply("a:INBOX", "kerem@ornek.com.tr", "t2@x", 900))
+            .unwrap();
+        assert_eq!(s.followups_close_answered(&own).unwrap(), vec![id]);
     }
 }

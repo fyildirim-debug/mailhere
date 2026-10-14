@@ -166,13 +166,17 @@ impl Store {
     /// Etiketi siler; bağlı postaların kutularını döner (liste yenilensin).
     /// Etiket yoksa boş liste.
     pub fn tag_delete(&self, id: &str) -> AppResult<Vec<String>> {
-        let ids: Vec<MessageId> = self.with(|c| {
-            let mut st =
-                c.prepare_cached("SELECT message_id FROM message_tags WHERE tag_id = ?1")?;
-            let rows = st.query_map([id], |r| r.get::<_, MessageId>(0))?;
+        // Kutular tek sorguyla bulunur; çok sayıda etiketli postada değişken
+        // sınırına takılmaz.
+        let touched: Vec<String> = self.with(|c| {
+            let mut st = c.prepare_cached(
+                "SELECT DISTINCT m.mailbox_id FROM message_tags mt
+                 JOIN messages m ON m.id = mt.message_id
+                 WHERE mt.tag_id = ?1 ORDER BY m.mailbox_id",
+            )?;
+            let rows = st.query_map([id], |r| r.get::<_, String>(0))?;
             rows.collect()
         })?;
-        let touched = self.mailboxes_of(&ids)?;
         self.with(|c| {
             c.execute("DELETE FROM tags WHERE id = ?1", [id])?;
             Ok(())

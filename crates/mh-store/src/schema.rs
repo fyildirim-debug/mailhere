@@ -270,7 +270,7 @@ const MIGRATIONS: &[&str] = &[
 /// Dallar ayrı geliştirilirken ana dalın ara sürümleri bazı geçişleri yer
 /// tutucu olarak uyguladı (`user_version` ilerledi, tablolar oluşmadı). Bu
 /// geçişler, varlığı denetlenen tablo yoksa sonradan uygulanır.
-const PLACEHOLDER_REPAIRS: &[(usize, &str)] = &[(3, "actions"), (9, "followups")];
+const PLACEHOLDER_REPAIRS: &[(usize, &str)] = &[(3, "actions"), (8, "tags"), (9, "followups")];
 
 fn table_exists(conn: &Connection, name: &str) -> rusqlite::Result<bool> {
     conn.query_row(
@@ -353,6 +353,25 @@ mod tests {
         migrate(&mut conn).unwrap();
         assert!(table_exists(&conn, "followups").unwrap());
         assert!(table_exists(&conn, "screened").unwrap());
+        migrate(&mut conn).unwrap();
+    }
+
+    #[test]
+    fn yer_tutucuyla_atlanan_liste_gecisi_tamamlanir() {
+        // Ara sürüm 8. geçişi yer tutucu olarak uygulamış, sürüm en sonda.
+        let mut conn = Connection::open_in_memory().unwrap();
+        for (i, sql) in MIGRATIONS.iter().enumerate() {
+            conn.execute_batch(if i == 7 { "-- yer tutucu" } else { sql })
+                .unwrap();
+        }
+        conn.pragma_update(None, "user_version", MIGRATIONS.len() as i64)
+            .unwrap();
+        assert!(!table_exists(&conn, "tags").unwrap());
+        migrate(&mut conn).unwrap();
+        assert!(table_exists(&conn, "tags").unwrap());
+        assert!(table_exists(&conn, "message_tags").unwrap());
+        conn.prepare("SELECT pinned FROM messages").unwrap();
+        // İkinci açılışta yeniden uygulanmaz (sütun zaten var).
         migrate(&mut conn).unwrap();
     }
 

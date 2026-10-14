@@ -253,6 +253,8 @@ impl Store {
                 }
                 let mut touched = Vec::new();
                 if old_mailbox != m.mailbox_id {
+                    // Gönderilenler'e taşınan postanın alıcıları bilinen gönderici olur.
+                    crate::screener::note_sent_tx(tx, m)?;
                     touched.push(old_mailbox);
                     touched.push(m.mailbox_id.clone());
                 } else if unread != m.unread || starred != m.starred {
@@ -266,6 +268,8 @@ impl Store {
             }
             let id = insert_as(tx, m, None)?;
             map_row(tx, id, &m.account_id, jmap_id, blob_id)?;
+            // Gönderilenler'e düşen postanın alıcıları bilinen gönderici olur (`screener`).
+            crate::screener::note_sent_tx(tx, m)?;
             if let Some(t) = thread_id {
                 tx.prepare_cached("UPDATE messages SET thread_id = ?2 WHERE id = ?1")?
                     .execute(params![id, t])?;
@@ -437,6 +441,24 @@ mod tests {
             s.jmap_account_state("a").unwrap(),
             JmapAccountState::default()
         );
+    }
+
+    #[test]
+    fn gonderilenlerdeki_alici_bilinen_gonderici_olur() {
+        let s = setup();
+        let mut m = msg("a", "a:mb-se", "Teklif", 1_000);
+        m.to = vec![mh_core::Address::new(Some("Kerem"), "Kerem@Ornek.com")];
+        s.jmap_upsert(&m, "S1", None, None).unwrap();
+        assert!(s.sender_known("a", "kerem@ornek.com").unwrap());
+        // Gelen kutusundaki postanın alıcısı öğrenilmez; Gönderilenler'e
+        // taşınınca öğrenilir.
+        let mut g = msg("a", "a:mb-in", "Not", 2_000);
+        g.to = vec![mh_core::Address::new(None, "ayse@ornek.com")];
+        s.jmap_upsert(&g, "S2", None, None).unwrap();
+        assert!(!s.sender_known("a", "ayse@ornek.com").unwrap());
+        g.mailbox_id = "a:mb-se".into();
+        s.jmap_upsert(&g, "S2", None, None).unwrap();
+        assert!(s.sender_known("a", "ayse@ornek.com").unwrap());
     }
 
     #[test]
