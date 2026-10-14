@@ -31,9 +31,11 @@
     messageId: number | null;
     /** Yeni postada önceden doldurulan alıcılar (kişi kartından). */
     initialTo?: Address[];
+    /** Yeni postanın gönderen hesabı (kişi kartının postasının hesabı). */
+    initialFrom?: string | null;
   }
 
-  let { mode, messageId, initialTo = [] }: Props = $props();
+  let { mode, messageId, initialTo = [], initialFrom = null }: Props = $props();
 
   let accounts = $state<Account[]>([]);
   let fromId = $state<string>('');
@@ -161,7 +163,7 @@
 
   async function init() {
     accounts = await call('accounts_list');
-    fromId = accounts[0]?.id ?? '';
+    fromId = (accounts.find((a) => a.id === initialFrom) ?? accounts[0])?.id ?? '';
     if (messageId == null && initialTo.length) to = [...initialTo];
     if (messageId != null) {
       try {

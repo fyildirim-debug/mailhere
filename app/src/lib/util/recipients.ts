@@ -15,6 +15,21 @@ export function parseAddress(text: string): Address | null {
   return { name: m[1]?.trim() || null, email: m[2] };
 }
 
+/** Hesap kimliğinde izin verilen karakterler (arka uçla aynı). */
+const ACCOUNT_ID = /^[A-Za-z0-9._:-]{1,64}$/;
+
+/** Sorgu dizgisindeki `from` parametresi: gönderen hesap kimliği; yoksa ya da bozuksa null. */
+export function parseFromAccount(query: string): string | null {
+  let params: URLSearchParams;
+  try {
+    params = new URLSearchParams(query);
+  } catch {
+    return null;
+  }
+  const id = params.get('from');
+  return id && ACCOUNT_ID.test(id) ? id : null;
+}
+
 /** Sorgu dizgisindeki `to` parametrelerinden alıcılar; bozuk olanlar atlanır. */
 export function parseRecipients(query: string): Address[] {
   const out: Address[] = [];

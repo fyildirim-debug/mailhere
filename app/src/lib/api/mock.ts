@@ -673,8 +673,9 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     },
     open_compose: ({ prefill }) => {
       if (typeof window !== 'undefined') {
-        // Alıcılar arka uçtaki gibi `?to=Ad <adres>` sorgusuyla taşınır.
+        // Hesap ve alıcılar arka uçtaki gibi `?from=hesap&to=Ad <adres>` sorgusuyla taşınır.
         const q = new URLSearchParams();
+        if (prefill.accountId && /^[A-Za-z0-9._:-]{1,64}$/.test(prefill.accountId)) q.append('from', prefill.accountId);
         for (const a of (prefill.to ?? []).slice(0, 20)) q.append('to', a.name ? `${a.name} <${a.email}>` : a.email);
         const query = q.size ? `?${q}` : '';
         window.open(`#/compose/${prefill.mode}/${prefill.messageId ?? 0}${query}`, `compose-${nextId++}`, 'popup=yes,width=820,height=660');

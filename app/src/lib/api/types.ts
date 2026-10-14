@@ -441,6 +441,8 @@ export interface ComposePrefill {
   messageId: MessageId | null;
   /** Yeni postada önceden doldurulan alıcılar (ör. kişi kartından). */
   to?: Address[];
+  /** Yeni postanın gönderileceği hesap (ör. kişi kartının postasının hesabı); yoksa ilk hesap. */
+  accountId?: AccountId | null;
 }
 
 // ------------------------------------------------------------------ eşitleme

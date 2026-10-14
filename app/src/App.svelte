@@ -13,7 +13,7 @@
 {:else if route.current.name === 'compose'}
   <!-- Karma değişince (tarayıcı, testler) yazma penceresi baştan kurulur. -->
   {#key route.current}
-    <ComposeWindow mode={route.current.mode} messageId={route.current.id} initialTo={route.current.to} />
+    <ComposeWindow mode={route.current.mode} messageId={route.current.id} initialTo={route.current.to} initialFrom={route.current.from} />
   {/key}
 {:else}
   <MainWindow />

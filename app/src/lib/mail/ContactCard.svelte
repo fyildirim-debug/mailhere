@@ -89,7 +89,9 @@
 
   function compose() {
     onclose();
-    void call('open_compose', { prefill: { mode: 'new', messageId: null, to: [{ name: info?.name ?? address.name, email: address.email }] } });
+    void call('open_compose', {
+      prefill: { mode: 'new', messageId: null, to: [{ name: info?.name ?? address.name, email: address.email }], accountId },
+    });
   }
 
   function rule() {

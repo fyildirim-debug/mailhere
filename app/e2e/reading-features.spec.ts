@@ -77,6 +77,8 @@ test('kişi kartı: özet, son konuşmalar, önemli kişi, postalarını göster
   await card.getByRole('button', { name: 'Yeni posta yaz' }).click();
   const compose = await popup;
   await expect(compose.getByRole('button', { name: 'Ayşe Demir alıcısını kaldır' })).toBeVisible();
+  // Kartın açıldığı postanın hesabından (Kişisel) gönderilir.
+  await expect(compose.locator('#compose-from')).toHaveValue('demo-kisisel');
   await compose.close();
   await expect(card).toHaveCount(0);
 

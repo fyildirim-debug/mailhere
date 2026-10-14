@@ -1,18 +1,18 @@
 // Pencere türü adres çubuğundaki karmadan (#/...) okunur.
 
 import type { Address, ComposeMode } from '../api/types';
-import { parseRecipients } from '../util/recipients';
+import { parseFromAccount, parseRecipients } from '../util/recipients';
 
 export type Route =
   | { name: 'main' }
   | { name: 'notify' }
   | { name: 'quick'; id: number }
-  | { name: 'compose'; mode: ComposeMode; id: number | null; to: Address[] };
+  | { name: 'compose'; mode: ComposeMode; id: number | null; to: Address[]; from: string | null };
 
 const MODES: ComposeMode[] = ['new', 'reply', 'replyAll', 'forward', 'draft'];
 
 export function parseRoute(hash: string): Route {
-  // `#/compose/new/0?to=…`: sorgu kısmı yalnız yazma penceresinde okunur.
+  // `#/compose/new/0?from=…&to=…`: sorgu kısmı yalnız yazma penceresinde okunur.
   const [path, query = ''] = hash.split('?');
   const parts = path.replace(/^#\/?/, '').split('/').filter(Boolean);
   switch (parts[0]) {
@@ -25,7 +25,13 @@ export function parseRoute(hash: string): Route {
     case 'compose': {
       const mode = MODES.includes(parts[1] as ComposeMode) ? (parts[1] as ComposeMode) : 'new';
       const id = Number(parts[2]);
-      return { name: 'compose', mode, id: Number.isFinite(id) && id > 0 ? id : null, to: parseRecipients(query) };
+      return {
+        name: 'compose',
+        mode,
+        id: Number.isFinite(id) && id > 0 ? id : null,
+        to: parseRecipients(query),
+        from: parseFromAccount(query),
+      };
     }
     default:
       return { name: 'main' };

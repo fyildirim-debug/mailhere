@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_PREFILL_TO, parseAddress, parseRecipients } from './recipients';
+import { MAX_PREFILL_TO, parseAddress, parseFromAccount, parseRecipients } from './recipients';
 
 describe('rota alıcıları', () => {
   it('ad ve adres çözülür', () => {
@@ -23,5 +23,14 @@ describe('rota alıcıları', () => {
     const many = new URLSearchParams();
     for (let i = 0; i < 40; i++) many.append('to', `k${i}@o.com`);
     expect(parseRecipients(many.toString())).toHaveLength(MAX_PREFILL_TO);
+  });
+});
+
+describe('rota gönderen hesabı', () => {
+  it('from parametresi yalnız güvenli kimlikse okunur', () => {
+    expect(parseFromAccount('from=demo-is&to=a%40b.co')).toBe('demo-is');
+    expect(parseFromAccount('to=a%40b.co')).toBeNull();
+    expect(parseFromAccount('from=a%26to%3Dx')).toBeNull();
+    expect(parseFromAccount('from=')).toBeNull();
   });
 });
