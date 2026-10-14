@@ -80,6 +80,10 @@
     "allow-tags-list",
     "allow-tag-save",
     "allow-tag-delete",
-    "allow-messages-tag"
+    "allow-messages-tag",
+    "allow-transfer-begin",
+    "allow-transfer-cancel",
+    "allow-transfer-receive",
+    "allow-transfer-apply"
   ]
 }
