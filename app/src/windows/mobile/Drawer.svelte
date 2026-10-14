@@ -1,16 +1,18 @@
 <script lang="ts">
-  // Sol çekmece (300 px, --ground): kenar çubuğunun birebir karşılığı.
-  // Görünümler, etiketler, kayıtlı aramalar, hesaplar ve klasör ağacı, Ayarlar.
+  // Sol çekmece (300 px, --ground): kenar çubuğunun birebir karşılığı, aynı
+  // bilgi mimarisi. Hesap kapsamı (yalnız çok hesapta), kapsama göre daralan
+  // görünümler, her hesabın istenmeyen + özel klasörleri, etiketler, kayıtlı
+  // aramalar; altta eşitleme durumu, Şimdi eşitle, tema ve Ayarlar.
   // Dokunmayla ve kenardan kaydırmayla açılır; karartma örtüsü, Esc ya da
   // sola kaydırma kapatır. Açıkken odak içeride döner (odak tuzağı).
   import type { Account, Mailbox, Tag } from '../../lib/api';
   import { call } from '../../lib/api';
   import { t } from '../../lib/i18n/index.svelte';
-  import { flatten, folderIcon, folderLabel, folderTree } from '../../lib/mail/folders';
+  import { flatten, folderIcon, folderLabel } from '../../lib/mail/folders';
   import {
-    accountActive,
     accountHint,
     COLLAPSED_FOLDERS_KEY,
+    folderAccounts,
     folderActive,
     folderCount,
     folderTarget,
@@ -20,6 +22,9 @@
     savedSearchActive,
     saveSet,
     scheduledVisible,
+    scopeActive,
+    scopeView,
+    sideTree,
     tagActive,
     toggled,
     VIEW_ITEMS,
@@ -29,7 +34,8 @@
   } from '../../lib/mail/nav';
   import Icon from '../../lib/ui/Icon.svelte';
   import Logo from '../../lib/ui/Logo.svelte';
-  import { mail, searchAll, setView, syncLabel } from '../../lib/stores/mail.svelte';
+  import { quietScroll } from '../../lib/ui/scroll';
+  import { mail, openSettings, searchAll, setView, syncLabel } from '../../lib/stores/mail.svelte';
   import { resolvedTheme, settings, toggleTheme } from '../../lib/stores/settings.svelte';
   import { tagStore } from '../../lib/stores/tags.svelte';
 
@@ -46,6 +52,11 @@
 
   let { open, onclose, onnavigate, onsettings, onscheduled, onaddaccount }: Props = $props();
 
+  const multi = $derived(mail.accounts.length > 1);
+  const scope = $derived(mail.accountId);
+  const folderList = $derived(folderAccounts(mail.accounts, scope));
+  const collapsible = $derived(multi && scope == null);
+
   // Açık hesaplar ve kapalı klasörler: masaüstü kenar çubuğuyla aynı anahtar.
   let expanded = $state<Set<string>>(initialOpenAccounts(mail.accounts));
   let shut = $state<Set<string>>(loadSet(COLLAPSED_FOLDERS_KEY) ?? new Set());
@@ -60,12 +71,16 @@
     saveSet(COLLAPSED_FOLDERS_KEY, shut);
   }
 
-  const trees = $derived(Object.fromEntries(mail.accounts.map((a) => [a.id, flatten(folderTree(mail.mailboxes, a.id), shut)])));
+  const trees = $derived(Object.fromEntries(mail.accounts.map((a) => [a.id, flatten(sideTree(mail.mailboxes, a.id), shut)])));
   const sync = $derived(syncLabel());
 
   function go(fn: () => void) {
     fn();
     onnavigate();
+  }
+
+  function pickScope(id: string | null) {
+    go(() => setView(scopeView(mail), id));
   }
 
   function openFolder(account: Account, b: Mailbox) {
@@ -74,7 +89,12 @@
   }
 
   function openTag(tg: Tag) {
-    go(() => setView({ kind: 'tag', id: tg.id }));
+    go(() => setView({ kind: 'tag', id: tg.id }, scope));
+  }
+
+  /** Hesabın klasör ayarları: ekran isteğini kabuk ayar ekranı olarak iter, çekmece kapanır. */
+  function manage(account: Account) {
+    openSettings(`account:${account.id}`);
   }
 
   // ----------------------------------------------------------- odak ve kaydırma
@@ -182,12 +202,38 @@
     </button>
   </div>
 
-  <nav class="scroll" aria-label={t('nav.label')}>
+  <nav class="scroll scroll-quiet" aria-label={t('nav.label')} use:quietScroll>
+    {#if multi}
+      <div class="group">
+        <span class="group-title">{t('nav.accounts')}</span>
+        <button class="btn-icon small" aria-label={t('act.addAccount')} title={t('act.addAccount')} onclick={onaddaccount}>
+          <Icon name="plus" size={18} />
+        </button>
+      </div>
+      <div class="scopes" role="group" aria-label={t('nav.accounts')}>
+        {#snippet scopeRow(id: string | null, name: string, hint: string, color: string | null, n: number)}
+          {@const on = scopeActive(id, mail)}
+          <button class="item acc" class:active={on} aria-pressed={on} onclick={() => pickScope(id)}>
+            <span class="dot" class:all={!color} style:background={color ?? undefined}></span>
+            <span class="acc-text">
+              <span class="trunc">{name}</span>
+              <span class="trunc hint">{hint}</span>
+            </span>
+            {#if n > 0}<span class="count num">{n}</span>{/if}
+          </button>
+        {/snippet}
+        {@render scopeRow(null, t('nav.allAccounts'), t('nav.accountsCount', { n: mail.accounts.length }), null, 0)}
+        {#each mail.accounts as account (account.id)}
+          {@render scopeRow(account.id, account.name, accountHint(account), account.color, mail.counts.perAccountUnread[account.id] ?? 0)}
+        {/each}
+      </div>
+    {/if}
+
     {#each VIEW_ITEMS as item (item.kind)}
       {@const active = viewActive(item.kind, mail)}
-      {@const n = viewCount(item, mail.counts)}
+      {@const n = viewCount(item, mail.counts, scope)}
       {#if viewVisible(item, mail)}
-        <button class="item" class:active aria-current={active ? 'page' : undefined} onclick={() => go(() => setView({ kind: item.kind }))}>
+        <button class="item" class:active aria-current={active ? 'page' : undefined} onclick={() => go(() => setView({ kind: item.kind }, scope))}>
           <Icon name={item.icon} size={22} />
           <span class="trunc grow">{t(item.label)}</span>
           {#if n > 0}<span class="count num">{n}</span>{/if}
@@ -202,54 +248,30 @@
       {/if}
     {/each}
 
-    {#if tagStore.list.length}
-      <div class="group"><span>{t('tag.title')}</span></div>
-      {#each tagStore.list as tg (tg.id)}
-        {@const on = tagActive(tg, mail)}
-        <button class="item" class:active={on} aria-current={on ? 'page' : undefined} onclick={() => openTag(tg)}>
-          <span class="tdot" style:background={tg.color}></span>
-          <span class="trunc grow">{tg.name}</span>
-        </button>
-      {/each}
-    {/if}
-
-    {#if settings.value.savedSearches.length}
-      <div class="group"><span>{t('saved.nav')}</span></div>
-      {#each settings.value.savedSearches as s (s.id)}
-        {@const on = savedSearchActive(s.query, mail)}
-        <button class="item" class:active={on} aria-current={on ? 'page' : undefined} title={t('saved.query', { q: s.query })} onclick={() => go(() => searchAll(s.query))}>
-          <Icon name="bookmark" size={22} />
-          <span class="trunc grow">{s.name}</span>
-        </button>
-      {/each}
-    {/if}
-
-    <div class="group">
-      <span>{t('nav.accounts')}</span>
-      <button class="btn-icon small" aria-label={t('act.addAccount')} title={t('act.addAccount')} onclick={onaddaccount}>
-        <Icon name="plus" size={18} />
-      </button>
-    </div>
-    {#each mail.accounts as account (account.id)}
-      {@const isOpen = expanded.has(account.id)}
-      {@const n = mail.counts.perAccountUnread[account.id] ?? 0}
-      {@const active = accountActive(account, isOpen, mail)}
-      <div class="acc" class:active>
-        <button
-          class="disclose"
-          aria-expanded={isOpen}
-          aria-label={t(isOpen ? 'side.collapseNamed' : 'side.expandNamed', { name: account.name })}
-          onclick={() => toggleAccount(account.id)}
-        >
-          <Icon name="chevronRight" size={16} class={isOpen ? 'turned' : ''} />
-        </button>
-        <button class="acc-main" aria-current={active ? 'page' : undefined} onclick={() => go(() => setView({ kind: 'inbox' }, account.id))}>
-          <span class="dot" style:background={account.color}></span>
-          <span class="acc-text">
-            <span class="trunc acc-name">{account.name}</span>
-            <span class="trunc domain">{accountHint(account)}</span>
+    <!-- Klasörler: hesap başlığı altında istenmeyen + özel klasörler. -->
+    {#each folderList as account (account.id)}
+      {@const isOpen = !collapsible || expanded.has(account.id)}
+      <div class="group">
+        {#if collapsible}
+          <button
+            class="group-toggle"
+            aria-expanded={isOpen}
+            aria-label={t(isOpen ? 'side.collapseNamed' : 'side.expandNamed', { name: account.name })}
+            onclick={() => toggleAccount(account.id)}
+          >
+            <span class="dot" style:background={account.color}></span>
+            <span class="trunc grow">{account.name}</span>
+            <Icon name="chevronRight" size={16} class="chev {isOpen ? 'turned' : ''}" />
+          </button>
+        {:else}
+          <span class="group-title">
+            <span class="dot" style:background={account.color}></span>
+            <span class="trunc" class:grow={multi}>{account.name}</span>
+            {#if !multi}<span class="trunc hint grow">{accountHint(account)}</span>{/if}
           </span>
-          {#if n > 0 && !isOpen}<span class="count num">{n}</span>{/if}
+        {/if}
+        <button class="btn-icon small" aria-label={t('side.manageNamed', { name: account.name })} title={t('side.manage')} onclick={() => manage(account)}>
+          <Icon name="settings" size={18} />
         </button>
       </div>
       {#if isOpen}
@@ -265,13 +287,13 @@
                   aria-label={t(shut.has(b.id) ? 'side.expandNamed' : 'side.collapseNamed', { name: folderLabel(b) })}
                   onclick={() => toggleFolder(b.id)}
                 >
-                  <Icon name="chevronRight" size={14} class={shut.has(b.id) ? '' : 'turned'} />
+                  <Icon name="chevronRight" size={16} class="chev {shut.has(b.id) ? '' : 'turned'}" />
                 </button>
               {:else}
                 <span class="disclose" aria-hidden="true"></span>
               {/if}
-              <button class="folder-main" aria-current={on ? 'page' : undefined} onclick={() => openFolder(account, b)}>
-                <Icon name={folderIcon(b)} size={18} />
+              <button class="item folder-main" aria-current={on ? 'page' : undefined} onclick={() => openFolder(account, b)}>
+                <Icon name={folderIcon(b)} size={22} />
                 <span class="trunc grow">{folderLabel(b)}</span>
                 {#if folderCount(b) > 0}<span class="count num">{folderCount(b)}</span>{/if}
               </button>
@@ -280,6 +302,35 @@
         </div>
       {/if}
     {/each}
+
+    {#if tagStore.list.length}
+      <div class="group"><span class="group-title">{t('tag.title')}</span></div>
+      {#each tagStore.list as tg (tg.id)}
+        {@const on = tagActive(tg, mail)}
+        <button class="item" class:active={on} aria-current={on ? 'page' : undefined} onclick={() => openTag(tg)}>
+          <span class="tdot" style:background={tg.color}></span>
+          <span class="trunc grow">{tg.name}</span>
+        </button>
+      {/each}
+    {/if}
+
+    {#if settings.value.savedSearches.length}
+      <div class="group"><span class="group-title">{t('saved.nav')}</span></div>
+      {#each settings.value.savedSearches as s (s.id)}
+        {@const on = savedSearchActive(s.query, mail)}
+        <button class="item" class:active={on} aria-current={on ? 'page' : undefined} title={t('saved.query', { q: s.query })} onclick={() => go(() => searchAll(s.query))}>
+          <Icon name="bookmark" size={22} />
+          <span class="trunc grow">{s.name}</span>
+        </button>
+      {/each}
+    {/if}
+
+    {#if !multi}
+      <button class="item quiet" onclick={onaddaccount}>
+        <Icon name="plus" size={22} />
+        <span class="trunc grow">{t('act.addAccount')}</span>
+      </button>
+    {/if}
   </nav>
 
   <div class="foot">
@@ -366,23 +417,35 @@
   .scroll {
     flex: 1;
     min-height: 0;
-    overflow-y: auto;
-    padding: 4px 10px 12px;
     display: flex;
     flex-direction: column;
     gap: 2px;
+    padding: 4px 4px 12px 10px;
+    overflow-y: auto;
     overscroll-behavior: contain;
+    scrollbar-gutter: stable;
   }
 
-  .item,
-  .acc-main,
-  .folder-main {
+  .scopes,
+  .tree {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .scopes {
+    margin-bottom: 8px;
+  }
+
+  /* ---------------------------------------------------------------- satırlar */
+
+  .item {
     display: flex;
     align-items: center;
     gap: 12px;
     width: 100%;
     height: var(--m-touch-lg);
-    padding: 0 12px;
+    padding: 0 10px 0 12px;
     border: 0;
     border-radius: var(--r-row);
     background: transparent;
@@ -393,24 +456,18 @@
       color var(--t-fast);
   }
 
-  .item:active,
-  .acc-main:active,
-  .folder-main:active {
+  .item:active {
     background: var(--hover);
   }
 
-  .item.active,
-  .acc.active,
-  .folder.active {
+  .item.active {
     background: var(--paper);
     color: var(--ink);
     font-weight: 500;
-    box-shadow: 0 1px 2px rgba(20, 24, 40, 0.08);
+    box-shadow: var(--seg-on-shadow);
   }
 
-  :global(:root[data-theme='dark']) .item.active,
-  :global(:root[data-theme='dark']) .acc.active,
-  :global(:root[data-theme='dark']) .folder.active {
+  :global(:root[data-theme='dark']) .item.active {
     background: var(--raised);
     box-shadow: none;
   }
@@ -420,9 +477,22 @@
   }
 
   .count {
+    flex: none;
+    margin-left: auto;
+    min-width: 2ch;
     font-size: var(--fs-meta);
     font-weight: 500;
+    text-align: right;
     color: var(--ink-2);
+  }
+
+  .item.active .count,
+  .folder.active .count {
+    color: var(--ink);
+  }
+
+  .quiet {
+    margin-top: 12px;
   }
 
   .tdot {
@@ -433,64 +503,10 @@
     border-radius: 50%;
   }
 
-  .group {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    min-height: 40px;
-    padding: 16px 2px 0 12px;
-    font-size: var(--fs-meta);
-    font-weight: 600;
-    color: var(--ink-2);
-  }
+  /* -------------------------------------------------------------- kapsam */
 
-  .acc,
-  .folder {
-    display: flex;
-    align-items: center;
-    border-radius: var(--r-row);
-    color: var(--ink-2);
-  }
-
-  .acc-main,
-  .folder-main {
-    flex: 1;
-    min-width: 0;
-    padding-left: 4px;
-    color: inherit;
-    font-weight: inherit;
-  }
-
-  .disclose {
-    flex: none;
-    display: grid;
-    place-items: center;
-    width: 36px;
-    height: var(--m-touch-lg);
-    padding: 0;
-    border: 0;
-    border-radius: var(--r-sm);
-    background: transparent;
-    color: var(--ink-3);
-  }
-
-  .disclose :global(.icon) {
-    transition: transform var(--t-fast) var(--ease);
-  }
-
-  .disclose :global(.turned) {
-    transform: rotate(90deg);
-  }
-
-  .tree {
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-    margin: 2px 0 6px;
-  }
-
-  .folder {
-    padding-left: calc(16px + var(--depth) * 16px);
+  .acc {
+    height: 56px;
   }
 
   .dot {
@@ -501,6 +517,11 @@
     border-radius: 50%;
   }
 
+  .dot.all {
+    box-sizing: border-box;
+    border: 1.6px solid currentColor;
+  }
+
   .acc-text {
     flex: 1;
     min-width: 0;
@@ -509,10 +530,128 @@
     line-height: 1.3;
   }
 
-  .domain {
+  .hint {
     font-size: var(--fs-meta);
+    font-weight: 400;
     color: var(--ink-2);
   }
+
+  /* ----------------------------------------------------------- bölümler */
+
+  .group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 40px;
+    margin-top: 8px;
+    padding: 0 0 0 2px;
+    font-size: var(--fs-meta);
+    font-weight: 600;
+    color: var(--ink-2);
+  }
+
+  .group-title {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding-left: 10px;
+  }
+
+  .group-title .dot,
+  .group-toggle .dot {
+    margin: 0 4px 0 0;
+  }
+
+  .group + .group {
+    margin-top: 0;
+  }
+
+  .group .btn-icon {
+    color: var(--ink-2);
+  }
+
+  .group-toggle {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 40px;
+    padding: 0 8px 0 10px;
+    border: 0;
+    border-radius: var(--r-icon);
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+  }
+
+  .group-toggle:active {
+    background: var(--hover);
+  }
+
+  :global(.drawer .chev) {
+    flex: none;
+    color: var(--ink-2);
+    transition: transform var(--t-fast) var(--ease);
+  }
+
+  :global(.drawer .chev.turned) {
+    transform: rotate(90deg);
+  }
+
+  /* ------------------------------------------------------------ klasörler */
+
+  .folder {
+    display: flex;
+    align-items: center;
+    padding-left: calc(var(--depth) * 16px);
+    border-radius: var(--r-row);
+  }
+
+  .folder.active {
+    background: var(--paper);
+    box-shadow: var(--seg-on-shadow);
+  }
+
+  :global(:root[data-theme='dark']) .folder.active {
+    background: var(--raised);
+    box-shadow: none;
+  }
+
+  .folder.active .folder-main {
+    color: var(--ink);
+    font-weight: 500;
+  }
+
+  .folder-main {
+    flex: 1;
+    min-width: 0;
+    padding-left: 2px;
+  }
+
+  .folder.active .folder-main,
+  .folder-main:active {
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .disclose {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: var(--m-touch);
+    height: var(--m-touch-lg);
+    padding: 0;
+    border: 0;
+    border-radius: var(--r-sm);
+    background: transparent;
+    color: var(--ink-2);
+  }
+
+  /* ---------------------------------------------------------------- alt */
 
   .foot {
     flex: none;
@@ -562,7 +701,8 @@
     .drawer,
     .drawer.open,
     .scrim,
-    .scrim.open {
+    .scrim.open,
+    :global(.drawer .chev) {
       transition: none;
     }
   }
