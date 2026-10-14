@@ -65,6 +65,33 @@ Son denetim: 2026-10-13 (beş alanda kod denetimi; bulgular doğrulanıp düzelt
 - İmza anahtarı paket derlemesine hiç girmez. Paketler önbelleksiz, imzasız derlenir; ayrı küçük bir işte, `yayin` ortamında imzalanır. Yazma izni yalnız sürüm taslağı işinde.
 - Bağımlılıklar `--locked`. `cargo audit`: bilinen açık yok (yalnız Tauri/GTK üzerinden gelen iki bakım uyarısı: glib, proc-macro-error). `pnpm audit`: bilinen açık yok. Dependabot ayda bir güncelleme önerir.
 
+## Android
+
+Taslak. Android kabuğu ayrı depoda (`mailheremobile`) derlenir; ortak çekirdek (`crates/*`, `crates/mh-app`) aynıdır. Henüz uygulanmamış maddeler **(planlanan)** diye işaretlidir; uygulandıkça işaret kalkar.
+
+- Çekirdek ayrımı: masaüstüne özgü parçalar (anahtar zinciri, tepsi, bildirim kartı penceresi, güncelleyici, tek örnek) kabuk crate'indedir; `crates/mh-app` bunları bağlamaz. Platforma göre değişen işler `Platform` trait'inden geçer, ortak kod pencere ya da dosya sistemine doğrudan dokunmaz.
+- Komut listesi tek kaynaktan gelir (`shared_commands!`, `SHARED_COMMANDS`, `commands.txt`); mobil kabuk masaüstü komutlarını (`open_quick`, `notify_*`, `demo_notify`, `update_*`) bağlamaz. Her kabuğun `capabilities/*.json` dosyası yalnız kendi komutlarına izin verir.
+- Pencere yalnız uygulamanın kendi adreslerinde kalır; geliştirme sunucusu adresine yalnız geliştirme derlemesinde ve yapılandırmadaki `devUrl` ana makinesi için izin verilir.
+- Veri yolları uygulamanın özel klasörleri (`app_local_data_dir`, `app_cache_dir`); veritabanı yine SQLCipher ile şifreli, dosya izinleri aynı (0700 / 0600).
+- **(planlanan)** Parola, OAuth yenileme jetonu ve veritabanı anahtarı `AndroidKeyStore` ile korunan kasada: donanım destekli AES-256-GCM anahtarı, 12 baytlık rastgele IV, anahtar adı AAD; şifreli değerler `mailhere-kasa.xml` tercih dosyasında. Kasaya yalnız Rust tarafı (`SecretStore` köprüsü) erişir.
+- **(planlanan)** `android:allowBackup="false"` ve `dataExtractionRules` ile tüm uygulama verisi (veritabanı, kasa, önbellek) bulut yedeklemesi ve cihazlar arası aktarımın dışında tutulur.
+- **(planlanan)** Ekler: seçilen dosyalar (`content://`) uygulamanın önbelleğine kopyalanır ve yalnız o kopyalar postaya eklenir; açma `FileProvider` ile yalnız o dosya için verilen geçici okuma iznidir; kaydetme sistemin dosya seçicisi (SAF) ile kullanıcının seçtiği konuma yazılır. Uygulama başka uygulamaların dosyalarını yol vererek okuyamaz.
+- **(planlanan)** Bildirim: Android 13+ izin istenir; kanal `yeni-posta`; bildirim metni gönderen ve konudan ibarettir, gövde ve ek adı taşınmaz.
+- **(planlanan)** OAuth dönüşü cihazda `127.0.0.1` döngü adresi üzerinden; tarayıcı özel sekmesi kapanınca dinleyici kapanır. Cihazda doğrulanacak.
+- **(planlanan)** QR tarayıcı kendi etkinliğimiz (CameraX + zxing core, Apache-2.0); ML Kit ya da başka bulut hizmeti yok. Kamera izni yalnız tarama ekranında istenir.
+- **(planlanan)** Ağ: TLS kökleri `webpki-roots` (sistem deposu değil); sertifika onayı masaüstüyle aynı akış. Ağ değişince eşitleme yeniden denenir.
+- **(planlanan)** Sürüm imzası: APK/AAB CI'da `apksigner` ile doğrulanır; imza anahtarı yalnız sürüm işinin gizli değerlerindedir.
+
+## Cihazlar arası aktarım
+
+Taslak **(planlanan)**: masaüstündeki hesaplar, ayarlar, kurallar ve etiketler telefona QR koduyla, yalnız yerel ağ üzerinden aktarılır. Postalar, taslaklar, giden kutusu ve cihaza özgü ayarlar aktarılmaz.
+
+- Kod (`mailhere://aktar?v=1&h=<adresler>&p=<kapı>&t=<16 B>&k=<32 B>`) yalnız QR'da ve ekrandaki metinde bulunur; **K anahtarı ağdan hiç geçmez**. Adres listesi yalnız özel IPv4 ve IPv6 ULA / link-local içerir; genel adres asla yazılmaz.
+- Anahtar türetme HKDF-SHA256 (tuz T), ayrı şifreleme / kimlik / onay anahtarları. İstemci selamı HMAC-SHA256 ile doğrulanır; paket AES-256-GCM ile şifrelidir; yanıt üst sınırı 8 MiB.
+- Sunucu yalnız özel adresten gelen bağlantıyı kabul eder (`is_public_ip` reddi). Teklif 180 s geçerli, tek başarılı teslim; 5 hatalı selamdan sonra kapanır; okuma zaman aşımı 10 s; aynı anda tek teklif.
+- Paket uygulanırken mevcut doğrulayıcılar çalışır (ayar sınırları, hesap/kural/etiket üst sınırları, ad çakışmasında etiket eşleme). Parolalar varsayılan dahildir ve onay kutusuyla kapatılabilir; alınan paket, anahtarlar ve düz metin bellekte `Zeroizing` ile tutulur, diske yazılmaz.
+- Ekranda uyarılar: aynı Wi-Fi, güvenlik duvarı, ekran paylaşımı sırasında QR göstermeme. Tüm paketi QR'a koymak (ağsız aktarım) reddedildi; ağsız seçenek sonraki sürümde parola korumalı şifreli dosya olarak planlanıyor.
+
 ## Açık kalanlar
 
 - **GitHub ayarı:** `yayin` ortamına onaylayıcı eklenmeli (Settings → Environments). İlk sürümde ortam kendiliğinden oluşur.

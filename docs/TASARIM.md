@@ -193,3 +193,36 @@ Sabitleme ve etiketler yalnız bu bilgisayarda tutulur; sunucuya bayrak ya da kl
 - Pencereler kendi başlık çubuğunu çizer (46 px ana, 40–42 px ikincil); küçült / büyüt / kapat sağda, kapatın üzerine gelince `#C42B1C`.
 - Uygulama kapatılınca tepside kalır; tepsi ikonunda okunmamış sayısı.
 - Linux Wayland'de bildirim kartı konumlanamıyorsa işlem düğmeli sistem bildirimi kullanılır.
+
+## 12. Mobil uyarlama
+
+Android sürümü aynı arayüz kodundan (`app/`) derlenir; kabuk `mobile` olunca mobil bileşenler yüklenir. Yukarıdaki jeton, yazı, renk, ikon ve hareket kuralları **aynen** geçerlidir; bu bölüm yalnız ölçü ve gezinmeyi uyarlar.
+
+**Ölçüler**
+
+| Öğe | Mobil |
+| --- | --- |
+| Dokunma hedefi | en az 44×44, birincil eylem 48 |
+| Liste satırı | 72 px (sıkı görünüm 60) |
+| Uygulama çubuğu | 56 px |
+| Alt eylem çubuğu (okuma) | 56 px; düğme hedefleri 44 |
+| Yüzen "Yeni posta" düğmesi | 56 px, sağ alt, `--accent` + `--shadow`; ekranda tek birincil |
+| İkon | masaüstü boyutlarına 22 eklenir (çubuk ve satır eylemleri) |
+| Yazı | ölçek 12 / 15 / 19 / 24 / 30 değişmez; okumada konu **19** (masaüstünde 24) |
+| Alt sayfa satırı | 48 px, köşe 14, `--raised` + `--shadow-lg` |
+| Çekmece | sol, 300 px, `--ground` |
+
+**Gezinme**
+
+- Alt sekme çubuğu yok. Sol çekmece kenar çubuğunun karşılığıdır: gelen kutusu, elek, ertelenen, bekleyen, yıldızlı, taslak, gönderilen, arşiv, çöp; hesaplar ve klasör ağacı; etiketler; kayıtlı aramalar; Ayarlar.
+- Yığın: liste → okuma → yazma; ayarlar yığına itilir. Her itme `history.pushState`; geri tuşu önce açık çekmece / alt sayfa / menüyü kapatır, sonra yığından çıkar, kökte uygulamayı kapatır.
+- Menüler mobilde alt sayfa (`Sheet`) olarak açılır. Toast aynı kalır, alt çubuğun üstünde durur.
+- Kaydırma: sola **Arşivle** (`--accent` zemin + ikon), sağa **Ertele** (`--amber`); eşik %40, 200 ms dönüş, yalnız `transform`; `prefers-reduced-motion` iken anlık. Uzun basış çoklu seçimi açar. Aşağı çekme eşitler.
+- Okumada alt çubuk: Yanıtla · Tümünü yanıtla · İlet · Arşivle · Sil.
+- Komut paleti ve klavye kısayolları yerine tam ekran arama; bildirim kartı, hızlı okuma ve pencere düğmeleri yoktur (işletim sistemi bildirimi kullanılır).
+
+**Teknik**
+
+- `index.html` görünüm alanı: `width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content`; güvenli alan `env(safe-area-inset-*)`.
+- Koyu tema aynı `data-theme`; mobil i18n anahtarları `mob.*` önekiyle.
+- Geçişler yalnız `transform` / `opacity`, 200–280 ms; mobil kabuk tembel yüklenir, listeler sanallaştırılır, Geist önyüklenir.

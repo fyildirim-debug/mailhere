@@ -1,6 +1,6 @@
 # Mailhere — program kuralları
 
-Mailhere; Windows ve Linux için hızlı, sakin, klavyeyle yönetilen bir masaüstü e-posta istemcisidir. Bu dosya projede çalışan herkes (insan ya da ajan) için bağlayıcıdır.
+Mailhere; Windows ve Linux için hızlı, sakin, klavyeyle yönetilen bir masaüstü e-posta istemcisidir; Android sürümü aynı çekirdekten ayrı bir depoda derlenir. Bu dosya projede çalışan herkes (insan ya da ajan) için bağlayıcıdır.
 
 ## Temiz oda
 
@@ -29,8 +29,18 @@ Tam kurallar: [`docs/TASARIM.md`](docs/TASARIM.md). Tek doğruluk kaynağı: `ap
 
 ## Mimari
 
-- `app/` — Svelte 5 + TypeScript + Vite arayüzü. Tek giriş, pencere türü `#/main`, `#/notify`, `#/quick/:id`, `#/compose`, `#/onboarding` ile seçilir.
-- `src-tauri/` — Tauri 2 kabuğu: pencereler, tepsi, komutlar, olaylar, imzalı güncelleme.
+İki depo, tek çekirdek:
+
+- **`mailhere`** (bu depo) — ortak çekirdek (`crates/*`, `app/`) ve masaüstü kabuğu (`src-tauri/`).
+- **`mailheremobile`** — Android kabuğu. Bu depoyu `mailhere/` git alt modülü olarak (sabit commit) içerir; kendi `Cargo.lock`, `pnpm-lock.yaml`, `src-tauri/` (paket `mailhere-android`, `#[tauri::mobile_entry_point]`, Kotlin eklenti) ve `gen/android/` dizini vardır. Arayüzü doğrudan alt modülün `app/dist` çıktısından alır.
+
+Modüller:
+
+- `app/` — Svelte 5 + TypeScript + Vite arayüzü. Tek giriş, pencere türü `#/main`, `#/notify`, `#/quick/:id`, `#/compose`, `#/onboarding` ile seçilir. Kabuk `desktop` ya da `mobile` (`app/src/lib/shell.ts`); mobil bileşenler `app/src/windows/mobile/` altında tembel yüklenir.
+- `crates/mh-app` — ortak uygulama katmanı: Tauri komutları (`commands`, `cmd_*`), `AppState` + `setup_core` (depo, eşitleyiciler, giden kutusu, zamanlayıcılar), olay köprüsü (`sink`), kurallar, elek, hatırlatmalar, `routes` (pencere rotaları ve adres denetimi), `files` (seçilmiş ek yolları), `notify` (ortak bildirim metni), `logging`. Kabuğa değil Tauri'ye bağlıdır; `keyring`, `single-instance`, `updater`, `tray-icon` **içermez**. Ortak komut listesi tek kaynaktan gelir: `shared_commands!` makrosu, `SHARED_COMMANDS` sabiti ve `crates/mh-app/commands.txt` (iki kabuğun `build.rs`'i `include_str!` ile okur; birim testi üçünü eşler).
+- `crates/mh-app/src/platform.rs` — **`Platform` trait'i**: kabuğa özgü işler (`notify`, `counts_changed`, `open_main`, `open_quick`, `open_compose`, `open_file`, `save_file`, `pick_files`, `fatal`). Masaüstü `src-tauri/src/platform.rs` (`DesktopPlatform`: kart/tepsi/pencereler/dosya penceresi), Android `mailheremobile` (`AndroidPlatform`: sistem bildirimi, tek pencere + `mh:navigate`, paylaşım/SAF). Ortak kod pencere, tepsi ya da dosya penceresine doğrudan dokunmaz; `state.platform` üzerinden gider.
+- `src-tauri/` — masaüstü kabuğu: pencereler, tepsi, bildirim kartı penceresi, anahtar zinciri (`KeyringSecrets`), dosya seçme penceresi, imzalı güncelleme, tek örnek; masaüstüne özel komutlar (`open_quick`, `notify_*`, `demo_notify`, `update_*`, `attachments_pick`).
+- `crates/mh-transfer` — cihazlar arası QR aktarımı (kripto + tel protokolü + sunucu/istemci; Store ve Tauri bilmez).
 - `crates/mh-core` — ortak tipler (arayüzle sözleşme; `app/src/lib/api/types.ts` ile birebir aynı tutulur).
 - `crates/mh-store` — SQLite + FTS5 yerel depo.
 - `crates/mh-mime` — ayrıştırma, HTML temizleme, önizleme, akıllı kategori.
@@ -41,6 +51,14 @@ Tam kurallar: [`docs/TASARIM.md`](docs/TASARIM.md). Tek doğruluk kaynağı: `ap
 - `crates/mh-notify` — bildirim kuralları.
 - Arayüz yalnız gösterir ve komut gönderir; ağ, ayrıştırma ve veri işi Rust'tadır.
 - Arayüz, Tauri dışında (tarayıcı, testler) `app/src/lib/api/mock.ts` sahte arka ucuyla çalışır; sözleşme değişirse ikisi birlikte güncellenir.
+
+## Mobil kuralları
+
+- Ortak kod (`crates/mh-app`, `app/src/lib`) platform ayrımı yapmaz; farklı davranış `Platform` trait'inde ya da kabuk crate'inde yaşar. `mh-app`'te `cfg(desktop)` / `cfg(mobile)` kullanılmaz (bu takma adları yalnız kabukların `build.rs`'i üretir).
+- Yeni ortak komut üç yere birden girer: `shared_commands!` listesi (tek kaynaktan `SHARED_COMMANDS` da üretilir), `crates/mh-app/commands.txt`, her iki kabuğun `capabilities/*.json` dosyası. Yalnız bir kabuğa ait komut o kabuğun crate'inde kalır.
+- `mh-app` ve `crates/*` her değişiklikte `aarch64-linux-android` için de clippy'den geçer (CI `android` işi). Android'de olmayan şey (keyring, tepsi, güncelleyici, X11) ortak koda girmez.
+- Mobil arayüz `docs/TASARIM.md` §12'ye uyar; mobil i18n anahtarları `mob.*`.
+- Gizli değerler Android'de `AndroidKeyStore` destekli kasada (`SecretVault.kt`); yedeklemeye kapalı. Bkz. `docs/GUVENLIK.md` "Android".
 
 ## Güvenlik
 
@@ -61,6 +79,17 @@ pnpm e2e                     # Playwright (sahte arka uç)
 cargo test --workspace       # Rust testleri
 cargo clippy --workspace --all-targets -- -D warnings
 pnpm tauri build             # paketler (Linux: deb, AppImage, rpm · Windows: nsis, msi)
+```
+
+Android (çekirdek denetimi bu depoda; paket `mailheremobile` deposunda):
+
+```bash
+rustup target add aarch64-linux-android
+# NDK 28.x: CC/AR/RANLIB/LINKER değişkenleri NDK'nın clang'ına gösterilir (SQLCipher'in OpenSSL'i kaynaktan derlenir)
+cargo clippy --locked --target aarch64-linux-android -p mh-app -- -D warnings   # CI "android" işi
+# mailheremobile içinde:
+pnpm tauri android dev                      # cihaz ya da emülatörde
+pnpm tauri android build --apk --target aarch64
 ```
 
 ## Git
