@@ -1378,6 +1378,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     // Yalnız mobil kabuk: kamera yerine geçerli görünümlü örnek kod; bildirim izni verilmiş sayılır.
     qr_scan: () => `mailhere://aktar?v=1&h=192.168.1.20&p=51234&t=${fakeB64(16, 41)}&k=${fakeB64(32, 42)}`,
     notification_permission: () => 'granted',
+    system_bars: () => null,
   };
 
   return {

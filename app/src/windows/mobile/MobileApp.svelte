@@ -21,6 +21,7 @@
   import { initMail, mail, markAllRead, rowsOf, select, setOnly, setView, type Row } from '../../lib/stores/mail.svelte';
   import { parseRoute } from '../../lib/stores/route.svelte';
   import { checkAll, clearChecked } from '../../lib/stores/selection.svelte';
+  import { settings } from '../../lib/stores/settings.svelte';
   import { tagById } from '../../lib/stores/tags.svelte';
   import Onboarding from '../main/Onboarding.svelte';
   import ScheduledView from '../main/ScheduledView.svelte';
@@ -93,6 +94,15 @@
     if (nav.current.name === 'compose') nav.replace(screen);
     else nav.push(screen);
   }
+
+  // Android sistem çubuklarının simgeleri uygulamanın temasını izler (telefon
+  // açık kipteyken uygulama koyu temada olabilir).
+  $effect(() => {
+    const dark = settings.resolved === 'dark';
+    call('system_bars', { dark }).catch(() => {
+      /* masaüstü tarayıcıda ve eski kabukta komut yok; çubuklar sistem temasında kalır */
+    });
+  });
 
   // Görev çubuğu / sekme başlığında okunmamış sayısı.
   $effect(() => {

@@ -885,6 +885,8 @@ export interface Commands {
   qr_scan: [Record<string, never>, string | null];
   /** Bildirim izni ister; sonuç "granted" | "denied" | "prompt" (Android 13 öncesi hep "granted"). */
   notification_permission: [Record<string, never>, string];
+  /** Android: durum ve gezinme çubuğu simgelerini uygulamanın temasına uydurur. */
+  system_bars: [{ dark: boolean }, null];
 }
 
 export type CommandName = keyof Commands;

@@ -3,7 +3,12 @@
 import { call, defaultSettings, EVENTS, on, type Settings } from '../api';
 import { setLanguage, t } from '../i18n/index.svelte';
 
-export const settings = $state({ value: { ...defaultSettings } as Settings, ready: false });
+export const settings = $state({
+  value: { ...defaultSettings } as Settings,
+  ready: false,
+  /** Uygulanan tema; sistem tercihi değişince de güncellenir (Android sistem çubukları izler). */
+  resolved: 'light' as 'light' | 'dark',
+});
 
 const media = typeof window !== 'undefined' ? window.matchMedia('(prefers-color-scheme: dark)') : null;
 
@@ -16,7 +21,8 @@ export function resolvedTheme(s: Settings = settings.value): 'light' | 'dark' {
 function apply(s: Settings) {
   settings.value = s;
   setLanguage(s.language);
-  if (typeof document !== 'undefined') document.documentElement.dataset.theme = resolvedTheme(s);
+  settings.resolved = resolvedTheme(s);
+  if (typeof document !== 'undefined') document.documentElement.dataset.theme = settings.resolved;
 }
 
 export async function initSettings() {
