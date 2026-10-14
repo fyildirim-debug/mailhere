@@ -3,7 +3,7 @@
 **/target/
 
 # Node
-node_modules/
+node_modules
 app/dist/
 .pnpm-store/
 

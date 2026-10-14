@@ -1,0 +1,135 @@
+/*
+ * Mobil kabuk ölçüleri ve paylaşılan sınıflar (docs/TASARIM.md §12).
+ * Yalnız mobil kabukta yüklenir (MobileApp.svelte); jetonlar tokens.css'ten gelir.
+ */
+
+:root {
+  /* Ölçüler: uygulama çubuğu ve alt çubuk 56, satır 72 (sıkı 60), dokunma hedefi 44 (birincil 48). */
+  --m-appbar: 56px;
+  --m-bar: 56px;
+  --m-row: 72px;
+  --m-row-compact: 60px;
+  --m-touch: 44px;
+  --m-touch-lg: 48px;
+  --m-drawer: 300px;
+  --m-fab: 56px;
+
+  /* Güvenli alan (çentik, gezinme çubuğu). */
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+}
+
+html,
+body {
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Kök: ekranı kaplar; ekranlar üst üste durur. */
+.m-shell {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.m-screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  /* Her ekran kendi yığın bağlamı: alttaki ekranın yüzen düğmesi üsttekini delmez. */
+  isolation: isolate;
+}
+
+/* Yığına itilen ekran listenin üstünde durur; hafif sağdan ve saydamdan gelir. */
+.m-screen.pushed {
+  z-index: 10;
+  animation: m-enter var(--t-panel) var(--ease);
+}
+
+@keyframes m-enter {
+  from {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+}
+
+/* Dokunma hedefleri: ikon düğmeler 44, satır içi 40; menü satırları 48. */
+.m-shell .btn-icon {
+  width: var(--m-touch);
+  height: var(--m-touch);
+}
+
+.m-shell .btn-icon.small {
+  width: 40px;
+  height: 40px;
+}
+
+.m-shell .menu-item {
+  height: 48px;
+}
+
+.m-shell .btn-soft,
+.m-shell .btn-primary {
+  min-height: var(--m-touch);
+}
+
+/* Boş durum ve yer tutucu: ne oldu + ne yapılabilir. */
+.m-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 48px 32px;
+  color: var(--ink-3);
+  text-align: center;
+}
+
+.m-empty .m-empty-icon {
+  color: var(--accent);
+}
+
+.m-empty-title {
+  color: var(--ink);
+  font-weight: 600;
+  text-wrap: balance;
+}
+
+.m-empty-body {
+  max-width: 32ch;
+  color: var(--ink-3);
+  text-wrap: pretty;
+}
+
+/* Yüzen birincil eylem: 56 px, sağ alt, güvenli alanın üstünde. */
+.m-fab {
+  position: absolute;
+  right: calc(16px + var(--sar));
+  bottom: calc(16px + var(--sab));
+  z-index: 5;
+  width: var(--m-fab);
+  height: var(--m-fab);
+  padding: 0;
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  transition:
+    transform var(--t-state) var(--ease),
+    opacity var(--t-state),
+    filter var(--t-fast);
+}
+
+.m-fab:active {
+  transform: scale(0.96);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .m-screen.pushed {
+    animation: none;
+  }
+}

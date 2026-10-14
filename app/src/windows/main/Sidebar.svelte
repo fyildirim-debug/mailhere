@@ -1,11 +1,30 @@
 <script lang="ts">
-  import type { Account, Mailbox, SavedSearch, Tag, View } from '../../lib/api';
+  import type { Account, Mailbox, SavedSearch, Tag } from '../../lib/api';
   import { call, toAppError, SAVED_SEARCH_NAME_CHARS } from '../../lib/api';
-  import { t, type MessageKey } from '../../lib/i18n/index.svelte';
+  import { t } from '../../lib/i18n/index.svelte';
   import CertDialog, { type CertTarget } from '../../lib/mail/CertDialog.svelte';
   import { flatten, folderIcon, folderLabel, folderTree } from '../../lib/mail/folders';
+  import {
+    accountActive,
+    accountHint,
+    COLLAPSED_FOLDERS_KEY,
+    folderActive,
+    folderCount,
+    folderTarget,
+    initialOpenAccounts,
+    loadSet,
+    OPEN_ACCOUNTS_KEY,
+    savedSearchActive,
+    saveSet,
+    scheduledVisible,
+    tagActive,
+    toggled,
+    VIEW_ITEMS,
+    viewActive,
+    viewCount,
+    viewVisible,
+  } from '../../lib/mail/nav';
   import Icon from '../../lib/ui/Icon.svelte';
-  import type { IconName } from '../../lib/ui/icons';
   import Menu, { type MenuItem } from '../../lib/ui/Menu.svelte';
   import NamePrompt from '../../lib/ui/NamePrompt.svelte';
   import { showToast } from '../../lib/ui/toast.svelte';
@@ -14,72 +33,22 @@
   import { tagStore } from '../../lib/stores/tags.svelte';
   import { installUpdate, update } from '../../lib/stores/update.svelte';
 
-  interface NavItem {
-    kind: Exclude<View['kind'], 'mailbox' | 'tag'>;
-    icon: IconName;
-    label: MessageKey;
-    count?: () => number;
-    /** Yalnız sayacı varsa (ya da açıkken) görünür. */
-    optional?: boolean;
-  }
-
-  const items: NavItem[] = [
-    { kind: 'inbox', icon: 'inbox', label: 'nav.inbox', count: () => mail.counts.inboxUnread },
-    { kind: 'screener', icon: 'sieve', label: 'nav.screener', count: () => mail.counts.screener, optional: true },
-    { kind: 'snoozed', icon: 'clock', label: 'nav.snoozed', count: () => mail.counts.snoozed },
-    { kind: 'followups', icon: 'followUp', label: 'nav.followups', count: () => mail.counts.followUps, optional: true },
-    { kind: 'starred', icon: 'star', label: 'nav.starred' },
-    { kind: 'drafts', icon: 'draft', label: 'nav.drafts', count: () => mail.counts.drafts },
-    { kind: 'sent', icon: 'send', label: 'nav.sent' },
-    { kind: 'archive', icon: 'archive', label: 'nav.archive' },
-    { kind: 'trash', icon: 'trash', label: 'nav.trash' },
-  ];
-
-  function domainOf(email: string) {
-    return email.split('@')[1] ?? email;
-  }
+  // Görünüm listesi ve etkinlik kuralları mobil çekmeceyle ortak (lib/mail/nav.ts).
 
   // ------------------------------------------------ açık hesaplar ve klasörler
   // Kişisel kolaylık: yalnız bu bilgisayarda, tarayıcı deposunda tutulur.
 
-  const OPEN_KEY = 'mailhere.side.open';
-  const SHUT_KEY = 'mailhere.side.collapsed';
-
-  function load(key: string): Set<string> | null {
-    try {
-      const raw = localStorage.getItem(key);
-      return raw ? new Set(JSON.parse(raw) as string[]) : null;
-    } catch {
-      return null;
-    }
-  }
-
-  function save(key: string, set: Set<string>) {
-    try {
-      localStorage.setItem(key, JSON.stringify([...set]));
-    } catch {
-      /* depo kapalıysa yalnız bu oturumda geçerli */
-    }
-  }
-
-  // İlk açılışta tek hesap varsa klasörleri açık gelir.
-  let open = $state<Set<string>>(load(OPEN_KEY) ?? new Set(mail.accounts.length === 1 ? [mail.accounts[0].id] : []));
-  let shut = $state<Set<string>>(load(SHUT_KEY) ?? new Set());
+  let open = $state<Set<string>>(initialOpenAccounts(mail.accounts));
+  let shut = $state<Set<string>>(loadSet(COLLAPSED_FOLDERS_KEY) ?? new Set());
 
   function toggleAccount(id: string) {
-    const next = new Set(open);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    open = next;
-    save(OPEN_KEY, next);
+    open = toggled(open, id);
+    saveSet(OPEN_ACCOUNTS_KEY, open);
   }
 
   function toggleFolder(id: string) {
-    const next = new Set(shut);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    shut = next;
-    save(SHUT_KEY, next);
+    shut = toggled(shut, id);
+    saveSet(COLLAPSED_FOLDERS_KEY, shut);
   }
 
   const trees = $derived(
@@ -87,14 +56,8 @@
   );
 
   function openFolder(account: Account, b: Mailbox) {
-    // Gelen kutusu ertelenenleri gizleyen görünümle açılır; diğerleri klasörün kendisi.
-    if (b.role === 'inbox') setView({ kind: 'inbox' }, account.id);
-    else setView({ kind: 'mailbox', id: b.id }, account.id);
-  }
-
-  function folderActive(account: Account, b: Mailbox): boolean {
-    if (mail.screen !== 'mail' || mail.search != null || mail.accountId !== account.id) return false;
-    return b.role === 'inbox' ? mail.view.kind === 'inbox' : mail.view.kind === 'mailbox' && mail.view.id === b.id;
+    const target = folderTarget(account, b);
+    setView(target.view, target.accountId);
   }
 
   // ------------------------------------------------------------ sağ tık menüsü
@@ -161,10 +124,6 @@
   function pointOf(e: MouseEvent | KeyboardEvent) {
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
     return e instanceof MouseEvent && e.clientX ? { x: e.clientX, y: e.clientY } : { x: r.left + 24, y: r.bottom };
-  }
-
-  function tagActive(tg: Tag): boolean {
-    return mail.screen === 'mail' && mail.search == null && mail.view.kind === 'tag' && mail.view.id === tg.id;
   }
 
   function tagMenu(e: MouseEvent | KeyboardEvent, tg: Tag) {
@@ -239,17 +198,17 @@
     <span class="kbd on-accent">C</span>
   </button>
 
-  {#each items as item (item.kind)}
-    {@const active = mail.screen === 'mail' && mail.search == null && mail.view.kind === item.kind && mail.accountId == null}
-    {@const n = item.count?.() ?? 0}
-    {#if !item.optional || n > 0 || active}
+  {#each VIEW_ITEMS as item (item.kind)}
+    {@const active = viewActive(item.kind, mail)}
+    {@const n = viewCount(item, mail.counts)}
+    {#if viewVisible(item, mail)}
       <button class="nav" class:active aria-current={active ? 'page' : undefined} onclick={() => setView({ kind: item.kind })}>
         <Icon name={item.icon} />
         <span class="trunc">{t(item.label)}</span>
         {#if n > 0}<span class="count num">{n}</span>{/if}
       </button>
     {/if}
-    {#if item.kind === 'drafts' && (mail.counts.scheduled > 0 || mail.screen === 'scheduled')}
+    {#if item.kind === 'drafts' && scheduledVisible(mail)}
       {@const on = mail.screen === 'scheduled'}
       <button class="nav" class:active={on} aria-current={on ? 'page' : undefined} onclick={() => (mail.screen = 'scheduled')}>
         <Icon name="calendarClock" />
@@ -267,7 +226,7 @@
       </button>
     </div>
     {#each tagStore.list as tg (tg.id)}
-      {@const on = tagActive(tg)}
+      {@const on = tagActive(tg, mail)}
       <button
         class="nav"
         class:active={on}
@@ -285,7 +244,7 @@
   {#if settings.value.savedSearches.length}
     <div class="group"><span>{t('saved.nav')}</span></div>
     {#each settings.value.savedSearches as s (s.id)}
-      {@const on = mail.screen === 'mail' && mail.search === s.query}
+      {@const on = savedSearchActive(s.query, mail)}
       <button
         class="nav"
         class:active={on}
@@ -310,7 +269,7 @@
   {#each mail.accounts as account (account.id)}
     {@const expanded = open.has(account.id)}
     {@const n = mail.counts.perAccountUnread[account.id] ?? 0}
-    {@const active = mail.screen === 'mail' && mail.search == null && mail.view.kind === 'inbox' && mail.accountId === account.id && !expanded}
+    {@const active = accountActive(account, expanded, mail)}
     <div class="acc" class:active>
       <button
         class="disclose"
@@ -332,7 +291,7 @@
         <!-- Ad sığmazsa kısalır; alan adı yer kalmazsa alt satıra iner ve gizlenir. -->
         <span class="acc-text">
           <span class="trunc acc-name">{account.name}</span>
-          <span class="trunc domain">{account.kind === 'jmap' ? 'JMAP' : domainOf(account.email)}</span>
+          <span class="trunc domain">{accountHint(account)}</span>
         </span>
         {#if n > 0 && !expanded}<span class="count num">{n}</span>{/if}
       </button>
@@ -341,7 +300,7 @@
       <div class="tree" role="group" aria-label={t('side.folders', { name: account.name })}>
         {#each trees[account.id] ?? [] as node (node.mailbox.id)}
           {@const b = node.mailbox}
-          {@const on = folderActive(account, b)}
+          {@const on = folderActive(account, b, mail)}
           <div class="folder" class:active={on} style:--depth={node.depth}>
             {#if node.children.length}
               <button
@@ -364,7 +323,7 @@
             >
               <Icon name={folderIcon(b)} size={16} />
               <span class="trunc grow">{folderLabel(b)}</span>
-              {#if b.unread > 0 && b.role !== 'sent' && b.role !== 'drafts' && b.role !== 'trash'}<span class="count num">{b.unread}</span>{/if}
+              {#if folderCount(b) > 0}<span class="count num">{folderCount(b)}</span>{/if}
             </button>
           </div>
         {/each}

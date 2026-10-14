@@ -1,12 +1,20 @@
 <script lang="ts">
   import { route } from './lib/stores/route.svelte';
+  import { isMobileShell } from './lib/shell';
   import MainWindow from './windows/main/MainWindow.svelte';
   import NotifyWindow from './windows/notify/NotifyWindow.svelte';
   import QuickWindow from './windows/quick/QuickWindow.svelte';
   import ComposeWindow from './windows/compose/ComposeWindow.svelte';
+
+  // Mobil kabuk tembel yüklenir: masaüstü paketi onu taşımaz.
+  const mobile = isMobileShell ? import('./windows/mobile/MobileApp.svelte') : null;
 </script>
 
-{#if route.current.name === 'notify'}
+{#if mobile}
+  {#await mobile then { default: MobileApp }}
+    <MobileApp />
+  {/await}
+{:else if route.current.name === 'notify'}
   <NotifyWindow />
 {:else if route.current.name === 'quick'}
   <QuickWindow id={route.current.id} />

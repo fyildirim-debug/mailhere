@@ -7,10 +7,13 @@ const version = (JSON.parse(readFileSync(new URL('../package.json', import.meta.
 
 // Tauri geliştirme sunucusu sabit portta çalışmalı.
 const host = process.env.TAURI_DEV_HOST;
+const platform = process.env.TAURI_ENV_PLATFORM;
+// Kabuk: Android derlemesi mobil, diğerleri masaüstü; MH_SHELL ile elle seçilir.
+const shell = process.env.MH_SHELL ?? (platform === 'android' ? 'mobile' : 'desktop');
 
 export default defineConfig({
   plugins: [svelte()],
-  define: { __APP_VERSION__: JSON.stringify(version) },
+  define: { __APP_VERSION__: JSON.stringify(version), __MH_SHELL__: JSON.stringify(shell) },
   clearScreen: false,
   server: {
     port: 5173,
@@ -20,8 +23,8 @@ export default defineConfig({
   },
   envPrefix: ['VITE_', 'TAURI_ENV_'],
   build: {
-    // Windows'ta WebView2 (Chromium), Linux'ta WebKitGTK.
-    target: process.env.TAURI_ENV_PLATFORM === 'windows' ? 'chrome110' : 'safari15',
+    // Windows'ta WebView2 ve Android'de WebView (Chromium), Linux'ta WebKitGTK.
+    target: platform === 'windows' || platform === 'android' ? 'chrome110' : 'safari15',
     minify: !process.env.TAURI_ENV_DEBUG,
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
     chunkSizeWarningLimit: 600,

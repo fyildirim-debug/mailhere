@@ -226,3 +226,6 @@ Android sürümü aynı arayüz kodundan (`app/`) derlenir; kabuk `mobile` olunc
 - `index.html` görünüm alanı: `width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content`; güvenli alan `env(safe-area-inset-*)`.
 - Koyu tema aynı `data-theme`; mobil i18n anahtarları `mob.*` önekiyle.
 - Geçişler yalnız `transform` / `opacity`, 200–280 ms; mobil kabuk tembel yüklenir, listeler sanallaştırılır, Geist önyüklenir.
+- Ölçüler `app/src/styles/mobile.css` değişkenlerinde tek yerde tutulur: `--m-appbar` 56, `--m-bar` 56, `--m-row` 72 / `--m-row-compact` 60, `--m-touch` 44 / `--m-touch-lg` 48, `--m-drawer` 300, `--m-fab` 56 (köşe 16); güvenli alan `--sat/--sab/--sal/--sar`. İkon boyutu çubuklarda 22, yüzen düğmede 24.
+- Seçim kipinde uygulama çubuğu `--accent` zemin + `--accent-ink`. Örtü `color-mix(in srgb, var(--ink) 42%, transparent)`. Hareket: ekran itme 280 ms (`translateX(28px)` + opacity), çekmece 280 ms, kaydırma dönüşü ve alt çubuk 200 ms; hepsi `cubic-bezier(.16,1,.3,1)`.
+- Kenardan kaydırma çekmeceyi açar (liste ekranında soldaki 20 px şerit); uzun basış 450 ms. Toast mobilde yüzen düğmenin üstünde durur.

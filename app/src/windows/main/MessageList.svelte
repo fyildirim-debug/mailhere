@@ -1,14 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { toAppError, SAVED_SEARCHES_MAX, SAVED_SEARCH_NAME_CHARS, type Category, type ListOnly, type MessageSummary } from '../../lib/api';
+  import { toAppError, SAVED_SEARCHES_MAX, SAVED_SEARCH_NAME_CHARS, type Category, type ListOnly } from '../../lib/api';
   import { t, type MessageKey } from '../../lib/i18n/index.svelte';
   import Icon from '../../lib/ui/Icon.svelte';
   import Menu, { type MenuItem } from '../../lib/ui/Menu.svelte';
   import NamePrompt from '../../lib/ui/NamePrompt.svelte';
   import { showToast } from '../../lib/ui/toast.svelte';
-  import { folderLabel } from '../../lib/mail/folders';
-  import { dateGroup, type DateGroup } from '../../lib/util/format';
-  import { followUpDue } from '../../lib/util/followup';
+  import { emptyState, groupLabel, groupOf, isInboxView, listTitle, orderRows } from '../../lib/mail/listing';
+  import { buildLayout, scrollToReveal, visibleEntries } from '../../lib/ui/virtual';
   import { loadMore, mail, markAllRead, rowsOf, setCategory, setOnly, setView } from '../../lib/stores/mail.svelte';
   import { settings, updateSettings } from '../../lib/stores/settings.svelte';
   import { tagById } from '../../lib/stores/tags.svelte';
@@ -28,75 +27,24 @@
   });
 
   const compact = $derived(settings.value.density === 'compact');
-  const isInbox = $derived(mail.view.kind === 'inbox' && mail.search == null);
+  const isInbox = $derived(isInboxView(mail));
   const rowH = $derived(compact ? 58 : 82);
+  const ctx = $derived({ view: mail.view, search: mail.search, now });
 
-  type Entry =
-    | { kind: 'group'; key: string; label: string; top: number; h: number }
-    | { kind: 'row'; key: string; index: number; top: number; h: number };
+  // Sıra ve grup başlıkları mobil listeyle ortak (lib/mail/listing.ts).
+  const rows = $derived(orderRows(rowsOf(mail.items, mail.search == null), ctx));
 
-  const groupKey: Record<DateGroup, MessageKey> = {
-    today: 'group.today',
-    yesterday: 'group.yesterday',
-    week: 'group.week',
-    older: 'group.older',
-  };
+  const layout = $derived(
+    buildLayout(rows, {
+      rowH,
+      groupH: GROUP_H,
+      groupOf: (m) => groupOf(m, ctx),
+      groupLabel,
+      rowKey: (m) => `m-${m.id}`,
+    }),
+  );
 
-  // Gelen kutusu ve klasörde sabitlenenler "Sabitlenenler" grubunda, en üstte.
-  const pinnedView = $derived(mail.search == null && (mail.view.kind === 'inbox' || mail.view.kind === 'mailbox'));
-  const rows = $derived.by(() => {
-    const base = rowsOf(mail.items, mail.search == null);
-    // Arka uç zaten süresi dolan hatırlatmaları ve sabitlenenleri öne koyar;
-    // yerel işaret anında da aynı sıra korunur (sıralama kararlıdır).
-    const rank = (r: MessageSummary) => (dueRow(r) ? 2 : r.pinned ? 1 : 0);
-    return pinnedView ? [...base].sort((a, b) => rank(b) - rank(a)) : base;
-  });
-  /** Gelen kutusunun başına düşen, süresi dolan yanıt hatırlatması. */
-  function dueRow(m: MessageSummary): boolean {
-    return isInbox && followUpDue(m.followUp, now);
-  }
-
-  const layout = $derived.by(() => {
-    const entries: Entry[] = [];
-    let top = 0;
-    let last: DateGroup | 'due' | 'pinned' | null = null;
-    rows.forEach((m, index) => {
-      // Süresi dolan hatırlatmalar ve sabitlenenler kendi başlıklarıyla en üstte;
-      // liste tarihe göre sıralı olmayabilir (arama, hatırlatma), başlık anahtarı
-      // bu yüzden konuma bağlıdır.
-      const g = dueRow(m) ? 'due' : pinnedView && m.pinned ? 'pinned' : dateGroup(m.date, now);
-      if (g !== last) {
-        const label = g === 'due' ? t('nav.followups') : g === 'pinned' ? t('list.pinnedGroup') : t(groupKey[g]);
-        entries.push({ kind: 'group', key: `g-${index}`, label, top, h: GROUP_H });
-        top += GROUP_H;
-        last = g;
-      }
-      entries.push({ kind: 'row', key: `m-${m.id}`, index, top, h: rowH });
-      top += rowH;
-    });
-    return { entries, total: top + 16 };
-  });
-
-  function firstVisible(entries: Entry[], y: number): number {
-    let lo = 0;
-    let hi = entries.length - 1;
-    while (lo < hi) {
-      const mid = (lo + hi) >> 1;
-      if (entries[mid].top + entries[mid].h < y) lo = mid + 1;
-      else hi = mid;
-    }
-    return lo;
-  }
-
-  const visible = $derived.by(() => {
-    const { entries } = layout;
-    if (!entries.length) return [];
-    const start = firstVisible(entries, scrollTop - OVERSCAN);
-    const end = scrollTop + viewport + OVERSCAN;
-    const out: Entry[] = [];
-    for (let i = start; i < entries.length && entries[i].top < end; i++) out.push(entries[i]);
-    return out;
-  });
+  const visible = $derived(visibleEntries(layout.entries, scrollTop, viewport, OVERSCAN));
 
   function onScroll() {
     scrollTop = scroller.scrollTop;
@@ -108,12 +56,8 @@
     const id = mail.selectedId;
     if (id == null || !scroller) return;
     const i = rows.findIndex((r) => r.ids.includes(id));
-    const e = layout.entries.find((x) => x.kind === 'row' && x.index === i);
-    if (!e) return;
-    const groupAbove = layout.entries[layout.entries.indexOf(e) - 1];
-    const top = groupAbove?.kind === 'group' ? groupAbove.top : e.top;
-    if (top < scroller.scrollTop) scroller.scrollTop = top;
-    else if (e.top + e.h > scroller.scrollTop + viewport) scroller.scrollTop = e.top + e.h - viewport;
+    const target = scrollToReveal(layout, i, scroller.scrollTop, viewport);
+    if (target != null) scroller.scrollTop = target;
   });
 
   const tabs: { key: Category | null; label: MessageKey }[] = [
@@ -123,37 +67,8 @@
     { key: 'newsletters', label: 'cat.newsletters' },
   ];
 
-  const titleKey: Record<string, MessageKey> = {
-    inbox: 'nav.inbox',
-    snoozed: 'nav.snoozed',
-    starred: 'nav.starred',
-    drafts: 'nav.drafts',
-    sent: 'nav.sent',
-    archive: 'nav.archive',
-    trash: 'nav.trash',
-    followups: 'nav.followups',
-    screener: 'nav.screener',
-  };
-
-  /** Boş durum metni: görünüme özel, yoksa genel. */
-  const empty = $derived.by((): { title: MessageKey; body: MessageKey } => {
-    if (mail.search == null && !mail.category && !mail.only) {
-      if (mail.view.kind === 'followups') return { title: 'follow.emptyTitle', body: 'follow.emptyBody' };
-      if (mail.view.kind === 'screener') return { title: 'screen.emptyTitle', body: 'screen.emptyBody' };
-      if (mail.view.kind === 'tag') return { title: 'list.emptyTitle', body: 'tag.emptyBody' };
-    }
-    return { title: 'list.emptyTitle', body: mail.category || mail.only ? 'list.emptyFilteredBody' : 'list.emptyBody' };
-  });
-
-  const title = $derived.by(() => {
-    if (mail.search != null) return t('list.searchTitle', { q: mail.search });
-    const view = mail.view;
-    const box = view.kind === 'mailbox' ? mail.mailboxes.find((b) => b.id === view.id) : undefined;
-    const base =
-      view.kind === 'mailbox' ? (box ? folderLabel(box) : '') : view.kind === 'tag' ? (tagById(view.id)?.name ?? t('tag.title')) : t(titleKey[view.kind]);
-    const acc = mail.accounts.find((a) => a.id === mail.accountId);
-    return acc ? `${base} · ${acc.name}` : base;
-  });
+  const empty = $derived(emptyState(mail));
+  const title = $derived(listTitle({ view: mail.view, search: mail.search, accountId: mail.accountId, mailboxes: mail.mailboxes, accounts: mail.accounts, tagById }));
 
   // Arama sonucunu kenar çubuğuna kaydet.
   let savePrompt = $state<{ x: number; y: number } | null>(null);
