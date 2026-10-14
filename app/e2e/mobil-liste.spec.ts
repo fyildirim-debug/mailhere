@@ -31,7 +31,8 @@ test.beforeEach(async ({ page }) => {
 });
 
 test('açılış: uygulama çubuğu, liste, yüzen düğme; kenar çubuğu ve okuma alanı yok', async ({ page }) => {
-  await expect(page.getByText('3 okunmamış')).toBeVisible();
+  // Okunmamış sayısı büyük başlığın altında (çubuktaki kopya yalnız kaydırınca görünür).
+  await expect(list(page).getByText('3 okunmamış')).toBeVisible();
   await expect(row(page, 'Re: Q4 bütçe taslağı')).toHaveCount(1);
   await expect(row(page, 'Cumartesi kahvaltı?')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Yeni posta' })).toBeVisible();

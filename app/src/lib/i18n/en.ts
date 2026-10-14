@@ -764,6 +764,7 @@ export const en: Record<MessageKey, string> = {
   'mob.searchEmpty': 'No matching mail',
   'mob.searchEmptyBody': 'Try another word or an operator such as from:, has:attachment, in:.',
   'mob.closeDrawer': 'Close menu',
+  'mob.folders': 'Folders',
   'mob.more': 'More',
   'mob.selected': '{n} selected',
   'mob.selectAll': 'Select all',

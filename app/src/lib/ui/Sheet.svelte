@@ -173,7 +173,7 @@
     max-height: calc(100% - 56px);
     padding-left: env(safe-area-inset-left, 0px);
     padding-right: env(safe-area-inset-right, 0px);
-    border-radius: var(--r-float) var(--r-float) 0 0;
+    border-radius: var(--r-palette) var(--r-palette) 0 0;
     background: var(--raised);
     box-shadow: var(--shadow-lg);
     outline: none;
@@ -195,15 +195,15 @@
   }
 
   .handle {
-    width: 36px;
+    width: 32px;
     height: 4px;
-    margin: 10px auto 8px;
+    margin: 10px auto 10px;
     border-radius: 999px;
     background: var(--line-strong);
   }
 
   .title {
-    padding: 2px 20px 10px;
+    padding: 0 20px 10px;
     font-weight: 600;
     letter-spacing: -0.01em;
   }

@@ -779,6 +779,7 @@ export const tr = {
   'mob.searchEmpty': 'Eşleşen posta yok',
   'mob.searchEmptyBody': 'Başka bir sözcük dene ya da from:, has:ek, in: gibi bir işleç kullan.',
   'mob.closeDrawer': 'Menüyü kapat',
+  'mob.folders': 'Klasörler',
   'mob.more': 'Diğer',
   'mob.selected': '{n} seçili',
   'mob.selectAll': 'Tümünü seç',

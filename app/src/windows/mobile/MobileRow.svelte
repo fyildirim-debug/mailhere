@@ -1,5 +1,7 @@
 <script lang="ts">
   // Mobil liste satırı (72 px, sıkı 60): gönderen + saat, konu, önizleme.
+  // Sol oluk: 8 px okunmamış noktası, 40 px avatar; metin 15 px tek ölçekte,
+  // hiyerarşi ağırlık ve mürekkeple kurulur (okunmamış: nokta + 600 + --ink).
   // Seçim kipinde avatarın yerine işaret gelir; hareket mantığı SwipeRow'da.
   import { locale, t } from '../../lib/i18n/index.svelte';
   import Avatar from '../../lib/ui/Avatar.svelte';
@@ -69,12 +71,12 @@
 <style>
   .row {
     display: grid;
-    grid-template-columns: 8px 40px minmax(0, 1fr);
+    grid-template-columns: 10px 40px minmax(0, 1fr);
     column-gap: 10px;
     align-items: start;
     width: 100%;
     height: 100%;
-    padding: 6px 16px 6px 6px;
+    padding: 6px var(--m-gutter) 6px 8px;
     border: 0;
     border-radius: 0;
     background: transparent;
@@ -96,13 +98,19 @@
     outline-offset: -2px;
   }
 
+  /* Okunmamış noktası ilk satırın ortasında; kanalı hep yerinde durur. */
   .dot {
-    width: 7px;
-    height: 7px;
-    margin-top: 7px;
+    width: 8px;
+    height: 8px;
+    margin: 6px 0 0 1px;
     border-radius: 50%;
     background: var(--accent);
     opacity: 0;
+    transition: opacity var(--t-fast);
+  }
+
+  .compact .dot {
+    margin-top: 10px;
   }
 
   .unread .dot {
@@ -150,6 +158,7 @@
 
   .sender {
     font-weight: 500;
+    color: var(--ink);
   }
 
   .unread .sender {
@@ -187,8 +196,14 @@
   .time {
     flex: none;
     margin-left: auto;
+    padding-left: 4px;
     font-size: var(--fs-meta);
     color: var(--ink-3);
+  }
+
+  .unread .time {
+    color: var(--ink-2);
+    font-weight: 500;
   }
 
   .subject {

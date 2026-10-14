@@ -83,7 +83,7 @@
       {/each}
     </div>
 
-    <div class="group-title">{t('set.nav.accounts')}</div>
+    <div class="m-section group-title">{t('set.nav.accounts')}</div>
     <div class="group">
       {#each mail.accounts as a (a.id)}
         <button class="row acc" onclick={() => onopen(`account:${a.id}`)}>
@@ -151,30 +151,28 @@
     overscroll-behavior: contain;
   }
 
+  /* Gruplar arası cömert boşluk; grup içinde satırlar etiket hizasından başlayan ince çizgiyle ayrılır. */
   .group {
     display: flex;
     flex-direction: column;
-    border-bottom: 1px solid var(--line);
   }
 
   .group + .group {
-    margin-top: 12px;
+    margin-top: 20px;
   }
 
   .group-title {
-    padding: 22px 16px 6px;
-    font-size: var(--fs-meta);
-    font-weight: 600;
-    color: var(--ink-2);
+    padding-bottom: 2px;
   }
 
   .row {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 14px;
     width: 100%;
     min-height: 56px;
-    padding: 0 12px 0 16px;
+    padding: 0 12px 0 var(--m-gutter);
     border: 0;
     background: transparent;
     color: var(--ink);
@@ -184,6 +182,16 @@
 
   .row:active {
     background: var(--hover);
+  }
+
+  .row + .row::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 52px;
+    right: 0;
+    height: 1px;
+    background: var(--line);
   }
 
   .row > :global(.icon) {
@@ -201,6 +209,11 @@
 
   .acc {
     min-height: 64px;
+  }
+
+  .acc + .row::before,
+  .row + .acc::before {
+    left: 66px;
   }
 
   .badge {
@@ -228,7 +241,7 @@
   }
 
   .version {
-    padding: 20px 16px 0;
+    padding: 28px var(--m-gutter) 0;
     text-align: center;
   }
 
@@ -237,7 +250,7 @@
     flex: 1;
     min-height: 0;
     overflow-y: auto;
-    padding: 8px 16px calc(32px + var(--sab));
+    padding: 8px var(--m-gutter) calc(32px + var(--sab));
     background: var(--paper);
     container: settings / inline-size;
     overscroll-behavior: contain;

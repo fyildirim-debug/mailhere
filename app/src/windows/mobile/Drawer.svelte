@@ -194,9 +194,23 @@
   onpointerup={up}
   onpointercancel={up}
 >
-  <div class="brand">
-    <Logo size={28} />
-    <span class="name">{t('app.name')}</span>
+  <!-- Tek hesapta başlık kimliktir (ad + adres) ve hesap ayarlarına götürür; çok hesapta marka. -->
+  <div class="head">
+    {#if !multi && mail.accounts[0]}
+      {@const a = mail.accounts[0]}
+      <button class="who" title={t('side.accountSettings')} onclick={() => manage(a)}>
+        <span class="badge" style:--c={a.color} aria-hidden="true">{a.name.slice(0, 1).toLocaleUpperCase('tr')}</span>
+        <span class="who-text">
+          <span class="trunc who-name">{a.name}</span>
+          <span class="trunc who-mail">{a.email}</span>
+        </span>
+      </button>
+    {:else}
+      <span class="brand">
+        <Logo size={28} />
+        <span class="name">{t('app.name')}</span>
+      </span>
+    {/if}
     <button class="btn-icon" aria-label={t('mob.closeDrawer')} title={t('mob.closeDrawer')} onclick={onclose}>
       <Icon name="x" size={22} />
     </button>
@@ -204,7 +218,7 @@
 
   <nav class="scroll scroll-quiet" aria-label={t('nav.label')} use:quietScroll>
     {#if multi}
-      <div class="group">
+      <div class="m-section group">
         <span class="group-title">{t('nav.accounts')}</span>
         <button class="btn-icon small" aria-label={t('act.addAccount')} title={t('act.addAccount')} onclick={onaddaccount}>
           <Icon name="plus" size={18} />
@@ -229,29 +243,31 @@
       </div>
     {/if}
 
-    {#each VIEW_ITEMS as item (item.kind)}
-      {@const active = viewActive(item.kind, mail)}
-      {@const n = viewCount(item, mail.counts, scope)}
-      {#if viewVisible(item, mail)}
-        <button class="item" class:active aria-current={active ? 'page' : undefined} onclick={() => go(() => setView({ kind: item.kind }, scope))}>
-          <Icon name={item.icon} size={22} />
-          <span class="trunc grow">{t(item.label)}</span>
-          {#if n > 0}<span class="count num">{n}</span>{/if}
-        </button>
-      {/if}
-      {#if item.kind === 'drafts' && scheduledVisible(mail)}
-        <button class="item" onclick={onscheduled}>
-          <Icon name="calendarClock" size={22} />
-          <span class="trunc grow">{t('nav.scheduled')}</span>
-          {#if mail.counts.scheduled > 0}<span class="count num">{mail.counts.scheduled}</span>{/if}
-        </button>
-      {/if}
-    {/each}
+    <div class="views">
+      {#each VIEW_ITEMS as item (item.kind)}
+        {@const active = viewActive(item.kind, mail)}
+        {@const n = viewCount(item, mail.counts, scope)}
+        {#if viewVisible(item, mail)}
+          <button class="item view" class:active aria-current={active ? 'page' : undefined} onclick={() => go(() => setView({ kind: item.kind }, scope))}>
+            <Icon name={item.icon} size={22} />
+            <span class="trunc grow">{t(item.label)}</span>
+            {#if n > 0}<span class="count num">{n}</span>{/if}
+          </button>
+        {/if}
+        {#if item.kind === 'drafts' && scheduledVisible(mail)}
+          <button class="item view" onclick={onscheduled}>
+            <Icon name="calendarClock" size={22} />
+            <span class="trunc grow">{t('nav.scheduled')}</span>
+            {#if mail.counts.scheduled > 0}<span class="count num">{mail.counts.scheduled}</span>{/if}
+          </button>
+        {/if}
+      {/each}
+    </div>
 
     <!-- Klasörler: hesap başlığı altında istenmeyen + özel klasörler. -->
     {#each folderList as account (account.id)}
       {@const isOpen = !collapsible || expanded.has(account.id)}
-      <div class="group">
+      <div class="m-section group">
         {#if collapsible}
           <button
             class="group-toggle"
@@ -263,12 +279,14 @@
             <span class="trunc grow">{account.name}</span>
             <Icon name="chevronRight" size={16} class="chev {isOpen ? 'turned' : ''}" />
           </button>
-        {:else}
+        {:else if multi}
           <span class="group-title">
             <span class="dot" style:background={account.color}></span>
-            <span class="trunc" class:grow={multi}>{account.name}</span>
-            {#if !multi}<span class="trunc hint grow">{accountHint(account)}</span>{/if}
+            <span class="trunc grow">{account.name}</span>
           </span>
+        {:else}
+          <!-- Tek hesapta kimlik başlıkta; burada yalnız bölüm adı. -->
+          <span class="group-title">{t('mob.folders')}</span>
         {/if}
         <button class="btn-icon small" aria-label={t('side.manageNamed', { name: account.name })} title={t('side.manage')} onclick={() => manage(account)}>
           <Icon name="settings" size={18} />
@@ -303,7 +321,7 @@
     {/each}
 
     {#if tagStore.list.length}
-      <div class="group"><span class="group-title">{t('tag.title')}</span></div>
+      <div class="m-section group"><span class="group-title">{t('tag.title')}</span></div>
       {#each tagStore.list as tg (tg.id)}
         {@const on = tagActive(tg, mail)}
         <button class="item" class:active={on} aria-current={on ? 'page' : undefined} onclick={() => openTag(tg)}>
@@ -314,7 +332,7 @@
     {/if}
 
     {#if settings.value.savedSearches.length}
-      <div class="group"><span class="group-title">{t('saved.nav')}</span></div>
+      <div class="m-section group"><span class="group-title">{t('saved.nav')}</span></div>
       {#each settings.value.savedSearches as s (s.id)}
         {@const on = savedSearchActive(s.query, mail)}
         <button class="item" class:active={on} aria-current={on ? 'page' : undefined} title={t('saved.query', { q: s.query })} onclick={() => go(() => searchAll(s.query))}>
@@ -398,20 +416,82 @@
     transition: none;
   }
 
-  .brand {
+  /* ------------------------------------------------------------------ başlık */
+
+  .head {
     flex: none;
     display: flex;
     align-items: center;
+    gap: 6px;
+    min-height: 64px;
+    padding: 6px 6px 6px 8px;
+  }
+
+  .brand {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
     gap: 10px;
-    height: var(--m-appbar);
-    padding: 0 6px 0 16px;
+    padding-left: 8px;
   }
 
   .name {
-    flex: 1;
     font-weight: 600;
     letter-spacing: -0.01em;
   }
+
+  .who {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 52px;
+    padding: 4px 8px;
+    border: 0;
+    border-radius: var(--r-row);
+    background: transparent;
+    color: var(--ink);
+    text-align: left;
+    transition: background var(--t-fast);
+  }
+
+  .who:active {
+    background: var(--hover);
+  }
+
+  /* Hesap rozeti: hesap rengi kullanıcı verisidir; zemin aynı tonun %18'i. */
+  .badge {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--c) 18%, transparent);
+    color: var(--c);
+    font-weight: 600;
+  }
+
+  .who-text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    line-height: 1.3;
+  }
+
+  .who-name {
+    font-weight: 600;
+  }
+
+  .who-mail {
+    font-size: var(--fs-meta);
+    color: var(--ink-2);
+  }
+
+  /* --------------------------------------------------------------- kaydırma */
 
   .scroll {
     flex: 1;
@@ -419,7 +499,7 @@
     display: flex;
     flex-direction: column;
     gap: 2px;
-    padding: 4px 4px 12px 10px;
+    padding: 0 6px 12px 8px;
     overflow-y: auto;
     overscroll-behavior: contain;
     scrollbar-gutter: stable;
@@ -431,6 +511,7 @@
     flex-shrink: 0;
   }
 
+  .views,
   .scopes,
   .tree {
     display: flex;
@@ -447,9 +528,9 @@
   .item {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 14px;
     width: 100%;
-    height: var(--m-touch-lg);
+    height: var(--m-nav-row);
     padding: 0 10px 0 12px;
     border: 0;
     border-radius: var(--r-row);
@@ -465,10 +546,19 @@
     background: var(--hover);
   }
 
+  /* Görünümler birincil gezinmedir: 500; klasörler 400 ve simgeleri daha sessiz. */
+  .item.view {
+    font-weight: 500;
+  }
+
+  .folder-main :global(.icon) {
+    color: var(--ink-3);
+  }
+
   .item.active {
     background: var(--paper);
     color: var(--ink);
-    font-weight: 500;
+    font-weight: 600;
     box-shadow: var(--seg-on-shadow);
   }
 
@@ -488,12 +578,13 @@
     font-size: var(--fs-meta);
     font-weight: 500;
     text-align: right;
-    color: var(--ink-2);
+    color: var(--ink-3);
   }
 
   .item.active .count,
   .folder.active .count {
     color: var(--ink);
+    font-weight: 600;
   }
 
   .quiet {
@@ -544,15 +635,7 @@
   /* ----------------------------------------------------------- bölümler */
 
   .group {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    min-height: 40px;
-    margin-top: 8px;
-    padding: 0 0 0 2px;
-    font-size: var(--fs-meta);
-    font-weight: 600;
-    color: var(--ink-2);
+    padding-left: 4px;
   }
 
   .group-title {
@@ -561,7 +644,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    padding-left: 10px;
+    padding-left: 8px;
   }
 
   .group-title .dot,
@@ -570,11 +653,12 @@
   }
 
   .group + .group {
-    margin-top: 0;
+    padding-top: 0;
+    min-height: 32px;
   }
 
   .group .btn-icon {
-    color: var(--ink-2);
+    color: var(--ink-3);
   }
 
   .group-toggle {
@@ -584,11 +668,11 @@
     align-items: center;
     gap: 6px;
     height: 40px;
-    padding: 0 8px 0 10px;
+    padding: 0 8px;
     border: 0;
     border-radius: var(--r-icon);
     background: transparent;
-    color: inherit;
+    color: var(--ink-2);
     font: inherit;
     text-align: left;
   }
@@ -599,7 +683,7 @@
 
   :global(.drawer .chev) {
     flex: none;
-    color: var(--ink-2);
+    color: var(--ink-3);
     transition: transform var(--t-fast) var(--ease);
   }
 
@@ -628,7 +712,11 @@
 
   .folder.active .folder-main {
     color: var(--ink);
-    font-weight: 500;
+    font-weight: 600;
+  }
+
+  .folder.active .folder-main :global(.icon) {
+    color: var(--ink);
   }
 
   .folder-main {
@@ -647,12 +735,12 @@
     display: grid;
     place-items: center;
     width: var(--m-touch);
-    height: var(--m-touch-lg);
+    height: var(--m-nav-row);
     padding: 0;
     border: 0;
     border-radius: var(--r-sm);
     background: transparent;
-    color: var(--ink-2);
+    color: var(--ink-3);
   }
 
   /* ---------------------------------------------------------------- alt */
@@ -664,6 +752,10 @@
     gap: 2px;
     padding: 6px 6px 6px 16px;
     border-top: 1px solid var(--line);
+  }
+
+  .foot .btn-icon {
+    color: var(--ink-3);
   }
 
   .foot-text {

@@ -457,7 +457,7 @@
   }
 
   .article {
-    padding: 20px 16px 28px;
+    padding: 20px var(--m-gutter) 28px;
     transition: transform var(--t-state) var(--ease);
   }
 
@@ -511,6 +511,7 @@
 
   .thread-meta {
     margin-top: 6px;
+    font-weight: 500;
   }
 
   .thread {
@@ -577,6 +578,8 @@
     background: var(--paper);
     border-top: 1px solid var(--line);
   }
+
+  /* Alt sayfa (Sheet) listesi ve kişi kartı okuma ekranında menü olarak açılır. */
 
   .bar {
     position: relative;
