@@ -495,8 +495,10 @@ mod tests {
         let subject = format!("{}Toplantı", "re:".repeat(100_000));
         let t = std::time::Instant::now();
         assert_eq!(normalize_subject(&subject), "toplanti");
+        // Karesel işlem saniyeler sürer; sınır yüklü makinede hata ayıklama
+        // derlemesine de pay bırakır.
         assert!(
-            t.elapsed() < std::time::Duration::from_millis(50),
+            t.elapsed() < std::time::Duration::from_millis(500),
             "{:?}",
             t.elapsed()
         );
