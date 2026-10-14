@@ -779,7 +779,21 @@ export const en: Record<MessageKey, string> = {
   'mob.longPress': 'Press and hold to select',
   'mob.composeSoonTitle': 'Writing on the phone is not ready yet',
   'mob.composeSoonBody': 'In this version new mail is written on the computer only. Reading, archiving and snoozing work here.',
-  'mob.settingsSoonTitle': 'Settings have not reached the phone yet',
-  'mob.settingsSoonBody': 'Edit account and notification settings on the computer for now; the theme changes here.',
   'mob.loading': 'Loading mail…',
+
+  // mobile: settings, account setup, scheduled
+  'mob.settings.sections': 'Settings sections',
+  'mob.settings.about': 'About',
+  'mob.settings.aboutLead': 'The phone build does not update itself; new versions are installed from the releases page on GitHub.',
+  'mob.settings.release': 'New releases on GitHub',
+  'mob.settings.notifyHint': 'Mail that shows no notification only raises the counter.',
+  'mob.settings.perAccountHint': 'Mail for a switched-off account still arrives, but shows no notification.',
+  'mob.settings.quietHint': 'No notifications in this window; the counter still grows.',
+  'mob.settings.db': 'Mail lives in an encrypted database on this phone (AES-256). The key stays in the Android keystore only.',
+  'mob.settings.keystore': 'Passwords and sign-in tokens are kept encrypted in the Android keystore only; there is no server of ours.',
+  'mob.settings.accNameHint': 'Shown in the drawer and the account list.',
+  'mob.settings.accNotifyHint': 'When off, new mail for this account shows no notification.',
+  'mob.settings.tagLead': 'Group your mail with your own coloured tags. Tags stay on this phone only; nothing is written to the server.',
+  'mob.settings.pinLocal': 'Pinning stays on this phone only; nothing is written to the server.',
+  'mob.onboarding.keyring': 'Stored encrypted in the Android keystore; it never leaves this phone.',
 };

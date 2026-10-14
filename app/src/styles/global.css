@@ -469,6 +469,41 @@ textarea.input {
   resize: vertical;
 }
 
+/*
+ * Dar kapsayıcıda (mobil ayarlar ekranı `container: settings`) ayar satırları
+ * tek sütuna iner; yalnız anahtar (switch) adının sağında kalır. Masaüstü
+ * ayarlar sayfası kapsayıcı bildirmez, bu kurallar orada hiç uygulanmaz.
+ */
+@container settings (max-width: 600px) {
+  .set-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .set-row:has(> .switch) {
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: 16px;
+  }
+
+  .set-row > .seg-track {
+    justify-self: stretch;
+  }
+
+  /* Dar segment metni kesilmez, iki satıra sarar. */
+  .seg {
+    min-width: 0;
+    height: auto;
+    min-height: 44px;
+    padding: 4px 6px;
+    line-height: 1.25;
+    white-space: normal;
+  }
+
+  .set-h {
+    margin-top: 28px;
+  }
+}
+
 select.input {
   padding-right: 10px;
 }

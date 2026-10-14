@@ -1,9 +1,12 @@
 <script lang="ts">
   import { t } from '../../../lib/i18n/index.svelte';
   import Icon from '../../../lib/ui/Icon.svelte';
+  import { isMobileShell } from '../../../lib/shell';
   import { settings, updateSettings } from '../../../lib/stores/settings.svelte';
 
   const s = $derived(settings.value);
+  // Android'de anahtar zinciri yerine Keystore vardır; açıklama ona göre.
+  const mobile = isMobileShell;
 
   /** Parmak izinin ilk sekiz baytı; tamamı ipucunda. */
   function shortFp(sha: string): string {
@@ -14,8 +17,8 @@
 <h2 class="page">{t('set.nav.privacy')}</h2>
 
 <ul class="facts">
-  <li><Icon name="lock" size={18} /><span>{t('priv.db')}</span></li>
-  <li><Icon name="key" size={18} /><span>{t('priv.keyring')}</span></li>
+  <li><Icon name="lock" size={18} /><span>{t(mobile ? 'mob.settings.db' : 'priv.db')}</span></li>
+  <li><Icon name="key" size={18} /><span>{t(mobile ? 'mob.settings.keystore' : 'priv.keyring')}</span></li>
   <li><Icon name="eyeOff" size={18} /><span>{t('priv.remote')}</span></li>
 </ul>
 
@@ -102,5 +105,12 @@
     font-family: var(--font-mono);
     font-size: var(--fs-meta);
     color: var(--ink-3);
+  }
+
+  @container settings (max-width: 600px) {
+    .list-row {
+      flex-wrap: wrap;
+      padding: 6px 4px;
+    }
   }
 </style>

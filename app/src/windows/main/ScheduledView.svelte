@@ -1,5 +1,7 @@
 <script lang="ts">
-  // Planlanmış gönderimler: giden kutusunda bekleyen postalar.
+  // Planlanmış gönderimler: giden kutusunda bekleyen postalar. Masaüstünde
+  // ana pencerenin sağ bölgesi; mobilde (`embedded`) uygulama çubuğu başlığı
+  // taşıdığı için başlık ve kenar çizgisi yoktur, satırlar tek sütundur.
   import { onMount } from 'svelte';
   import { call, EVENTS, on, toAppError, type ScheduledItem } from '../../lib/api';
   import { t, when } from '../../lib/i18n/index.svelte';
@@ -7,6 +9,13 @@
   import { showToast } from '../../lib/ui/toast.svelte';
   import { displayName } from '../../lib/util/format';
   import { mail, refreshCounts } from '../../lib/stores/mail.svelte';
+
+  interface Props {
+    /** Mobil kabukta itilen ekranın içinde: başlık dışarıda, tek sütun. */
+    embedded?: boolean;
+  }
+
+  let { embedded = false }: Props = $props();
 
   let items = $state<ScheduledItem[]>([]);
   let loaded = $state(false);
@@ -64,10 +73,10 @@
   }
 </script>
 
-<section class="sched" aria-labelledby="sched-title">
+<section class="sched" class:embedded aria-labelledby={embedded ? undefined : 'sched-title'} aria-label={embedded ? t('nav.scheduled') : undefined}>
   <div class="inner">
     <header class="head">
-      <h1 id="sched-title">{t('nav.scheduled')}</h1>
+      {#if !embedded}<h1 id="sched-title">{t('nav.scheduled')}</h1>{/if}
       <span class="meta">{t('sched.lead')}</span>
     </header>
 
@@ -212,5 +221,29 @@
       grid-template-columns: minmax(0, 1fr);
       gap: 8px;
     }
+  }
+
+  .embedded {
+    border-left: 0;
+  }
+
+  .embedded .inner {
+    padding: 12px 16px calc(24px + env(safe-area-inset-bottom, 0px));
+    animation: none;
+  }
+
+  .embedded .head {
+    margin-bottom: 12px;
+  }
+
+  .embedded .item {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    padding: 12px 0;
+  }
+
+  .embedded .tools {
+    flex-wrap: wrap;
+    justify-content: flex-end;
   }
 </style>

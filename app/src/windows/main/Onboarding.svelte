@@ -13,6 +13,7 @@
   import CertDialog, { type CertTarget } from '../../lib/mail/CertDialog.svelte';
   import Icon from '../../lib/ui/Icon.svelte';
   import Logo from '../../lib/ui/Logo.svelte';
+  import { isMobileShell } from '../../lib/shell';
   import { mail, reloadAccounts } from '../../lib/stores/mail.svelte';
 
   type Step = 'email' | 'found' | 'jmap' | 'oauth' | 'ready';
@@ -319,6 +320,8 @@
 
   const securities: Security[] = ['tls', 'starttls'];
   const sourceKey = $derived(config ? (`onb.foundFrom.${config.source}` as MessageKey) : null);
+  // Parolanın nerede durduğu kabuğa göre: masaüstünde anahtar zinciri, Android'de Keystore.
+  const keyringKey: MessageKey = isMobileShell ? 'mob.onboarding.keyring' : 'onb.keyring';
 </script>
 
 <div class="onb" class:full={!hasAccounts}>
@@ -357,6 +360,7 @@
         {#if notice}<p class="note top" role="status">{notice}</p>{/if}
         <button class="btn-primary wide" disabled={!valid || finding} onclick={find}>{finding ? t('onb.finding') : t('onb.continue')}</button>
         <div class="or"><span></span>{t('onb.or')}<span></span></div>
+        <!-- 4c: mobilde ilk seçenek "Bilgisayardan QR ile aktar" (isMobileShell) buraya, Google'ın üstüne gelir. -->
         <div class="alts">
           <button class="alt" onclick={() => chooseProvider('google')}><Icon name="globe" />{t('onb.google')}</button>
           <button class="alt" onclick={() => chooseProvider('microsoft')}><Icon name="grid" />{t('onb.microsoft')}</button>
@@ -420,7 +424,7 @@
           />
           <button class="link small show" onclick={() => (showPass = !showPass)}>{showPass ? t('onb.hide') : t('onb.show')}</button>
         </div>
-        <span class="meta keyring">{t('onb.keyring')}</span>
+        <span class="meta keyring">{t(keyringKey)}</span>
         {#if error}<p class="error" role="alert">{error}</p>{/if}
         <button class="btn-primary wide" disabled={!password || adding} onclick={add}>{adding ? t('onb.adding') : t('onb.add')}</button>
       </div>
@@ -471,7 +475,7 @@
           />
           <button class="link small show" onclick={() => (showPass = !showPass)}>{showPass ? t('onb.hide') : t('onb.show')}</button>
         </div>
-        <span class="meta keyring">{t('onb.keyring')}</span>
+        <span class="meta keyring">{t(keyringKey)}</span>
         {#if error}<p class="error" role="alert">{error}</p>{/if}
         <button class="btn-primary wide" disabled={!password || !valid || !sessionUrl.trim() || adding} onclick={addJmap}>{adding ? t('onb.adding') : t('onb.add')}</button>
       </div>
@@ -907,6 +911,58 @@
 
     .form {
       padding: 32px 24px;
+    }
+  }
+
+  /* Mobil kabuk (`container: onboarding`): tam ekran, tek sütun, 44 px hedefler.
+     Adım üstten başlar; klavye açılınca odaklı alan kayarak görünür kalır. */
+  @container onboarding (max-width: 600px) {
+    .form {
+      padding: 20px 16px 32px;
+    }
+
+    .step {
+      margin: 0 0 auto;
+    }
+
+    .alts,
+    .names {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .alt {
+      height: 48px;
+    }
+
+    .back,
+    .link.small,
+    .again {
+      min-height: 44px;
+      display: inline-flex;
+      align-items: center;
+      margin-top: 0;
+    }
+
+    .back {
+      margin-bottom: 8px;
+    }
+
+    .show {
+      top: 0;
+      height: 44px;
+    }
+
+    .with-btn {
+      flex-wrap: wrap;
+    }
+
+    .with-btn .btn-soft {
+      flex: 1;
+    }
+
+    .close {
+      top: 8px;
+      right: 8px;
     }
   }
 </style>

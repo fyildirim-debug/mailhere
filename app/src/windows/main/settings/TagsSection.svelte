@@ -4,6 +4,7 @@
   import { t } from '../../../lib/i18n/index.svelte';
   import Icon from '../../../lib/ui/Icon.svelte';
   import { showToast } from '../../../lib/ui/toast.svelte';
+  import { isMobileShell } from '../../../lib/shell';
   import { refreshList, setView } from '../../../lib/stores/mail.svelte';
   import { deleteTag, saveTag, tagStore } from '../../../lib/stores/tags.svelte';
 
@@ -13,6 +14,8 @@
   let confirmId = $state<string | null>(null);
 
   const full = $derived(tagStore.list.length >= TAGS_MAX);
+  // Etiket ve sabitleme yereldir; metin cihaza göre "bilgisayar" ya da "telefon" der.
+  const mobile = isMobileShell;
 
   function startNew() {
     error = null;
@@ -56,7 +59,7 @@
 </script>
 
 <h2 class="page">{t('tag.title')}</h2>
-<p class="set-lead">{t('tag.lead')}</p>
+<p class="set-lead">{t(mobile ? 'mob.settings.tagLead' : 'tag.lead')}</p>
 
 <div class="tags">
   {#each tagStore.list as tag (tag.id)}
@@ -89,7 +92,7 @@
 </div>
 
 <h3 class="set-h">{t('pin.pin')}</h3>
-<p class="set-lead">{t('pin.local')}</p>
+<p class="set-lead">{t(mobile ? 'mob.settings.pinLocal' : 'pin.local')}</p>
 
 {#snippet form()}
   {#if editing}
@@ -212,5 +215,27 @@
     box-shadow:
       0 0 0 2px var(--paper),
       0 0 0 4px var(--accent);
+  }
+
+  @container settings (max-width: 600px) {
+    .row {
+      flex-wrap: wrap;
+      row-gap: 4px;
+      padding: 8px 0;
+    }
+
+    .name {
+      flex: 1 1 calc(100% - 40px);
+    }
+
+    .edit {
+      grid-template-columns: minmax(0, 1fr);
+      padding: 14px;
+    }
+
+    .swatch {
+      width: 34px;
+      height: 34px;
+    }
   }
 </style>

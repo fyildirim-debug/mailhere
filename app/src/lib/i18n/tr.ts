@@ -794,9 +794,23 @@ export const tr = {
   'mob.longPress': 'Basılı tutarak seç',
   'mob.composeSoonTitle': 'Telefondan yazma henüz hazır değil',
   'mob.composeSoonBody': 'Bu sürümde yeni posta yalnız bilgisayardan yazılır. Okuma, arşivleme ve erteleme burada çalışır.',
-  'mob.settingsSoonTitle': 'Ayarlar telefona henüz gelmedi',
-  'mob.settingsSoonBody': 'Hesap ve bildirim ayarlarını şimdilik bilgisayardan düzenle; tema buradan değişir.',
   'mob.loading': 'Postalar yükleniyor…',
+
+  // mobil: ayarlar, hesap ekleme, planlananlar
+  'mob.settings.sections': 'Ayar bölümleri',
+  'mob.settings.about': 'Hakkında',
+  'mob.settings.aboutLead': 'Telefon sürümü kendini güncellemez; yeni sürüm GitHub’daki sürümler sayfasından kurulur.',
+  'mob.settings.release': 'Yeni sürüm GitHub’da',
+  'mob.settings.notifyHint': 'Bildirim göstermeyen postalar yalnız sayacı artırır.',
+  'mob.settings.perAccountHint': 'Kapalı hesabın postaları gelir ama bildirim çıkmaz.',
+  'mob.settings.quietHint': 'Bu aralıkta bildirim çıkmaz, sayaç artar.',
+  'mob.settings.db': 'Postalar bu telefonda şifreli bir veritabanında durur (AES-256). Anahtar yalnız Android anahtar deposunda.',
+  'mob.settings.keystore': 'Parolalar ve giriş jetonları yalnız Android anahtar deposunda (Keystore) şifreli tutulur; hiçbir sunucumuz yok.',
+  'mob.settings.accNameHint': 'Çekmecede ve hesap listesinde görünür.',
+  'mob.settings.accNotifyHint': 'Kapalıysa bu hesabın yeni postaları için bildirim çıkmaz.',
+  'mob.settings.tagLead': 'Postalarını kendi renkli etiketlerinle gruplarsın. Etiketler yalnız bu telefonda tutulur; sunucuya yazılmaz.',
+  'mob.settings.pinLocal': 'Sabitleme yalnız bu telefonda tutulur; sunucuya yazılmaz.',
+  'mob.onboarding.keyring': 'Android anahtar deposunda şifreli saklanır; bu telefondan çıkmaz.',
 } as const;
 
 export type MessageKey = keyof typeof tr;

@@ -160,4 +160,14 @@
   .hidden .grow {
     color: var(--ink-3);
   }
+
+  @container settings (max-width: 600px) {
+    .pick {
+      max-width: none;
+    }
+
+    .folder {
+      padding-left: calc(var(--depth) * 16px);
+    }
+  }
 </style>

@@ -128,6 +128,20 @@
     width: 168px;
   }
 
+  @container settings (max-width: 600px) {
+    .dates {
+      flex-wrap: wrap;
+    }
+
+    .dates label {
+      flex: 1 1 140px;
+    }
+
+    .dates .input {
+      width: 100%;
+    }
+  }
+
   .bar {
     margin-top: 16px;
   }

@@ -2,6 +2,7 @@
   import { call, toAppError, type Account } from '../../../lib/api';
   import { t, type MessageKey } from '../../../lib/i18n/index.svelte';
   import { showToast } from '../../../lib/ui/toast.svelte';
+  import { isMobileShell } from '../../../lib/shell';
   import { reloadAccounts } from '../../../lib/stores/mail.svelte';
   import { accountUpdate, PALETTE } from './account';
 
@@ -10,6 +11,8 @@
   }
 
   let { account }: Props = $props();
+  // İpuçları kabuğa göre: mobilde çekmece ve sistem bildirimi var, kart yok.
+  const mobile = isMobileShell;
 
   // Sayfa açıkken hesap güncellenirse (başka bölümden) form yeniden doldurulur.
   let form = $state({ name: '', displayName: '', color: '', notify: true });
@@ -57,7 +60,7 @@
 
 <h3 class="set-h">{t('acc.identity')}</h3>
 <div class="set-row">
-  <label class="set-name" for="acc-name">{t('onb.name')}<span class="set-hint">{t('acc.nameHint')}</span></label>
+  <label class="set-name" for="acc-name">{t('onb.name')}<span class="set-hint">{t(mobile ? 'mob.settings.accNameHint' : 'acc.nameHint')}</span></label>
   <input id="acc-name" class="input small" maxlength="60" bind:value={form.name} />
 </div>
 <div class="set-row">
@@ -80,7 +83,7 @@
   </div>
 </div>
 <div class="set-row top">
-  <span class="set-name">{t('acc.notify')}<span class="set-hint">{t('acc.notifyHint')}</span></span>
+  <span class="set-name">{t('acc.notify')}<span class="set-hint">{t(mobile ? 'mob.settings.accNotifyHint' : 'acc.notifyHint')}</span></span>
   <input type="checkbox" role="switch" class="switch" aria-label={t('acc.notify')} bind:checked={form.notify} />
 </div>
 <div class="set-row">
@@ -166,5 +169,16 @@
 
   .confirm .set-actions {
     justify-content: flex-start;
+  }
+
+  @container settings (max-width: 600px) {
+    .swatches {
+      flex-wrap: wrap;
+    }
+
+    .swatch {
+      width: 34px;
+      height: 34px;
+    }
   }
 </style>

@@ -3,8 +3,9 @@
   // üstüne itilen ekranlar. Açılış akışı masaüstüyle aynı (initMail); hesap
   // yoksa mevcut hesap ekleme bileşeni gelir.
   //
-  // Bu pakette okuma ekranı mevcut Reader'ı tam ekran gösterir; yazma ve
-  // ayarlar ekranları sonraki paketlerde (MobileCompose, MobileSettings) gelir.
+  // Bu pakette okuma ekranı mevcut Reader'ı tam ekran gösterir; yazma ekranı
+  // sonraki pakette (MobileCompose) gelir. Ayarlar (MobileSettings) ve
+  // planlananlar (ScheduledView `embedded`) yığına itilen ekranlardır.
   import '../../styles/mobile.css';
   import { onMount } from 'svelte';
   import { call, EVENTS, on, type ListOnly, type MessageSummary } from '../../lib/api';
@@ -15,16 +16,17 @@
   import ToastHost from '../../lib/ui/ToastHost.svelte';
   import { initMail, mail, markAllRead, rowsOf, select, setOnly, setView, type Row } from '../../lib/stores/mail.svelte';
   import { checkAll, clearChecked } from '../../lib/stores/selection.svelte';
-  import { resolvedTheme, toggleTheme } from '../../lib/stores/settings.svelte';
   import { tagById } from '../../lib/stores/tags.svelte';
   import Onboarding from '../main/Onboarding.svelte';
   import Reader from '../main/Reader.svelte';
+  import ScheduledView from '../main/ScheduledView.svelte';
   import AppBar from './AppBar.svelte';
   import Drawer from './Drawer.svelte';
   import MobileBulkBar from './MobileBulkBar.svelte';
   import MobileList from './MobileList.svelte';
   import MobileSearch from './MobileSearch.svelte';
-  import { nav } from './nav.svelte';
+  import MobileSettings from './MobileSettings.svelte';
+  import { nav, type MobileScreen } from './nav.svelte';
 
   // Hesap ekleme sürerken (ilk hesap dahil) uygulamanın geri kalanı açılmaz.
   const setup = $derived(!mail.accounts.length || mail.screen === 'onboarding');
@@ -60,13 +62,17 @@
   });
 
   // Masaüstü ekran isteklerini yığına çevir: okuma menüsünden "Etiketleri düzenle"
-  // gibi çağrılar `mail.screen = 'settings'` yapar; mobilde ayar ekranı itilir.
+  // ya da ayar bölümlerinden `openSettings('account:…')` gibi çağrılar
+  // `mail.screen = 'settings'` yapar; mobilde istenen bölüm ekran olarak itilir.
+  // Aynı bölüm zaten üstteyse yeniden itilmez.
   $effect(() => {
-    if (mail.screen === 'settings' || mail.screen === 'scheduled') {
-      const section = mail.screen === 'settings' ? mail.settingsSection : null;
-      mail.screen = 'mail';
-      if (nav.current.name !== 'settings') nav.push({ name: 'settings', section });
-    }
+    if (mail.screen !== 'settings' && mail.screen !== 'scheduled') return;
+    const target: MobileScreen = mail.screen === 'settings' ? { name: 'settings', section: mail.settingsSection } : { name: 'scheduled' };
+    mail.screen = 'mail';
+    const cur = nav.current;
+    if (cur.name === 'scheduled' && target.name === 'scheduled') return;
+    if (cur.name === 'settings' && target.name === 'settings' && cur.section === target.section) return;
+    nav.push(target);
   });
 
   // Hesap kalmayınca (ya da ekleme akışı açılınca) yığın köke döner.
@@ -214,18 +220,21 @@
         </div>
       </div>
     {:else if screen.name === 'settings'}
-      <!-- Yer tutucu: 3d paketinde MobileSettings gelir. -->
-      <div class="m-screen pushed">
-        <AppBar leading="back" title={t('act.settings')} onleading={() => nav.back()} />
-        <div class="m-empty">
-          <span class="m-empty-icon"><Icon name="settings" size={28} /></span>
-          <div class="m-empty-title">{t('mob.settingsSoonTitle')}</div>
-          <div class="m-empty-body">{t('mob.settingsSoonBody')}</div>
-          <button class="btn-soft" onclick={() => toggleTheme()}>
-            <Icon name={resolvedTheme() === 'dark' ? 'sun' : 'moon'} size={18} />
-            {t('win.theme')}
-          </button>
+      <!-- Her bölüm ayrı itilen ekran: `screen` nesnesi değişince yeniden kurulur ve giriş hareketi oynar. -->
+      {#key screen}
+        <div class="m-screen pushed">
+          <MobileSettings
+            section={screen.section}
+            onback={() => nav.back()}
+            onopen={(section) => nav.push({ name: 'settings', section })}
+            onaddaccount={() => (mail.screen = 'onboarding')}
+          />
         </div>
+      {/key}
+    {:else if screen.name === 'scheduled'}
+      <div class="m-screen pushed">
+        <AppBar leading="back" title={t('nav.scheduled')} onleading={() => nav.back()} />
+        <div class="m-sched"><ScheduledView embedded /></div>
       </div>
     {/if}
 
@@ -234,6 +243,7 @@
       onclose={() => nav.close()}
       onnavigate={() => nav.close()}
       onsettings={() => nav.push({ name: 'settings', section: null })}
+      onscheduled={() => nav.push({ name: 'scheduled' })}
       onaddaccount={() => {
         nav.close();
         mail.screen = 'onboarding';
@@ -246,8 +256,13 @@
 </div>
 
 <style>
+  /* Hesap ekleme tam ekran: güvenli alan kenarlıkları, Onboarding'in mobil
+     kapsayıcı sorgularının kökü (`container: onboarding`). */
   .setup {
     overflow-y: auto;
+    padding: var(--sat) var(--sar) var(--sab) var(--sal);
+    background: var(--paper);
+    container: onboarding / inline-size;
   }
 
   .edge {
@@ -285,6 +300,14 @@
 
   .m-read :global(.reader .reply-wrap) {
     padding: 8px 12px calc(12px + var(--sab));
+  }
+
+  .m-sched {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--paper);
   }
 
   /* Toast yüzen düğmenin ve alt çubuğun üstünde durur. */

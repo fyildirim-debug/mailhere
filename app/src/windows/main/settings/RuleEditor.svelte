@@ -283,4 +283,66 @@
   .stop input {
     accent-color: var(--accent);
   }
+
+  /* Mobil: her koşul ve eylem iki satır olur — üstte tür ve kaldır düğmesi,
+     altta işleç ve değer. */
+  @container settings (max-width: 600px) {
+    .editor {
+      padding: 14px;
+    }
+
+    .top {
+      flex-direction: column;
+    }
+
+    .top select {
+      width: 100%;
+    }
+
+    .block-head {
+      flex-wrap: wrap;
+    }
+
+    .block-head .seg-track {
+      flex: 1 1 100%;
+    }
+
+    .line {
+      flex-wrap: wrap;
+    }
+
+    .kind {
+      order: 0;
+      flex: 1 1 60%;
+      width: auto;
+    }
+
+    .line .btn-icon {
+      order: 1;
+    }
+
+    .op {
+      order: 2;
+      flex: 0 0 40%;
+      width: auto;
+    }
+
+    .line .grow {
+      order: 3;
+      flex: 1 1 120px;
+    }
+
+    .line span.grow {
+      display: none;
+    }
+
+    .stop {
+      min-height: 44px;
+    }
+
+    .stop input {
+      width: 20px;
+      height: 20px;
+    }
+  }
 </style>

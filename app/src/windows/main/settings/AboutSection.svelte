@@ -1,11 +1,17 @@
 <script lang="ts">
+  import { openExternal } from '../../../lib/api';
   import { t, type MessageKey } from '../../../lib/i18n/index.svelte';
   import Icon from '../../../lib/ui/Icon.svelte';
+  import { isMobileShell } from '../../../lib/shell';
   import { settings, updateSettings } from '../../../lib/stores/settings.svelte';
   import { checkUpdate, installUpdate, update } from '../../../lib/stores/update.svelte';
 
   const s = $derived(settings.value);
   const version = __APP_VERSION__;
+  // Mobilde imzalı güncelleyici ve klavye kısayolu yoktur: "Hakkında" sürümü ve
+  // yeni sürümlerin indirildiği sayfayı gösterir.
+  const mobile = isMobileShell;
+  const RELEASES_URL = 'https://github.com/fyildirim-debug/mailheremobile/releases';
 
   const keys: [string, MessageKey][] = [
     ['C', 'keys.compose'],
@@ -25,6 +31,13 @@
   ];
 </script>
 
+{#if mobile}
+  <h2 class="page">{t('mob.settings.about')}</h2>
+  <h3 class="set-h">{t('set.version', { version })}</h3>
+  <p class="set-lead">{t('set.license')}</p>
+  <p class="set-lead">{t('mob.settings.aboutLead')}</p>
+  <button class="btn-soft release" onclick={() => openExternal(RELEASES_URL)}><Icon name="external" size={16} />{t('mob.settings.release')}</button>
+{:else}
 <h2 class="page">{t('set.nav.about')}</h2>
 
 <h3 class="set-h">{t('set.updates')}</h3>
@@ -67,6 +80,7 @@
     <dd>{t(label)}</dd>
   {/each}
 </dl>
+{/if}
 
 <style>
   .page {
@@ -87,6 +101,10 @@
     flex-direction: column;
     gap: 2px;
     flex-basis: 100%;
+  }
+
+  .release {
+    margin-top: 12px;
   }
 
   .ok {

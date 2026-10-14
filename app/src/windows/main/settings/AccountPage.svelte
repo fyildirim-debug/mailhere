@@ -168,4 +168,22 @@
     padding-top: 8px;
     animation: fade-up var(--t-state) ease-out;
   }
+
+  /* Mobil: uygulama çubuğu geri düğmesini ve hesap adını taşır; sekme şeridi
+     kenara kadar yatay kaydırılır, sekmeler 44 px. */
+  @container settings (max-width: 600px) {
+    .back,
+    .head {
+      display: none;
+    }
+
+    .tabs {
+      margin: 0 -16px;
+      padding: 0 8px;
+    }
+
+    .tab {
+      height: var(--m-touch, 44px);
+    }
+  }
 </style>

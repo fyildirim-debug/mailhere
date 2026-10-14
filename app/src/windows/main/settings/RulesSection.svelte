@@ -293,4 +293,20 @@
   .add {
     margin-top: 16px;
   }
+
+  @container settings (max-width: 600px) {
+    .rule {
+      flex-wrap: wrap;
+      row-gap: 8px;
+    }
+
+    .title {
+      flex-wrap: wrap;
+    }
+
+    .tools {
+      flex-basis: 100%;
+      justify-content: flex-end;
+    }
+  }
 </style>

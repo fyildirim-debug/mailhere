@@ -232,4 +232,23 @@
   .bar {
     margin-top: 16px;
   }
+
+  @container settings (max-width: 600px) {
+    .srv {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      padding: 10px 12px 14px;
+    }
+
+    .host {
+      grid-column: 1 / -1;
+    }
+
+    .pass {
+      max-width: none;
+    }
+
+    .show {
+      top: 4px;
+    }
+  }
 </style>

@@ -156,4 +156,11 @@
   .bar {
     margin-top: 16px;
   }
+
+  @container settings (max-width: 600px) {
+    .name,
+    .pick {
+      max-width: none;
+    }
+  }
 </style>

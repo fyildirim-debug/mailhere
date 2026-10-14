@@ -78,6 +78,33 @@ body {
   min-height: var(--m-touch);
 }
 
+/* Form denetimleri (ayarlar, hesap ekleme): girdi ve segment 44, ikincil düğme 40. */
+.m-shell .input.small {
+  height: var(--m-touch);
+  padding: 0 12px;
+}
+
+.m-shell .seg {
+  height: var(--m-touch);
+}
+
+.m-shell .btn-ghost {
+  height: 40px;
+  padding: 0 10px;
+  font-size: var(--fs-body);
+}
+
+.m-shell .link {
+  padding: 8px 0;
+}
+
+/* Anahtar 40×24 kalır; dokunma alanı görünmez kenarla 56×44'e çıkar. */
+.m-shell .switch::before {
+  content: '';
+  position: absolute;
+  inset: -10px -8px;
+}
+
 /* Boş durum ve yer tutucu: ne oldu + ne yapılabilir. */
 .m-empty {
   flex: 1;

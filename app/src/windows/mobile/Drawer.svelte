@@ -19,6 +19,7 @@
     OPEN_ACCOUNTS_KEY,
     savedSearchActive,
     saveSet,
+    scheduledVisible,
     tagActive,
     toggled,
     VIEW_ITEMS,
@@ -38,10 +39,12 @@
     /** Çekmeceden bir görünüm seçilince (çekmece kapanır). */
     onnavigate: () => void;
     onsettings: () => void;
+    /** Planlananlar (yalnız bekleyen gönderim varsa listelenir). */
+    onscheduled: () => void;
     onaddaccount: () => void;
   }
 
-  let { open, onclose, onnavigate, onsettings, onaddaccount }: Props = $props();
+  let { open, onclose, onnavigate, onsettings, onscheduled, onaddaccount }: Props = $props();
 
   // Açık hesaplar ve kapalı klasörler: masaüstü kenar çubuğuyla aynı anahtar.
   let expanded = $state<Set<string>>(initialOpenAccounts(mail.accounts));
@@ -188,6 +191,13 @@
           <Icon name={item.icon} size={22} />
           <span class="trunc grow">{t(item.label)}</span>
           {#if n > 0}<span class="count num">{n}</span>{/if}
+        </button>
+      {/if}
+      {#if item.kind === 'drafts' && scheduledVisible(mail)}
+        <button class="item" onclick={onscheduled}>
+          <Icon name="calendarClock" size={22} />
+          <span class="trunc grow">{t('nav.scheduled')}</span>
+          {#if mail.counts.scheduled > 0}<span class="count num">{mail.counts.scheduled}</span>{/if}
         </button>
       {/if}
     {/each}

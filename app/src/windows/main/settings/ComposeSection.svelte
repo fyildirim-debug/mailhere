@@ -220,4 +220,34 @@
   code.alt {
     color: var(--ink-3);
   }
+
+  @container settings (max-width: 600px) {
+    .box {
+      max-width: none;
+    }
+
+    .tpl {
+      flex-wrap: wrap;
+      padding: 8px 0;
+    }
+
+    .tpl-text {
+      flex-basis: calc(100% - 42px);
+    }
+
+    .edit {
+      grid-template-columns: minmax(0, 1fr);
+      padding: 14px;
+    }
+
+    .vars {
+      grid-template-columns: minmax(0, 1fr);
+      row-gap: 4px;
+      max-width: none;
+    }
+
+    .vars dd {
+      margin-bottom: 8px;
+    }
+  }
 </style>

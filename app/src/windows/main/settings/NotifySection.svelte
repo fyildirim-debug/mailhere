@@ -3,11 +3,15 @@
   import { t, type MessageKey } from '../../../lib/i18n/index.svelte';
   import Icon from '../../../lib/ui/Icon.svelte';
   import { showToast } from '../../../lib/ui/toast.svelte';
+  import { isMobileShell } from '../../../lib/shell';
   import { mail, reloadAccounts } from '../../../lib/stores/mail.svelte';
   import { settings, updateSettings } from '../../../lib/stores/settings.svelte';
   import { accountUpdate } from './account';
 
   const s = $derived(settings.value);
+  // Mobilde kart yok, işletim sistemi bildirimi var: kart konumu/süresi, yerel
+  // bildirim anahtarı ve örnek kart gizlenir; ipuçları "bildirim" der.
+  const mobile = isMobileShell;
 
   const modes: [NotifyMode, MessageKey][] = [
     ['people', 'set.notify.people'],
@@ -50,7 +54,7 @@
 
 <h3 class="set-h">{t('set.notifyWhat')}</h3>
 <div class="set-row top">
-  <span class="set-name">{t('set.notify')}<span class="set-hint">{t('set.notifyHint')}</span></span>
+  <span class="set-name">{t('set.notify')}<span class="set-hint">{t(mobile ? 'mob.settings.notifyHint' : 'set.notifyHint')}</span></span>
   <div class="seg-track" role="radiogroup" aria-label={t('set.notify')}>
     {#each modes as [v, k] (v)}
       <button class="seg" role="radio" aria-checked={s.notify === v} onclick={() => updateSettings({ notify: v })}>{t(k)}</button>
@@ -64,7 +68,7 @@
   </div>
 {/if}
 <div class="set-row top">
-  <span class="set-name">{t('set.perAccount')}<span class="set-hint">{t('set.perAccountHint')}</span></span>
+  <span class="set-name">{t('set.perAccount')}<span class="set-hint">{t(mobile ? 'mob.settings.perAccountHint' : 'set.perAccountHint')}</span></span>
   <div class="accs">
     {#each mail.accounts as a (a.id)}
       <label class="acc">
@@ -96,6 +100,7 @@
   />
 </div>
 
+{#if !mobile}
 <h3 class="set-h">{t('set.cardTitle')}</h3>
 <div class="set-row">
   <span class="set-name">{t('set.cardPosition')}</span>
@@ -128,10 +133,11 @@
   <span class="set-name"></span>
   <button class="btn-soft test" onclick={() => call('demo_notify')}><Icon name="bell" size={16} />{t('set.testCard')}</button>
 </div>
+{/if}
 
 <h3 class="set-h">{t('set.quiet')}</h3>
 <div class="set-row top">
-  <span class="set-name">{t('set.quietOn')}<span class="set-hint">{t('set.quietHint')}</span></span>
+  <span class="set-name">{t('set.quietOn')}<span class="set-hint">{t(mobile ? 'mob.settings.quietHint' : 'set.quietHint')}</span></span>
   <div class="quiet">
     <input
       type="checkbox"
@@ -209,5 +215,25 @@
 
   .time .input {
     width: 128px;
+  }
+
+  @container settings (max-width: 600px) {
+    .acc {
+      min-height: 44px;
+    }
+
+    .quiet {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 10px;
+    }
+
+    .time {
+      justify-content: space-between;
+    }
+
+    .time .input {
+      width: 160px;
+    }
   }
 </style>

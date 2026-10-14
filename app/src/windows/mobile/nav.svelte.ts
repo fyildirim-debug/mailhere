@@ -1,5 +1,5 @@
-// Mobil gezinme yığını: liste → okuma / yazma / ayarlar / arama. Çekmece ve alt
-// sayfa gibi katmanlar yığının üstünde tek bir "katman" olarak durur.
+// Mobil gezinme yığını: liste → okuma / yazma / ayarlar / planlananlar / arama.
+// Çekmece ve alt sayfa gibi katmanlar yığının üstünde tek bir "katman" olarak durur.
 //
 // Tarayıcı geçmişiyle bire bir: her itme ve her katman açılışı bir
 // `history.pushState` girdisidir; girdinin durumu `{ mh: derinlik }` taşır.
@@ -14,7 +14,10 @@ export type MobileScreen =
   | { name: 'list' }
   | { name: 'read'; id: MessageId }
   | { name: 'compose'; mode: ComposeMode; id: MessageId | null }
+  /** Ayarlar: `section` boşsa bölüm listesi; her bölüm ayrı ekran olarak itilir. */
   | { name: 'settings'; section: SettingsSection | null }
+  /** Planlanmış gönderimler (giden kutusu); çekmeceden açılır. */
+  | { name: 'scheduled' }
   | { name: 'search' };
 
 export type Layer = 'drawer' | 'sheet';
