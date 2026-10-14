@@ -18,4 +18,6 @@ pub use message::{
 pub use mime::for_path as mime_for_path;
 pub use outbox::Outbox;
 pub use transport::{send, send_with, server_saves_sent, test_login};
-pub use unsubscribe::{is_public_ip, mailto_message, one_click, OneClickError};
+// Adres denetimi `mh_core::net`'e taşındı; eski yol korunur.
+pub use mh_core::net::is_public_ip;
+pub use unsubscribe::{mailto_message, one_click, OneClickError};

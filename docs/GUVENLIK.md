@@ -84,13 +84,15 @@ Taslak. Android kabuğu ayrı depoda (`mailheremobile`) derlenir; ortak çekirde
 
 ## Cihazlar arası aktarım
 
-Taslak **(planlanan)**: masaüstündeki hesaplar, ayarlar, kurallar ve etiketler telefona QR koduyla, yalnız yerel ağ üzerinden aktarılır. Postalar, taslaklar, giden kutusu ve cihaza özgü ayarlar aktarılmaz.
+Masaüstündeki hesaplar, ayarlar, kurallar ve etiketler telefona QR koduyla, yalnız yerel ağ üzerinden aktarılır. Postalar, taslaklar, giden kutusu ve cihaza özgü ayarlar aktarılmaz. Kripto ve ağ katmanı `crates/mh-transfer`'dadır (uygulandı); paketin kurulması/uygulanması ve arayüz **(planlanan)**.
 
-- Kod (`mailhere://aktar?v=1&h=<adresler>&p=<kapı>&t=<16 B>&k=<32 B>`) yalnız QR'da ve ekrandaki metinde bulunur; **K anahtarı ağdan hiç geçmez**. Adres listesi yalnız özel IPv4 ve IPv6 ULA / link-local içerir; genel adres asla yazılmaz.
-- Anahtar türetme HKDF-SHA256 (tuz T), ayrı şifreleme / kimlik / onay anahtarları. İstemci selamı HMAC-SHA256 ile doğrulanır; paket AES-256-GCM ile şifrelidir; yanıt üst sınırı 8 MiB.
-- Sunucu yalnız özel adresten gelen bağlantıyı kabul eder (`is_public_ip` reddi). Teklif 180 s geçerli, tek başarılı teslim; 5 hatalı selamdan sonra kapanır; okuma zaman aşımı 10 s; aynı anda tek teklif.
-- Paket uygulanırken mevcut doğrulayıcılar çalışır (ayar sınırları, hesap/kural/etiket üst sınırları, ad çakışmasında etiket eşleme). Parolalar varsayılan dahildir ve onay kutusuyla kapatılabilir; alınan paket, anahtarlar ve düz metin bellekte `Zeroizing` ile tutulur, diske yazılmaz.
+- Kod (`mailhere://aktar?v=1&h=<adresler>&p=<kapı>&t=<16 B>&k=<32 B>`) yalnız QR'da ve ekrandaki metinde bulunur; **K anahtarı ağdan hiç geçmez**. Kodda yalnız özel IPv4, CGNAT (100.64/10; Tailscale gibi örtü ağları) ve IPv6 ULA adresleri duyurulur (en çok 6); bağlanırken arayüz adı gerektiren link-local adresler ve genel adresler asla yazılmaz, genel adres içeren kod telefonda reddedilir. Bilinmeyen sürüm (`v>1`) "uygulamayı güncelle" hatası verir.
+- Anahtar türetme HKDF-SHA256 (tuz T, IKM K) ile üç ayrı anahtar: şifreleme, kimlik, onay. Telefon kimliğini 68 baytlık selamla (HMAC-SHA256, rastgele nonce) kanıtlar; paket AES-256-GCM ile gider (aad = T + istemci nonce'u); uygulandı onayı ayrı anahtarla şifreli ve doğrulanmış. Yanıt üst sınırı 8 MiB; aşan uzunluk gövde okunmadan reddedilir.
+- Sunucu yalnız yerel ağ eşlerini kabul eder (özel IPv4, CGNAT, link-local, ULA; loopback ve genel asla). Paket tek bir istemciye **bir kez** verilir; hatalı selam yanıtsız kapanır (zamanlama ya da varlık sızdırmaz) ve sayılır, 5 hatalı denemede teklif kapanır. Teklif 180 s, onay 120 s, okuma 10 s, yazma 30 s; aynı anda en çok 8 bağlantı, tek teklif. Telefon tarafı adres başına 3 s, toplam 30 s bekler.
+- Gizli değerler (K, türetilmiş anahtarlar, düz paket, kod metni) bellekte `Zeroizing` ile tutulur, diske yazılmaz; `Debug` çıktıları ve hata mesajları anahtar içermez.
+- Paket uygulanırken mevcut doğrulayıcılar çalışır (ayar sınırları, hesap/kural/etiket üst sınırları, ad çakışmasında etiket eşleme). Parolalar varsayılan dahildir ve onay kutusuyla kapatılabilir.
 - Ekranda uyarılar: aynı Wi-Fi, güvenlik duvarı, ekran paylaşımı sırasında QR göstermeme. Tüm paketi QR'a koymak (ağsız aktarım) reddedildi; ağsız seçenek sonraki sürümde parola korumalı şifreli dosya olarak planlanıyor.
+- Açık kalan: aynı yerel ağdaki bir saldırgan hatalı denemelerle teklifi kapatabilir (yalnız erişilebilirlik; yeni kod oluşturulur). QR ekranda göründüğü sürece fotoğraf ya da ekran paylaşımı K'yi ifşa eder. Sanal ağ (VPN/konteyner) adresleri kodda sonda duyurulabilir; K olmadan işe yaramaz.
 
 ## Açık kalanlar
 

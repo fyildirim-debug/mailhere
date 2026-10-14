@@ -115,7 +115,7 @@ jobs:
             echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$BIN/aarch64-linux-android26-clang"
           } >> "$GITHUB_ENV"
       - name: Ortak çekirdek Android için derleniyor mu?
-        run: cargo clippy --locked --target aarch64-linux-android -p mh-app -- -D warnings
+        run: cargo clippy --locked --target aarch64-linux-android -p mh-app -p mh-transfer -- -D warnings
 
   paket:
     name: Paket (${{ matrix.os }})
