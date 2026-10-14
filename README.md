@@ -1,6 +1,6 @@
 # Mailhere
 
-Windows ve Linux için hızlı, sakin, klavyeyle yönetilen masaüstü e-posta istemcisi.
+Windows ve Linux için hızlı, sakin, klavyeyle yönetilen masaüstü e-posta istemcisi. Android sürümü aynı çekirdekten derlenir: [mailheremobile](https://github.com/fyildirim-debug/mailheremobile/releases).
 
 Yeni posta geldiğinde koca bir pencere açılmaz: ekranın köşesinde küçük bir kart belirir. "Aç" dediğinde yalnız o postayı gösteren hızlı okuma penceresi gelir; yanıtlarsın, arşivlersin, işine dönersin.
 
@@ -14,10 +14,12 @@ Yeni posta geldiğinde koca bir pencere açılmaz: ekranın köşesinde küçük
 
 ## Öne çıkanlar
 
+- **Telefona tek QR ile aktar** — Ayarlar › Cihazlar: hesaplar, kurallar, etiketler ve ayarlar (istersen parolalar) Android uygulamasına uçtan uca şifreli, yalnız yerel ağ üzerinden geçer; hiçbir sunucuya uğramaz.
 - **Köşe kartı ve hızlı okuma** — bildirimler yalnız kişilerden gelen postada çıkar; bülten ve otomatik bildirimler tepsideki sayaçta kalır. Sessiz saatler, bir saat sessize alma, kart konumu ve süresi ayarlanır.
 - **Akıllı süzgeç** — gelen kutusu Kişiler, Bildirimler ve Bültenler diye kendiliğinden ayrılır.
 - **Klavye önce** — `J/K` gezin, `E` arşivle, `H` ertele, `R` yanıtla, `Ctrl K` her şeyi bul.
 - **Geri alınabilir her şey** — arşivleme, silme, erteleme ve gönderme birkaç saniye geri alınabilir.
+- **Anında posta** — IMAP IDLE ve JMAP anlık bildirim; sessizce kopan bağlantı (modem, NAT) fark edilip yeniden kurulur, uykudan dönünce bağlantılar yenilenir. "Postaları al" (F5) her şeyi hemen eşitler.
 - **Her hesap** — IMAP/SMTP (ayarlar kendiliğinden bulunur), Gmail ve Outlook / Microsoft 365 için tarayıcıyla giriş (OAuth 2, XOAUTH2), Stalwart gibi JMAP sunucuları (anlık bildirim dahil).
 - **Klasörler** — hesap başına klasör ağacı (alt klasörler, okunmamış sayısı); istemediğin klasörü gizlersin, gizli klasör eşitlenmez. Gönderilenler, Taslaklar, Arşiv, Çöp ve İstenmeyen klasörleri elle seçilebilir.
 - **Kurallar** — gelen postayı göndereninden, konusundan, metninden ya da türünden tanıyıp klasöre taşır, arşivler, siler, okundu sayar, yıldızlar, bildirimsiz bırakır ya da başka bir adrese iletir (döngü korumalı). Göndericiyi tek tıkla engellersin.
@@ -32,7 +34,7 @@ Yeni posta geldiğinde koca bir pencere açılmaz: ekranın köşesinde küçük
 - **Otomatik yanıt** — JMAP sunucularında (ör. Stalwart) sunucu tarafında tatil yanıtı; uygulama kapalıyken de çalışır.
 - **Ayrıntılı hesap ayarları** — gönderen adı, renk, hesap başına bildirim, sunucu ve parola değişikliği (önce bağlantı denenir).
 - **Çevrimdışı güvenli** — arşivleme, bayrak, taşıma gibi sunucu işlemleri kalıcı bir kuyrukta bekler, bağlantı gelince sırayla uygulanır; uygulama kapansa da kaybolmaz.
-- **Gizlilik varsayılan** — parolalar ve jetonlar işletim sisteminin anahtar zincirinde; yerel posta veritabanı diskte şifreli (SQLCipher, AES-256; anahtarı anahtar zincirinde); uzak görseller ve izleme pikselleri kapalı; HTML posta betiksiz ve yalıtılmış gösterilir. Koyu temada kendi zemini olmayan postalar da koyu zeminde açılır. Kendinden imzalı sertifika ancak parmak izini görüp onayladığında kabul edilir.
+- **Gizlilik varsayılan** — parolalar ve jetonlar işletim sisteminin anahtar zincirinde; yerel posta veritabanı diskte şifreli (SQLCipher, AES-256; anahtarı anahtar zincirinde); uzak görseller ve izleme pikselleri kapalı; HTML posta betiksiz ve yalıtılmış gösterilir. Koyu temada postalar uygulamanın koyu yüzeyine uyarlanır ("Özgün renkler" tek tıkla geri getirir); izin verdiğin göndericinin görselleri, başka sayfada gösterilmesini engelleyen sunuculardan da güvenle indirilir. Kendinden imzalı sertifika ancak parmak izini görüp onayladığında kabul edilir.
 - **Sakin bildirim** — tam ekran uygulama ya da sunum açıkken kart çıkmaz.
 - **İmzalı güncelleme** — yeni sürüm uygulama içinden kurulur; imzası tutmayan paket kurulmaz.
 - **Hafif** — Tauri 2 ile işletim sisteminin kendi web görünümü kullanılır; ayrı bir tarayıcı gömülmez.
@@ -98,7 +100,11 @@ pnpm tauri build
 | Klasör | İçerik |
 | --- | --- |
 | `app/` | Svelte 5 + TypeScript arayüzü; tüm pencereler tek uygulamada (`#/main`, `#/notify`, `#/quick/:id`, `#/compose/:mod/:id`) |
-| `src-tauri/` | Tauri kabuğu: pencereler, tepsi, komutlar |
+| `src-tauri/` | Masaüstü Tauri kabuğu: pencereler, tepsi, bildirim kartı, anahtar zinciri, güncelleme |
+| `crates/mh-app` | iki kabuğun (masaüstü, Android) ortak uygulama katmanı: komutlar, durum, `Platform` sözleşmesi |
+| `crates/mh-transfer` | cihazlar arası QR aktarımı (şifreli, yalnız yerel ağ) |
+| `crates/mh-jmap` | JMAP eşitleme, anlık bildirim, gönderim |
+| `crates/mh-oauth` | Google ve Microsoft OAuth 2 |
 | `crates/mh-core` | arayüzle ortak tipler (sözleşme) |
 | `crates/mh-store` | SQLite + FTS5 yerel depo (SQLCipher ile şifreli) |
 | `crates/mh-mime` | ayrıştırma, HTML temizleme, akıllı kategori |
