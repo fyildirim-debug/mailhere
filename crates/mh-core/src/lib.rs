@@ -527,6 +527,15 @@ pub enum UnsubscribeResult {
     Browser,
 }
 
+/// `remote_images` komutunun döndürdüğü görsel: postadaki adres ve arayüzün
+/// `img.src`'ye yazacağı `data:` adresi.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteImage {
+    pub url: String,
+    pub data: String,
+}
+
 /// Listelenecek görünüm.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "lowercase")]

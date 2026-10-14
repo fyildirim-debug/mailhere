@@ -73,3 +73,4 @@ transfer_begin
 transfer_cancel
 transfer_receive
 transfer_apply
+remote_images

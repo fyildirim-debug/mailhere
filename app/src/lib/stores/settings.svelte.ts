@@ -18,6 +18,11 @@ export function resolvedTheme(s: Settings = settings.value): 'light' | 'dark' {
   return s.theme;
 }
 
+/** Postalar koyu temaya uyarlanır mı: tema koyu ve "Postaları koyu temaya uyarla" açık. */
+export function darkMailWanted(s: Settings = settings.value): boolean {
+  return resolvedTheme(s) === 'dark' && s.darkMail;
+}
+
 function apply(s: Settings) {
   settings.value = s;
   setLanguage(s.language);

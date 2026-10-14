@@ -40,7 +40,7 @@ Bileşenler **asla** ham renk yazmaz; yalnız aşağıdaki jetonları (`var(--�
 | `--danger` | hata, silme onayı | `#C2372E` |
 | `--brand` | marka bölgesi (karşılama paneli); üstünde her temada beyaz metin | `#4655D4` (koyu: `#3440B0`) |
 | `--signal` | logodaki "burada" noktası | `#F2B544` |
-| `--mail-paper` | HTML postanın kâğıdı (posta kendi renkleriyle tasarlandığı için her temada beyaz) | `#FFFFFF` |
+| `--mail-paper` | HTML postanın özgün kâğıdı: açık temada ve koyu temada "Özgün renkler" seçiliyken (posta kendi renkleriyle tasarlandığı için her temada beyaz) | `#FFFFFF` |
 | `--qr-paper` / `--qr-ink` | QR kodun zemini ve modülleri; telefon kamerası ters (açık modül, koyu zemin) kodu güvenilir okumadığı için her temada beyaz üstüne koyu | `#FFFFFF` / `#15171C` |
 
 ### 2.2 Koyu tema
@@ -68,7 +68,7 @@ Bileşenler **asla** ham renk yazmaz; yalnız aşağıdaki jetonları (`var(--�
 
 Kurallar:
 
-- HTML postalar kendi açık renkleriyle tasarlandığı için koyu temada da beyaz kâğıt (`--mail-paper`) üzerinde, köşeli bir yüzeyde gösterilir; düz metin postalar temayı izler.
+- Koyu temada HTML posta koyu temaya **eşlenir** (`app/src/lib/mail/darkmail.ts`), süzgeçle (`invert`) ters çevrilmez: açık zeminler `--paper` tonuna koyulaşır (beyaz tam `--paper`, açık griler biraz açık; ton korunur), koyu yazı `--ink` / `--ink-2`'ye, kenar çizgileri `--line` / `--line-strong`'a oturur. Görseller, zaten koyu ya da orta tonlu zeminler (başlık bandı, düğme) ve üstlerindeki yazı olduğu gibi kalır. Her postada "Özgün renkler" ikon düğmesi (`contrast`, `aria-pressed`) postayı beyaz kâğıtta (`--mail-paper`) kendi renkleriyle gösterir; "Postaları koyu temaya uyarla" ayarı kapalıysa postalar hep özgün renklerinde. Düz metin postalar temayı izler.
 - QR kodu (cihazlar arası aktarım) koyu temada da beyaz kart (`--qr-paper`, köşe 12, `--line` kenar) üstünde `--qr-ink` modüllerle çizilir; 4 modüllük sessiz bölge kartın içindedir. Okunabilirlik temadan önce gelir; QR'ın kendisi hiçbir zaman tema rengine boyanmaz.
 - Zemin katmanı sırası: `ground` → `surface` → `paper` → `raised`. Bir katman kendinden alttakinin üstüne oturur; tersi olmaz.
 - `--ink-3` yalnız `surface`, `paper` ve `sel` üstünde kullanılır. `ground` üstünde üst bilgi için `--ink-2` kullanılır (karşıtlık).
@@ -120,6 +120,7 @@ Avatar; gönderici adresinden deterministik seçilen 9 tonlu paletten gelir (zem
 | Liste satırı | 3 satır (gönderen+saat, konu, önizleme), 8 px okunmamış noktası, 34 px avatar; seçili `--sel`; üzerine gelince sağ üstte Arşivle / Ertele / Sil eylemleri saati örter. |
 | Okuma alanı | araç çubuğu 52 px; konu 24/600; önceki iletiler tek satıra katlanır; gövde 68ch; ekler 252 px kartlar; altta hızlı yanıt kutusu. |
 | Uzak içerik şeridi | koruma ikonu + "Uzak görseller ve izleme pikselleri engellendi" + "Bu göndericiye izin ver". |
+| Özgün renkler geçişi | gönderen satırında (hızlı okumada başlık çubuğunda) `contrast` ikonlu düğme; yalnız koyu temada ve HTML postada, `aria-pressed`; basılıyken `--accent-soft` zemin + `--accent-text`. Çerçeve yeniden yüklenmez, yalnız renkler değişir. |
 | Toast | ters renk (`--ink` zemin), alt ortada, "Geri al" eylemi, 5 sn. |
 | Bildirim kartı | 372 px, köşe 14, `--shadow-lg`; başlık satırı (logo, hesap, zaman, sessize al, kapat), avatar 40, gönderen / konu / 2 satır önizleme, eylemler Aç · Okundu say · Arşivle, altta 2 px geri sayım çizgisi (üzerine gelince durur). En çok 3 kart, fazlası "N posta daha" özeti. |
 | Hızlı okuma | 440×700 pencere; başlık çubuğunda Üstte tut, Uygulamada aç, Kapat; altta hazır yanıt çipleri ve yanıt kutusu. |

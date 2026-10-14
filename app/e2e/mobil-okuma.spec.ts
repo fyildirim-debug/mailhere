@@ -2,7 +2,8 @@ import { expect, test, type Page } from '@playwright/test';
 
 // Mobil okuma ekranı (Pixel 7, `?kabuk=mobil`): satırdan açılış, alt eylem
 // çubuğu, arşivleyince listeye dönüş, diğer eylemler alt sayfası (taşı, etiket,
-// ertele), kişi kartı alt sayfası, geri tuşu sırası (alt sayfa → ekran).
+// ertele), kişi kartı alt sayfası, geri tuşu sırası (alt sayfa → ekran), koyu
+// temada posta eşleme ve "Özgün renkler", çerçevenin yükleyemediği uzak görsel.
 
 const list = (page: Page) => page.getByRole('region', { name: 'Posta listesi' });
 const row = (page: Page, text: string) => list(page).getByText(text, { exact: true });
@@ -173,4 +174,42 @@ test('konuşma görünümü: iletiler katlı gelir, komşuya kaydırma sonraki p
   // Geri tek adımda listeye döner (değiştirme yeni geçmiş girdisi üretmez).
   await page.goBack();
   await expect(page.getByRole('heading', { level: 1, name: 'Gelen Kutusu' })).toBeVisible();
+});
+
+test('koyu temada bülten koyuya eşlenir; “Özgün renkler” 44 px hedefle kendi renklerine döner', async ({ page }) => {
+  await page.getByRole('button', { name: 'Menü', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Kutular ve hesaplar' }).getByRole('button', { name: 'Temayı değiştir' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await page.keyboard.press('Escape');
+  await row(page, 'Renk, ışık ve odak').click();
+  await expect(page.getByRole('heading', { level: 2, name: 'Renk, ışık ve odak' })).toBeVisible();
+  const frame = page.frameLocator('iframe[title="posta"]');
+  const bg = (sel: string) => frame.locator(sel).first().evaluate((el) => getComputedStyle(el).backgroundColor);
+  await expect(frame.locator('html')).toHaveClass(/mh-dark/);
+  expect(await bg('body')).toBe('rgb(25, 28, 34)');
+  expect(await bg('td[bgcolor="#1b1d24"]')).toBe('rgb(27, 29, 36)');
+  expect(await bg('table')).not.toBe('rgb(244, 244, 246)');
+
+  const toggle = page.getByRole('button', { name: 'Özgün renkler' });
+  const box = await toggle.boundingBox();
+  expect(box?.width).toBe(44);
+  expect(box?.height).toBe(44);
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(frame.locator('html')).not.toHaveClass(/mh-dark/);
+  expect(await bg('table')).toBe('rgb(244, 244, 246)');
+  expect(await bg('body')).toBe('rgb(255, 255, 255)');
+  // Yatay taşma yok.
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
+  expect(overflow).toBe(false);
+});
+
+test('izinli uzak görsel çerçevede yüklenemezse arka uçtan indirilir', async ({ page }) => {
+  await page.route(/^https:\/\/(izleme\.)?tasarimnotlari\.co\//, (route) => route.abort());
+  await row(page, 'Renk, ışık ve odak').click();
+  await page.getByRole('button', { name: 'Bu göndericiye izin ver' }).click();
+  const cover = page.frameLocator('iframe[title="posta"]').getByRole('img', { name: 'Sayı 18 kapak' });
+  await expect(cover).toHaveAttribute('src', /^data:image\/svg\+xml;base64,/);
+  await expect.poll(() => cover.evaluate((el) => (el as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
 });

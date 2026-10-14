@@ -10,6 +10,7 @@
 pub mod cmd_account;
 pub mod cmd_cert;
 pub mod cmd_drafts;
+pub mod cmd_images;
 pub mod cmd_jmap;
 pub mod cmd_list;
 pub mod cmd_mailbox;
@@ -134,6 +135,7 @@ define_shared_commands! { $
     transfer::transfer_cancel,
     transfer::transfer_receive,
     transfer::transfer_apply,
+    cmd_images::remote_images,
 }
 
 /// `commands.txt` içindeki adlar (yorum ve boş satırlar atılır).
