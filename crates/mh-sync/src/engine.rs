@@ -15,6 +15,7 @@ mod drafts;
 mod moves;
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -45,9 +46,12 @@ const MIN_BACKOFF: Duration = Duration::from_secs(2);
 const MAX_BACKOFF: Duration = Duration::from_secs(300);
 /// Tüm kutuların düzenli eşitlenmesi (aynı zamanda bağlantıyı canlı tutar).
 const PERIODIC: Duration = Duration::from_secs(10 * 60);
-/// IDLE en geç bu sürede yenilenir (RFC 2177: 29 dakikadan kısa).
-const IDLE_RENEW: Duration = Duration::from_secs(25 * 60);
-/// IDLE desteklemeyen sunucuda gelen kutusu yoklama aralığı.
+/// IDLE en geç bu sürede yenilenir (RFC 2177: 29 dakikadan kısa). Kısa
+/// tutulur: sessizce kopan bağlantı en geç bu kadar sonra fark edilir (TCP
+/// canlılık yoklaması işletim sisteminde kapalıysa da).
+const IDLE_RENEW: Duration = Duration::from_secs(10 * 60);
+/// IDLE desteklemeyen sunucuda, ya da IDLE bağlantısı kurulamamışken gelen
+/// kutusu yoklama aralığı.
 const POLL: Duration = Duration::from_secs(120);
 const FULL_SYNC_TIMEOUT: Duration = Duration::from_secs(20 * 60);
 const ACTION_TIMEOUT: Duration = Duration::from_secs(120);
@@ -104,6 +108,9 @@ struct AccountCtx {
     secrets: Arc<dyn SecretStore>,
     tokens: Arc<TokenProvider>,
     sink: Arc<dyn EventSink>,
+    /// Gelen kutusu izleniyor (IDLE kurulu ya da IDLE'siz sunucu yoklanıyor).
+    /// Değilse komut bağlantısı gelen kutusunu kendisi yoklar.
+    watching: AtomicBool,
 }
 
 impl AccountCtx {
@@ -249,6 +256,7 @@ impl SyncManager {
             secrets: self.secrets.clone(),
             tokens: self.tokens.clone(),
             sink: self.sink.clone(),
+            watching: AtomicBool::new(false),
         });
         let tasks = vec![
             self.rt.spawn(account_loop(ctx.clone(), rx)),
@@ -712,6 +720,8 @@ async fn run_session(
     }
     let mut periodic = tokio::time::interval_at(Instant::now() + PERIODIC, PERIODIC);
     periodic.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut poll = tokio::time::interval_at(Instant::now() + POLL, POLL);
+    poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         while let Ok(c) = rx.try_recv() {
             enqueue(pending, c);
@@ -743,6 +753,10 @@ async fn run_session(
                 Some(c) => enqueue(pending, c),
             },
             _ = periodic.tick() => pending.push_back(Command::SyncAll),
+            // IDLE kurulamıyorsa yeni posta 10 dakikalık tam eşitlemeyi beklemesin.
+            _ = poll.tick(), if !ctx.watching.load(Ordering::Relaxed) => {
+                enqueue(pending, Command::SyncInbox);
+            }
         }
     }
 }
@@ -1469,7 +1483,9 @@ async fn apply_delete(conn: &mut Conn, items: &[ServerRef]) -> SyncResult<()> {
 async fn idle_loop(ctx: Arc<AccountCtx>, tx: UnboundedSender<Command>) {
     let mut backoff = MIN_BACKOFF;
     loop {
-        match idle_session(&ctx, &tx, &mut backoff).await {
+        let res = idle_session(&ctx, &tx, &mut backoff).await;
+        ctx.watching.store(false, Ordering::Relaxed);
+        match res {
             Ok(()) => return,
             Err(e) => {
                 tracing::debug!(account = %ctx.account.id, error = %e, "IDLE bağlantısı kesildi");
@@ -1496,6 +1512,7 @@ async fn idle_session(
     *backoff = MIN_BACKOFF;
     if !caps.has_str("IDLE") {
         let _ = timeout(Duration::from_secs(5), session.logout()).await;
+        ctx.watching.store(true, Ordering::Relaxed);
         loop {
             tokio::time::sleep(POLL).await;
             if tx.send(Command::SyncInbox).is_err() {
@@ -1509,13 +1526,33 @@ async fn idle_session(
         .map(|m| m.mailbox.path)
         .unwrap_or_else(|| "INBOX".into());
     timeout(ACTION_TIMEOUT, session.examine(&inbox)).await??;
+    let mut first = true;
     loop {
         let mut idle = session.idle();
         timeout(ACTION_TIMEOUT, idle.init()).await??;
+        if first {
+            first = false;
+            ctx.watching.store(true, Ordering::Relaxed);
+            // Bağlantı kopukken gelen postalar: IDLE her kurulduğunda gelen
+            // kutusu bir kez eşitlenir (ilk açılışta tam eşitlemeyle birleşir).
+            if tx.send(Command::SyncInbox).is_err() {
+                return Ok(());
+            }
+        }
         let (wait, stop) = idle.wait_with_timeout(IDLE_RENEW);
         let res = wait.await;
         drop(stop);
-        let res = res?;
+        // Akış bitti: sunucu ya da aradaki cihaz bağlantıyı kapattı. async-imap
+        // bunu "elle kesildi" diye bildirir; DONE yazılacak yer yok.
+        let res = match res? {
+            IdleResponse::ManualInterrupt => {
+                return Err(SyncError::Io(std::io::Error::new(
+                    std::io::ErrorKind::ConnectionAborted,
+                    "IDLE akışı kapandı",
+                )))
+            }
+            r => r,
+        };
         session = timeout(ACTION_TIMEOUT, idle.done()).await??;
         while session.unsolicited_responses.try_recv().is_ok() {}
         if let IdleResponse::NewData(_) = res {

@@ -57,6 +57,8 @@ ammonia = "4.1.7"
 
 # Ağ (yalnız ring sağlayıcısı; aws-lc derlemesi Windows'ta ek araç ister)
 rustls = { version = "0.23.45", default-features = false, features = ["ring", "logging", "std", "tls12"] }
+# IMAP soketinde TCP canlılık yoklaması (NAT eşlemesi, ölü bağlantı).
+socket2 = "0.6.5"
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "logging", "tls12"] }
 webpki-roots = "1.0.9"
 # PKCE özeti ve güvenli rastgele değer (rustls zaten ring kullanır).

@@ -73,6 +73,10 @@ fn builder() -> reqwest::ClientBuilder {
     reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(CONNECT_TIMEOUT)
+        // Durum akışı (EventSource) saatlerce açık kalır: canlılık yoklaması
+        // NAT eşlemesini korur, ölü bağlantıyı ping beklemeden düşürür.
+        .tcp_keepalive(Duration::from_secs(60))
+        .tcp_keepalive_interval(Duration::from_secs(15))
         .user_agent(concat!("Mailhere/", env!("CARGO_PKG_VERSION")))
 }
 

@@ -15,6 +15,12 @@ use crate::error::{network_error, SyncError, SyncResult};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(30);
+/// Sessiz bağlantıda ilk canlılık yoklaması ve yoklamalar arası süre. IDLE
+/// saatlerce veri taşımaz; ev yönlendiricisi ya da operatör NAT'ı eşlemeyi
+/// birkaç dakikada düşürür ve istemci bunu fark etmeden yeni postayı kaçırır.
+/// Yoklama eşlemeyi canlı tutar, karşı taraf ölmüşse okuma hata verir.
+const KEEPALIVE_TIME: Duration = Duration::from_secs(60);
+const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(15);
 
 /// TLS ya da (yalnız yerel testte) düz akış.
 pub trait ImapIo: AsyncRead + AsyncWrite + Unpin + Send + Debug {}
@@ -51,6 +57,12 @@ pub(crate) async fn tcp(host: &str, port: u16) -> AppResult<TcpStream> {
     match timeout(CONNECT_TIMEOUT, TcpStream::connect((host, port))).await {
         Ok(Ok(s)) => {
             let _ = s.set_nodelay(true);
+            let keepalive = socket2::TcpKeepalive::new()
+                .with_time(KEEPALIVE_TIME)
+                .with_interval(KEEPALIVE_INTERVAL);
+            if let Err(e) = socket2::SockRef::from(&s).set_tcp_keepalive(&keepalive) {
+                tracing::debug!(host, port, error = %e, "TCP canlılık yoklaması açılamadı");
+            }
             Ok(s)
         }
         Ok(Err(e)) => {

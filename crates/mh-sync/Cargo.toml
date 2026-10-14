@@ -17,6 +17,7 @@ futures.workspace = true
 tracing.workspace = true
 rustls.workspace = true
 tokio-rustls.workspace = true
+socket2.workspace = true
 webpki-roots.workspace = true
 async-imap.workspace = true
 hickory-resolver.workspace = true
