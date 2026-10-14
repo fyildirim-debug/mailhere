@@ -35,7 +35,7 @@ pub const PASSWORD_REQUIRED: &str = "Sunucu değişince parolayı yeniden yaz.";
 pub const OAUTH_HAS_NO_PASSWORD: &str = "Google ve Microsoft hesaplarında parola yok. Giriş sorunu varsa hesabı kaldırıp yeniden giriş yap.";
 
 /// "#RRGGBB" biçiminde mi?
-fn is_hex_color(c: &str) -> bool {
+pub(crate) fn is_hex_color(c: &str) -> bool {
     c.len() == 7 && c.starts_with('#') && c[1..].chars().all(|ch| ch.is_ascii_hexdigit())
 }
 

@@ -68,3 +68,7 @@ tags_list
 tag_save
 tag_delete
 messages_tag
+transfer_begin
+transfer_cancel
+transfer_receive
+transfer_apply

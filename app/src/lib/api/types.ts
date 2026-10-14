@@ -852,6 +852,20 @@ export interface Commands {
   tag_delete: [{ id: string }, null];
   /** Etiketi postalara ekler (`on`) ya da kaldırır. */
   messages_tag: [{ ids: MessageId[]; tagId: string; on: boolean }, null];
+
+  // Cihazlar arası aktarım (tek QR, yalnız yerel ağ)
+  /**
+   * Bu bilgisayarda aktarım teklifi açar: paket hazırlanır, yerel kapı dinlenir; QR, metin kodu ve
+   * süre döner. Durumlar `mh:transfer` olayıyla gelir. Açık bir teklif varsa sessizce kapanır.
+   * `includeSecrets`: parolalar ve OAuth yenileme jetonları da pakete girer.
+   */
+  transfer_begin: [{ includeSecrets: boolean }, TransferOffer];
+  /** Açık teklifi kapatır (`cancelled` olayı gelir); teklif yoksa sessizce geçer. */
+  transfer_cancel: [Record<string, never>, null];
+  /** QR'dan okunan ya da yapıştırılan kodla bilgisayardan paketi alır; özet 5 dk bellekte bekler. */
+  transfer_receive: [{ code: string }, TransferPreview];
+  /** Bekleyen paketi seçime göre uygular, sonucu bilgisayara bildirir ve raporu döner. */
+  transfer_apply: [{ previewId: string; choice: TransferChoice }, TransferReport];
 }
 
 export type CommandName = keyof Commands;

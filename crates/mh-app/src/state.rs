@@ -31,6 +31,8 @@ pub struct AppState {
     pub cache_dir: PathBuf,
     /// Kabuğa özgü işler (kart, tepsi, pencereler, dosya penceresi).
     pub platform: Arc<dyn Platform>,
+    /// QR aktarımı: açık teklif ve uygulanmayı bekleyen paketler.
+    pub transfer: crate::transfer::TransferHub,
 }
 
 pub fn now_ms() -> Millis {
@@ -258,6 +260,7 @@ pub fn setup_core(
         mute: Mute::new(),
         cache_dir: dirs.cache,
         platform: platform.clone(),
+        transfer: Default::default(),
     });
     if let Err(e) = core.start(&rt) {
         tracing::error!(code = %e.code, error = %e.message, "eşitleme başlatılamadı");

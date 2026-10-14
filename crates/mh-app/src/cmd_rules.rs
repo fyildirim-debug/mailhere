@@ -14,10 +14,10 @@ use crate::state::{internal, AppState};
 type Res<T> = Result<T, AppError>;
 
 /// Kural adının ve metin değerlerinin üst sınırı (karakter).
-const NAME_MAX: usize = 80;
-const VALUE_MAX: usize = 500;
-const CONDITIONS_MAX: usize = 20;
-const ACTIONS_MAX: usize = 10;
+pub(crate) const NAME_MAX: usize = 80;
+pub(crate) const VALUE_MAX: usize = 500;
+pub(crate) const CONDITIONS_MAX: usize = 20;
+pub(crate) const ACTIONS_MAX: usize = 10;
 /// E-posta adresinin üst sınırı (RFC 5321).
 const EMAIL_MAX: usize = 254;
 
@@ -30,14 +30,14 @@ fn rule_gone() -> AppError {
 }
 
 /// Denetim karakterleri atılmış, kırpılmış ve `max` karaktere kısaltılmış metin.
-fn clip(s: &str, max: usize) -> String {
+pub(crate) fn clip(s: &str, max: usize) -> String {
     let line = mh_mime::clean_line(s);
     let cut: String = line.trim().chars().take(max).collect();
     cut.trim_end().to_owned()
 }
 
 /// Tek ve geçerli bir e-posta adresi mi (gönderimde kabul edilecek biçimde)?
-fn valid_email(email: &str) -> bool {
+pub(crate) fn valid_email(email: &str) -> bool {
     if email.len() > EMAIL_MAX
         || email.matches('@').count() != 1
         || !mh_store::is_full_address(email)

@@ -31,6 +31,7 @@ pub mod screener;
 pub mod signatures;
 pub mod sink;
 pub mod state;
+pub mod transfer;
 
 pub use platform::{BoxFut, Confirm, Platform};
 pub use state::{setup_core, AppState, Dirs};
@@ -127,6 +128,10 @@ define_shared_commands! { $
     cmd_list::tag_save,
     cmd_list::tag_delete,
     cmd_list::messages_tag,
+    transfer::transfer_begin,
+    transfer::transfer_cancel,
+    transfer::transfer_receive,
+    transfer::transfer_apply,
 }
 
 /// `commands.txt` içindeki adlar (yorum ve boş satırlar atılır).

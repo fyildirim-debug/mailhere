@@ -16,13 +16,17 @@ mh-send.workspace = true
 mh-notify.workspace = true
 mh-oauth.workspace = true
 mh-jmap.workspace = true
+mh-transfer.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 chrono.workspace = true
 rustls.workspace = true
 uuid.workspace = true
+# Aktarım paketindeki gizli değerler düşerken sıfırlanır.
+zeroize.workspace = true
 # Kabuğa değil Tauri'ye bağlı: yalnız webview çalışma zamanı (kök Cargo.toml).
 # Tepsi, görüntü kodekleri ve diğer masaüstü özellikleri kabuk crate'inde açılır.
 tauri.workspace = true

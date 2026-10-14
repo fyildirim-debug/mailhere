@@ -20,7 +20,9 @@ import {
   type MailboxRole,
   type MessageDetail,
   type MessageSummary,
+  type QrMatrix,
   type Rule,
+  type RuleAction,
   type RuleCondition,
   type SavedSearch,
   type ScheduledItem,
@@ -30,6 +32,10 @@ import {
   type Signature,
   type Tag,
   type Template,
+  type TransferOffer,
+  type TransferPreview,
+  type TransferReport,
+  type TransferStateKind,
   type Vacation,
   type View,
   QUICK_REPLIES_MAX,
@@ -197,6 +203,107 @@ function matches(m: MessageDetail, c: RuleCondition): boolean {
 
 function sameServer(a: ServerConfig | null, b: ServerConfig): boolean {
   return !!a && a.host.trim().toLowerCase() === b.host.trim().toLowerCase() && a.port === b.port && a.username.trim() === b.username.trim();
+}
+
+// ------------------------------------------------------------ aktarım (QR)
+
+/** Aktarımın bellekte beklediği süre (arka uçtaki `PREVIEW_TTL`). */
+const PREVIEW_TTL_MS = 5 * 60_000;
+/** Teklifin ömrü (arka uçtaki `OfferOptions::ttl`). */
+const OFFER_TTL_MS = 180_000;
+
+/** Telefona giden paketin sahte karşılığı (gizli değerin kendisi yok, yalnız var/yok). */
+interface MockPackage {
+  fromVersion: string;
+  fromPlatform: string;
+  createdAt: number;
+  settings: Settings | null;
+  accounts: { account: Account; hasSecret: boolean }[];
+  rules: Rule[];
+  tags: Tag[];
+}
+
+/** Küçük, kararlı sözde rastgele kaynak (xorshift32); testler tekrarlanabilir olsun. */
+function prng(seed: number): () => number {
+  let x = (seed >>> 0) || 0x9e3779b9;
+  return () => {
+    x ^= x << 13;
+    x >>>= 0;
+    x ^= x >>> 17;
+    x ^= x << 5;
+    x >>>= 0;
+    return x;
+  };
+}
+
+/** base64url (dolgusuz) sözde rastgele `bytes` bayt. */
+function fakeB64(bytes: number, seed: number): string {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+  const next = prng(seed);
+  const chars = Math.ceil((bytes * 8) / 6);
+  let out = '';
+  for (let i = 0; i < chars; i++) out += alphabet[next() % 64];
+  return out;
+}
+
+/**
+ * QR görünümlü modül matrisi: köşelerde üç bulucu desen, aralarında zamanlama
+ * çizgileri, geri kalanı metinden türetilmiş sözde rastgele veri. Gerçek QR
+ * değildir (okutulamaz); yalnız arayüzün çizimi için.
+ */
+export function mockQr(text: string, size = 29): QrMatrix {
+  let seed = 7;
+  for (const ch of text) seed = (seed * 31 + ch.charCodeAt(0)) >>> 0;
+  const next = prng(seed);
+  const grid: boolean[][] = Array.from({ length: size }, () => Array.from({ length: size }, () => next() % 2 === 1));
+  const finder = (top: number, left: number) => {
+    for (let r = -1; r <= 7; r++) {
+      for (let c = -1; c <= 7; c++) {
+        const y = top + r;
+        const x = left + c;
+        if (y < 0 || x < 0 || y >= size || x >= size) continue;
+        const ring = r === 0 || r === 6 || c === 0 || c === 6;
+        const core = r >= 2 && r <= 4 && c >= 2 && c <= 4;
+        const inside = r >= 0 && r <= 6 && c >= 0 && c <= 6;
+        grid[y][x] = inside && (ring || core);
+      }
+    }
+  };
+  finder(0, 0);
+  finder(0, size - 7);
+  finder(size - 7, 0);
+  for (let i = 8; i < size - 8; i++) {
+    grid[6][i] = i % 2 === 0;
+    grid[i][6] = i % 2 === 0;
+  }
+  return { size, rows: grid.map((row) => row.map((on) => (on ? '1' : '0')).join('')) };
+}
+
+/** Kod metnini denetler (arka uçtaki `Code::parse` ile aynı mesajlar). */
+function checkTransferCode(code: string): void {
+  const text = code.trim();
+  const unknown = () => fail('invalid', 'Aktarım kodu tanınmadı. Bilgisayardaki QR kodu yeniden okut ya da kodu eksiksiz yapıştır.');
+  if (!/^mailhere:\/\/aktar\?/i.test(text)) unknown();
+  const params = new Map<string, string>();
+  for (const pair of text.slice('mailhere://aktar?'.length).split('&')) {
+    if (!pair) continue;
+    const i = pair.indexOf('=');
+    if (i < 0) unknown();
+    params.set(pair.slice(0, i), pair.slice(i + 1));
+  }
+  const v = Number(params.get('v'));
+  if (!Number.isInteger(v) || v < 1) unknown();
+  if (v > 1) fail('invalid', `Bu kod daha yeni bir Mailhere sürümüyle oluşturulmuş (v${v}). Önce bu cihazdaki Mailhere'yi güncelle.`);
+  const hosts = (params.get('h') ?? '').split(',').filter(Boolean);
+  const port = Number(params.get('p'));
+  if (!hosts.length || !Number.isInteger(port) || port < 1 || port > 65535 || !params.get('t') || !params.get('k')) unknown();
+  if (hosts.some((h) => /^(8\.8\.8\.8|1\.1\.1\.1)$/.test(h))) {
+    fail('invalid', 'Aktarım kodu yerel ağ dışında bir adres içeriyor; güvenlik için kullanılmadı. Bilgisayarda yeni kod oluştur.');
+  }
+  // Ulaşılamayan bilgisayar (testler): adres 10.255.255.1 ise ağ hatası.
+  if (hosts.includes('10.255.255.1')) {
+    fail('network', "Bilgisayara bağlanılamadı. İki cihaz aynı Wi-Fi ağında mı, bilgisayarda aktarım ekranı hâlâ açık mı? Güvenlik duvarı Mailhere'ye izin vermeli.");
+  }
 }
 
 function loadSettings(persist: boolean): Settings {
@@ -396,6 +503,73 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
   }
 
   const grants = new Map<string, { provider: AuthKind; email: string; displayName: string | null }>();
+
+  // Aktarım: açık teklifin zamanlayıcıları (bilgisayar) ve bekleyen paketler (telefon).
+  let offerTimers: ReturnType<typeof setTimeout>[] | null = null;
+  let offerSeq = 0;
+  const previews = new Map<string, { pkg: MockPackage; at: number }>();
+
+  function emitTransfer(state: TransferStateKind, message: string | null = null) {
+    emit(EVENTS.transfer, { state, message });
+  }
+
+  /** Açık teklifi kapatır; `announce` ile `cancelled` olayı gider. */
+  function closeOffer(announce: boolean): boolean {
+    if (!offerTimers) return false;
+    for (const t of offerTimers) clearTimeout(t);
+    offerTimers = null;
+    if (announce) emitTransfer('cancelled');
+    return true;
+  }
+
+  /** Bilgisayardan gelmiş gibi örnek paket: biri bu cihazda olabilen iki hesap, kurallar, etiketler, ayarlar. */
+  function samplePackage(): MockPackage {
+    const work: Account = {
+      id: 'demo-is', name: 'İş', email: 'furkan@ornek.com.tr', displayName: 'Furkan Yıldırım', color: '#4C6FD8', kind: 'imap',
+      imap: { host: 'imap.ornek.com.tr', port: 993, security: 'tls', username: 'furkan@ornek.com.tr' },
+      smtp: { host: 'smtp.ornek.com.tr', port: 465, security: 'tls', username: 'furkan@ornek.com.tr' },
+      jmapUrl: null, createdAt: now() - 30 * 86_400_000, auth: 'password', notify: true,
+      signatures: [{ id: 'is-tam', name: 'Tam', body: 'Furkan Yıldırım\nÜrün Geliştirme · Örnek A.Ş.' }], signatureNew: 'is-tam', signatureReply: null,
+    };
+    const google: Account = {
+      id: 'aktarim-google', name: 'Google', email: 'furkan.yildirim@gmail.com', displayName: 'Furkan', color: '#D0566E', kind: 'imap',
+      imap: { host: 'imap.gmail.com', port: 993, security: 'tls', username: 'furkan.yildirim@gmail.com' },
+      smtp: { host: 'smtp.gmail.com', port: 465, security: 'tls', username: 'furkan.yildirim@gmail.com' },
+      jmapUrl: null, createdAt: now() - 10 * 86_400_000, auth: 'google', notify: true, signatures: [], signatureNew: null, signatureReply: null,
+    };
+    return {
+      fromVersion: '0.4.0',
+      fromPlatform: 'linux',
+      createdAt: now(),
+      settings: {
+        ...defaultSettings, theme: 'dark', density: 'compact', vip: ['elif@ornek.com.tr'], conversationView: false,
+        // Cihaza özgü alanlar: uygulanırken yereldekiler kalır.
+        cardSeconds: 30, cardPosition: 'topLeft', nativeNotifications: true, autoUpdate: false,
+      },
+      accounts: [
+        { account: work, hasSecret: true },
+        { account: google, hasSecret: false },
+      ],
+      rules: [
+        {
+          id: 'aktarim-kural-fatura', name: 'Faturalar etiketlensin', enabled: true, accountId: null, match: 'any',
+          conditions: [{ kind: 'subject', op: 'contains', value: 'fatura' }], actions: [{ kind: 'tag', tagId: 'aktarim-etiket-fatura' }], stop: false,
+        },
+        {
+          id: 'aktarim-kural-toplanti', name: 'Toplantı davetleri yıldızlı', enabled: true, accountId: 'demo-is', match: 'all',
+          conditions: [{ kind: 'subject', op: 'contains', value: 'toplantı' }], actions: [{ kind: 'star' }], stop: false,
+        },
+        {
+          id: 'aktarim-kural-eski', name: 'Eski hesabın bültenleri', enabled: true, accountId: 'eski-hesap', match: 'all',
+          conditions: [{ kind: 'category', value: 'newsletters' }], actions: [{ kind: 'archive' }], stop: false,
+        },
+      ],
+      tags: [
+        { id: 'aktarim-etiket-fatura', name: 'Fatura', color: '#D08A1E' },
+        { id: 'aktarim-etiket-seyahat', name: 'Seyahat', color: '#2A9BA8' },
+      ],
+    };
+  }
 
   function draftMessage(msg: OutgoingMessage, id: MessageId): MessageDetail {
     const account = state.accounts.find((a) => a.id === msg.accountId);
@@ -1065,6 +1239,137 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       }
       emit(EVENTS.changed, { mailboxIds: [] });
       return null;
+    },
+    transfer_begin: ({ includeSecrets }) => {
+      // Yeni teklif eskisini sessizce kapatır.
+      closeOffer(false);
+      const seed = (now() ^ (offerSeq++ * 0x9e37) ^ (includeSecrets ? 0x5a5a : 0)) >>> 0;
+      const hosts = ['192.168.1.20', 'fd12:3456::20'];
+      const text = `mailhere://aktar?v=1&h=${hosts.join(',')}&p=51234&t=${fakeB64(16, seed)}&k=${fakeB64(32, seed + 1)}`;
+      const offer: TransferOffer = { text, qr: mockQr(text), hosts, port: 51234, expiresAt: now() + OFFER_TTL_MS };
+      // Bitiş: kalan zamanlayıcılar (ör. süre dolması) da kapanır.
+      const finish = (state: TransferStateKind, message: string | null = null) => {
+        closeOffer(false);
+        emitTransfer(state, message);
+      };
+      offerTimers = [
+        setTimeout(() => emitTransfer('waiting'), 0),
+        setTimeout(() => emitTransfer('connected'), 1000),
+        setTimeout(() => emitTransfer('delivered'), 2000),
+        setTimeout(() => finish('applied'), 4000),
+        setTimeout(() => finish('expired', 'Kodun süresi doldu; telefon bağlanmadı. Yeni kod oluşturup yeniden dene.'), OFFER_TTL_MS),
+      ];
+      return offer;
+    },
+    transfer_cancel: () => {
+      closeOffer(true);
+      return null;
+    },
+    transfer_receive: async ({ code }) => {
+      checkTransferCode(code);
+      // Ağdan alma süresi.
+      await new Promise((r) => setTimeout(r, 300));
+      const pkg = samplePackage();
+      const previewId = newId('onizleme');
+      // Süresi dolanlar düşer.
+      for (const [id, p] of previews) if (now() - p.at >= PREVIEW_TTL_MS) previews.delete(id);
+      previews.set(previewId, { pkg, at: now() });
+      const preview: TransferPreview = {
+        previewId,
+        fromVersion: pkg.fromVersion,
+        fromPlatform: pkg.fromPlatform,
+        createdAt: pkg.createdAt,
+        accounts: pkg.accounts.map(({ account, hasSecret }) => ({
+          id: account.id, name: account.name, email: account.email, kind: account.kind, auth: account.auth,
+          hasSecret, exists: state.accounts.some((a) => a.id === account.id),
+        })),
+        rules: pkg.rules.length,
+        tags: pkg.tags.length,
+        settings: pkg.settings != null,
+      };
+      return preview;
+    },
+    transfer_apply: ({ previewId, choice }) => {
+      const entry = previews.get(previewId);
+      previews.delete(previewId);
+      if (!entry || now() - entry.at >= PREVIEW_TTL_MS) {
+        fail('notFound', "Önizlemenin süresi doldu ya da paket zaten uygulandı. Bilgisayarda yeni kod oluşturup QR'ı yeniden okut.");
+      }
+      const { pkg } = entry;
+      const report: TransferReport = { accountsAdded: 0, accountsUpdated: 0, accountsWithoutSecret: [], rules: 0, rulesSkipped: 0, tags: 0, settings: false };
+      // 1) Ayarlar: cihaza özgü olanlar ve onaylı sertifikalar yerelde kalır.
+      if (choice.settings && pkg.settings) {
+        const local = state.settings;
+        state.settings = {
+          ...pkg.settings,
+          cardPosition: local.cardPosition, cardSeconds: local.cardSeconds, nativeNotifications: local.nativeNotifications,
+          autoUpdate: local.autoUpdate, trustedCerts: local.trustedCerts,
+          quickReplies: cleanQuickReplies(pkg.settings.quickReplies), templates: cleanTemplates(pkg.settings.templates),
+          savedSearches: cleanSavedSearches(pkg.settings.savedSearches),
+        };
+        report.settings = true;
+        emit(EVENTS.settings, structuredClone(state.settings));
+      }
+      // 2) Etiketler: adı çakışan yereldekine eşlenir; seçilmediyse yalnız eşleme kurulur.
+      const tagMap = new Map<string, string>();
+      for (const t of pkg.tags) {
+        const name = cleanTagName(t.name);
+        if (!name) continue;
+        const local = state.tags.find((x) => lower(x.name) === lower(name));
+        if (local) {
+          tagMap.set(t.id, local.id);
+          continue;
+        }
+        if (!choice.tags || state.tags.length >= TAGS_MAX) continue;
+        const color = TAG_COLORS.find((c) => c.toLowerCase() === t.color.trim().toLowerCase()) ?? TAG_COLORS[0];
+        state.tags.push({ id: t.id, name, color });
+        tagMap.set(t.id, t.id);
+        report.tags++;
+      }
+      // 3) Hesaplar: kimlik korunur; varsa güncellenir, yoksa eklenir.
+      for (const { account, hasSecret } of pkg.accounts) {
+        if (!choice.accounts.includes(account.id)) continue;
+        const i = state.accounts.findIndex((a) => a.id === account.id);
+        if (i >= 0) {
+          state.accounts[i] = { ...structuredClone(account), createdAt: state.accounts[i].createdAt };
+          report.accountsUpdated++;
+        } else {
+          state.accounts.push(structuredClone(account));
+          addMailboxes(account.id);
+          report.accountsAdded++;
+          if (!hasSecret) report.accountsWithoutSecret.push(account.email);
+        }
+        emit(EVENTS.sync, { accountId: account.id, state: 'online' });
+      }
+      // 4) Kurallar: hesabı bu cihazda olmayan atlanır; etiket kimlikleri yeniden yazılır.
+      if (choice.rules) {
+        for (const rule of pkg.rules) {
+          if (rule.accountId && !state.accounts.some((a) => a.id === rule.accountId)) {
+            report.rulesSkipped++;
+            continue;
+          }
+          const actions = rule.actions.flatMap((a): RuleAction[] => {
+            if (a.kind !== 'tag') return [a];
+            const local = tagMap.get(a.tagId) ?? (state.tags.some((x) => x.id === a.tagId) ? a.tagId : null);
+            return local ? [{ ...a, tagId: local }] : [];
+          });
+          if (!actions.length) {
+            report.rulesSkipped++;
+            continue;
+          }
+          const clean = { ...structuredClone(rule), actions };
+          const i = state.rules.findIndex((r) => r.id === rule.id);
+          if (i >= 0) state.rules[i] = clean;
+          else if (state.rules.length < 200) state.rules.push(clean);
+          else {
+            report.rulesSkipped++;
+            continue;
+          }
+          report.rules++;
+        }
+      }
+      emit(EVENTS.changed, { mailboxIds: [] });
+      return report;
     },
   };
 

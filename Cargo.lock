@@ -2770,8 +2770,10 @@ dependencies = [
  "mh-send",
  "mh-store",
  "mh-sync",
+ "mh-transfer",
  "rustls",
  "serde",
+ "serde_json",
  "tauri",
  "tauri-plugin-notification",
  "tauri-plugin-opener",
@@ -2779,6 +2781,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]
