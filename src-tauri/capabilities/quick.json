@@ -17,6 +17,7 @@
     "allow-quick-replies-set",
     "allow-accounts-list",
     "allow-message-get",
+    "allow-remote-images",
     "allow-messages-flag",
     "allow-messages-move",
     "allow-messages-snooze",

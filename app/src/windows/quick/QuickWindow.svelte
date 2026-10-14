@@ -14,7 +14,7 @@
   import { fillVariables } from '../../lib/util/variables';
   import { locale } from '../../lib/i18n/index.svelte';
   import { quickReplyTargets, quoteFor, signatureFor } from '../../lib/stores/mail.svelte';
-  import { quickReplies, settings } from '../../lib/stores/settings.svelte';
+  import { darkMailWanted, quickReplies, settings } from '../../lib/stores/settings.svelte';
 
   interface Props {
     id: number;
@@ -34,6 +34,9 @@
   let closeTimer: ReturnType<typeof setTimeout> | null = null;
 
   const chips = $derived(quickReplies(settings.value));
+  /** Koyu temada posta kendi renkleriyle ("Özgün renkler"). */
+  let original = $state(false);
+  const canToggleColors = $derived(d?.bodyHtml != null && darkMailWanted(settings.value));
   let editingChips = $state(false);
   /** Yanıtın gideceği adresler (kendi postamızda alıcılar). */
   const targets = $derived(d ? quickReplyTargets(d, account) : []);
@@ -171,6 +174,11 @@
     <span class="title" data-tauri-drag-region>{t('quick.title')}</span>
     {#if account}<span class="meta" data-tauri-drag-region>· {account.name}</span>{/if}
     <span class="grow" data-tauri-drag-region></span>
+    {#if canToggleColors}
+      <button class="btn-icon small" class:on={original} aria-pressed={original} aria-label={t('read.originalColors')} title={t('read.originalColors')} onclick={() => (original = !original)}>
+        <Icon name="contrast" size={16} />
+      </button>
+    {/if}
     <button class="btn-icon small" class:on={pinned} aria-pressed={pinned} aria-label={t('act.pin')} title={t('act.pin')} onclick={togglePin}>
       <Icon name="pin" size={16} />
     </button>
@@ -204,7 +212,7 @@
       </div>
       <h1 class="selectable">{d.subject || '—'}</h1>
       <div class="body">
-        <MailBody text={d.bodyText} html={d.bodyHtml} remoteAllowed={d.remoteAllowed} />
+        <MailBody id={d.id} text={d.bodyText} html={d.bodyHtml} remoteAllowed={d.remoteAllowed} bind:original />
       </div>
       {#if d.attachments.length}
         <div class="atts">

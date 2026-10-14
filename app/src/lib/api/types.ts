@@ -266,6 +266,12 @@ export interface Unsubscribe {
 /** `done`: arka uç çıkışı yaptı; `browser`: arayüz `url`yi tarayıcıda açmalı. */
 export type UnsubscribeResult = 'done' | 'browser';
 
+/** `remote_images` sonucu: postadaki adres ve `img.src`'ye yazılacak `data:` adresi. */
+export interface RemoteImage {
+  url: string;
+  data: string;
+}
+
 export type View =
   | { kind: 'inbox' }
   | { kind: 'snoozed' }
@@ -746,6 +752,12 @@ export interface Commands {
   messages_snooze: [{ ids: MessageId[]; until: Millis | null }, null];
   search: [{ q: string; limit: number }, MessageSummary[]];
   remote_allow: [{ id: MessageId }, MessageDetail];
+  /**
+   * Çerçevenin yükleyemediği (ör. `Cross-Origin-Resource-Policy` başlıklı) izinli uzak görselleri
+   * arka uç indirir ve `data:` adresi olarak döner. Yalnız gönderici izinliyse ve adres postanın
+   * temizlenmiş HTML'inde geçiyorsa; inmeyen görsel listede yer almaz.
+   */
+  remote_images: [{ id: MessageId; urls: string[] }, RemoteImage[]];
   /** Eki geçici klasöre yazar, varsayılan uygulamayla açar; dosya yolunu döner. */
   attachment_open: [{ id: MessageId; index: number }, string];
   send: [{ msg: OutgoingMessage }, OutboxItem];

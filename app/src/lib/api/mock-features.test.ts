@@ -106,3 +106,19 @@ describe('yeni gönderici eleği', () => {
     await expect(b.call('screener_decide', { email: 'x@y.com', accountId: 'yok', allow: true })).rejects.toMatchObject({ code: 'notFound' });
   });
 });
+
+describe('uzak görsel indirme (remote_images)', () => {
+  it('yalnız izinli göndericinin postasında geçen adresleri, tekil, data: olarak döner', async () => {
+    const b = createMockBackend({ now: NOW });
+    const m = (await b.call('messages_list', { query: inbox })).items.find((x) => x.subject === 'Renk, ışık ve odak')!;
+    const cover = 'https://tasarimnotlari.co/sayi-18.png';
+    await expect(b.call('remote_images', { id: m.id, urls: [cover] })).rejects.toMatchObject({ code: 'invalid' });
+    await b.call('remote_allow', { id: m.id });
+    const got = await b.call('remote_images', { id: m.id, urls: [` ${cover} `, cover, 'https://baska.example/x.png', 'https://izleme.tasarimnotlari.co/p.gif'] });
+    expect(got.map((g) => g.url)).toEqual([cover, 'https://izleme.tasarimnotlari.co/p.gif']);
+    expect(got[0].data).toMatch(/^data:image\/svg\+xml;base64,/);
+    expect(got[1].data).toMatch(/^data:image\/png;base64,/);
+    await expect(b.call('remote_images', { id: m.id, urls: ['https://baska.example/x.png'] })).rejects.toMatchObject({ code: 'invalid' });
+    await expect(b.call('remote_images', { id: 9999, urls: [cover] })).rejects.toMatchObject({ code: 'notFound' });
+  });
+});

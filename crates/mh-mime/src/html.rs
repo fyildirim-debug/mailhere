@@ -356,6 +356,102 @@ fn restore_blocked(html: String, marker: &str, urls: &[String]) -> String {
     out
 }
 
+/// Temizlenmiş HTML'deki uzak (`http`/`https`) görsel adresleri, belge
+/// sırasıyla ve yinelenenler atılarak.
+///
+/// Yalnız [`sanitize_html`] çıktısı içindir: etiketler küçük harfli,
+/// öznitelik değerleri çift tırnaklı ve kaçışlıdır (`&amp;`, `&quot;`).
+/// Adresler çözülmüş (`&amp;` → `&`) döner; böylece arayüzün
+/// `img.getAttribute('src')` ile verdiği değerle birebir karşılaştırılabilir.
+/// Engellenmiş görseller (`data-mh-src`) ve `data:`/`cid:` adresler girmez.
+pub fn remote_image_urls(html: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    let mut rest = html;
+    while let Some(i) = rest.find("<img") {
+        let after = &rest[i + 4..];
+        // Etiketin sonu; kaçışlı değerlerde `>` bulunmaz.
+        let Some(end) = after.find('>') else {
+            break;
+        };
+        let tag = &after[..end];
+        if let Some(url) = img_src(tag).map(decode_entities) {
+            if is_http(&url) && seen.insert(url.clone()) {
+                out.push(url);
+            }
+        }
+        rest = &after[end + 1..];
+    }
+    out
+}
+
+/// `<img …>` etiketinin içindeki ` src="…"` değeri (çözülmemiş).
+fn img_src(tag: &str) -> Option<&str> {
+    let mut rest = tag;
+    while let Some(i) = rest.find("src=\"") {
+        // `data-mh-src="…"` gibi başka bir özniteliğin sonu olmasın.
+        let boundary = rest[..i]
+            .chars()
+            .next_back()
+            .is_none_or(char::is_whitespace);
+        let after = &rest[i + 5..];
+        let end = after.find('"')?;
+        if boundary {
+            return Some(&after[..end]);
+        }
+        rest = &after[end + 1..];
+    }
+    None
+}
+
+/// HTML öznitelik değerindeki karakter göndermelerini çözer (`&amp;`,
+/// `&quot;`, `&lt;`, `&gt;`, `&apos;`, `&nbsp;`, `&#NN;`, `&#xHH;`). Tanınmayan
+/// gönderme olduğu gibi kalır.
+pub fn decode_entities(s: &str) -> String {
+    if !s.contains('&') {
+        return s.to_owned();
+    }
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(i) = rest.find('&') {
+        out.push_str(&rest[..i]);
+        let after = &rest[i..];
+        let Some(semi) = after[..after.len().min(12)].find(';') else {
+            out.push('&');
+            rest = &after[1..];
+            continue;
+        };
+        let name = &after[1..semi];
+        let decoded = match name {
+            "amp" => Some('&'),
+            "quot" => Some('"'),
+            "lt" => Some('<'),
+            "gt" => Some('>'),
+            "apos" => Some('\''),
+            "nbsp" => Some('\u{a0}'),
+            _ => name.strip_prefix('#').and_then(|n| {
+                let code = match n.strip_prefix(['x', 'X']) {
+                    Some(hex) => u32::from_str_radix(hex, 16).ok(),
+                    None => n.parse().ok(),
+                }?;
+                char::from_u32(code)
+            }),
+        };
+        match decoded {
+            Some(c) => {
+                out.push(c);
+                rest = &after[semi + 1..];
+            }
+            None => {
+                out.push('&');
+                rest = &after[1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 struct FilterCtx<'a> {
     remote_allowed: bool,
     inline: &'a HashMap<String, String>,
@@ -638,6 +734,46 @@ mod tests {
         assert!(s.html.contains("x&amp;x&amp;"));
         let s = clean(&"<table>x</table>".repeat(20_000), false);
         assert_eq!(s.html.matches("<td>x</td>").count(), 20_000);
+    }
+
+    #[test]
+    fn uzak_gorsel_adresleri_cozulmus_ve_tekil_cikar() {
+        let mut inline = HashMap::new();
+        inline.insert("logo@ornek".to_owned(), "data:image/png;base64,AAAA".to_owned());
+        let s = sanitize_html(
+            r#"<p>x</p><img src="https://iz.example/a.png?u=1&amp;v=&quot;2&quot;" alt="kapak">
+               <img src="https://iz.example/a.png?u=1&amp;v=&quot;2&quot;"><img src="cid:logo@ornek">
+               <img src="HTTP://buyuk.example/b.gif"><img alt="kaynaksız">
+               <img src="javascript:alert(1)"><img src="/goreli.png">"#,
+            true,
+            inline,
+        );
+        assert_eq!(
+            remote_image_urls(&s.html),
+            vec![
+                "https://iz.example/a.png?u=1&v=\"2\"".to_owned(),
+                "HTTP://buyuk.example/b.gif".to_owned(),
+            ]
+        );
+        // İzin yokken görseller engellenmiştir; liste boş döner.
+        let blocked = clean(r#"<img src="https://iz.example/a.png">"#, false);
+        assert!(remote_image_urls(&blocked.html).is_empty());
+        // Elle yazılmış işaretleme: `data-mh-src` değeri `src` sanılmaz.
+        assert!(remote_image_urls(r#"<img data-mh-src="https://iz.example/a.png">"#).is_empty());
+        assert_eq!(
+            remote_image_urls(r#"<img data-mh-src="https://a.example/x" src="https://b.example/y">"#),
+            vec!["https://b.example/y".to_owned()]
+        );
+        assert!(remote_image_urls("<img src=\"https://acik.example/kapanmadi").is_empty());
+    }
+
+    #[test]
+    fn gondermeler_cozulur() {
+        assert_eq!(decode_entities("a&amp;b&quot;c&lt;d&gt;e&apos;f"), "a&b\"c<d>e'f");
+        assert_eq!(decode_entities("x&#65;&#x42;&#X43;y&nbsp;z"), "xABCy\u{a0}z");
+        assert_eq!(decode_entities("&bilinmeyen;&amp"), "&bilinmeyen;&amp");
+        assert_eq!(decode_entities("&#xZZ;&#;"), "&#xZZ;&#;");
+        assert_eq!(decode_entities("yok"), "yok");
     }
 
     #[test]

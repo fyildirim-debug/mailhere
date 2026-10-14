@@ -1,51 +1,62 @@
 <script lang="ts">
   // Posta gövdesi. HTML betiksiz, CSP'li bir çerçevede; düz metin bağlantıları güvenle ayrılmış halde.
-  // Koyu temada kendi zemini olmayan HTML posta koyu zeminde gösterilir; kendi
-  // tasarımı (zemin rengi ya da görseli) olan posta açık kağıtta kalır.
-  import { openExternal } from '../api';
-  import { resolvedTheme, settings } from '../stores/settings.svelte';
+  // Koyu temada HTML posta koyu temaya eşlenir (darkmail.ts): açık zeminler
+  // koyulaşır, koyu yazı açılır, görseller ve koyu tasarlanmış alanlar kalır.
+  // `original` ile posta kendi renklerine döner. Çerçevenin yükleyemediği
+  // izinli uzak görseller (CORP başlığı) arka uçtan `data:` olarak alınır.
+  import { call, openExternal, type MessageId } from '../api';
+  import { darkMailWanted, settings } from '../stores/settings.svelte';
   import { linkify } from '../util/format';
-  import { adaptDark, hasOwnBackground } from './darkmail';
+  import { adaptDark } from './darkmail';
 
   interface Props {
+    id: MessageId;
     text: string | null;
     html: string | null;
     remoteAllowed: boolean;
+    /** Koyu temada postayı kendi renkleriyle göster ("Özgün renkler"). */
+    original?: boolean;
   }
 
-  let { text, html, remoteAllowed }: Props = $props();
+  let { id, text, html, remoteAllowed, original = $bindable(false) }: Props = $props();
+
+  /** Bir çağrıda arka uca verilen en çok adres (arka uçla aynı). */
+  const MAX_RESCUE = 40;
 
   let frame = $state<HTMLIFrameElement>();
   let height = $state(120);
-  /** Koyu zeminde mi gösteriliyor (kendi zemini olmayan posta)? */
-  let darkPaper = $state(false);
   /** Uyarlama bitene kadar çerçeve görünmez (beyaz–koyu yanıp sönmesin). */
   let shown = $state(false);
 
-  const wantDark = $derived(resolvedTheme(settings.value) === 'dark' && settings.value.darkMail);
+  const wantDark = $derived(darkMailWanted(settings.value));
+  /** Çerçeve koyu kağıtta mı? Ayardan bilinir; analiz beklenmez, yerleşim oynamaz. */
+  const darkPaper = $derived(wantDark && !original);
 
   /** Çerçeve kendi belgesi olduğundan jetonların o anki değerleri aktarılır. */
   function token(name: string): string {
     return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   }
 
+  /** Açık kağıdın renkleri: posta kendi renkleriyle tasarlandığı için temadan bağımsız. */
+  const LIGHT = { ink: '#15171c', ink2: '#4f5562', link: '#3a47b8', rule: '#d2d6de', placeholder: '#eef0f4' };
+
   const srcdoc = $derived.by(() => {
     if (html == null) return '';
-    const dark = wantDark;
-    const paper = dark ? token('--paper') : token('--mail-paper');
-    const ink = dark ? token('--ink') : '#15171c';
-    const ink2 = dark ? token('--ink-2') : '#4f5562';
-    const link = dark ? token('--accent-text') : '#3a47b8';
-    const rule = dark ? token('--line-strong') : '#d2d6de';
-    const placeholder = dark ? token('--raised') : '#eef0f4';
+    const paper = token('--mail-paper');
+    // Koyu kurallar yalnız koyu temada üretilir; `mh-dark` sınıfı uyarlamadan sonra eklenir.
+    const dark = wantDark
+      ? `html.mh-dark{color-scheme:dark}html.mh-dark,html.mh-dark body{background:${token('--paper')};color:${token('--ink')}}` +
+        `html.mh-dark a{color:${token('--accent-text')}}html.mh-dark blockquote{border-left-color:${token('--line-strong')};color:${token('--ink-2')}}` +
+        `html.mh-dark img[data-mh-src]:not([src]){background:${token('--raised')}}`
+      : '';
     return (
       `<!doctype html><html><head><meta charset="utf-8">` +
       `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: cid:${remoteAllowed ? ' https: http:' : ''}; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'">` +
       // İzin verilen uzak görsellerde bile uygulamayı ele veren Referer gitmesin.
       `<meta name="referrer" content="no-referrer">` +
-      `<style>:root{color-scheme:${dark ? 'dark' : 'light'}}html,body{margin:0;background:${paper};color:${ink}}body{padding:20px 22px;font:15px/1.6 'Geist Variable',ui-sans-serif,system-ui,sans-serif;word-wrap:break-word;overflow-wrap:anywhere}` +
-      `img{max-width:100%;height:auto}img[data-mh-src]:not([src]){background:${placeholder};border-radius:6px}table{max-width:100%!important}a{color:${link}}pre{white-space:pre-wrap}blockquote{margin:0 0 0 4px;padding-left:12px;border-left:1px solid ${rule};color:${ink2}}` +
-      `html.mh-light,html.mh-light body{background:${token('--mail-paper')};color:#15171c;color-scheme:light}html.mh-light a{color:#3a47b8}html.mh-light blockquote{border-left-color:#d2d6de;color:#4f5562}</style>` +
+      `<style>:root{color-scheme:light}html,body{margin:0;background:${paper};color:${LIGHT.ink}}body{padding:20px 22px;font:15px/1.6 'Geist Variable',ui-sans-serif,system-ui,sans-serif;word-wrap:break-word;overflow-wrap:anywhere}` +
+      `img{max-width:100%;height:auto}img[data-mh-src]:not([src]){background:${LIGHT.placeholder};border-radius:6px}table{max-width:100%!important}a{color:${LIGHT.link}}pre{white-space:pre-wrap}blockquote{margin:0 0 0 4px;padding-left:12px;border-left:1px solid ${LIGHT.rule};color:${LIGHT.ink2}}` +
+      `${dark}</style>` +
       `</head><body>${html}</body></html>`
     );
   });
@@ -54,6 +65,38 @@
   $effect(() => {
     void srcdoc;
     shown = false;
+  });
+
+  /** Son uyarlamanın geri alma işlevi (özgün renklere dönüş). */
+  let undo: (() => void) | null = null;
+  /** Çerçevedeki belgeye en son uygulanan kip (yüklemede ve geçişte bir kez yazılsın). */
+  let appliedDark: boolean | null = null;
+
+  /** Belgeyi ayara göre koyuya eşler ya da özgün haline döndürür. */
+  function applyTheme(doc: Document) {
+    undo?.();
+    undo = null;
+    appliedDark = darkPaper;
+    const root = doc.documentElement;
+    root.classList.remove('mh-dark');
+    if (!darkPaper) return;
+    // Okuma açık varsayılanlarla yapılır, sonra koyu sınıf eklenir.
+    undo = adaptDark(doc, {
+      ink: token('--ink'),
+      ink2: token('--ink-2'),
+      paper: token('--paper'),
+      line: token('--line'),
+      lineStrong: token('--line-strong'),
+      lightLink: LIGHT.link,
+    });
+    root.classList.add('mh-dark');
+  }
+
+  // "Özgün renkler" geçişi çerçeveyi yeniden yüklemez; yalnız renkler değişir.
+  $effect(() => {
+    const want = darkPaper;
+    const doc = frame?.contentDocument;
+    if (shown && doc?.body && appliedDark !== want) applyTheme(doc);
   });
 
   function measure() {
@@ -65,16 +108,8 @@
   function onLoad() {
     const doc = frame?.contentDocument;
     if (!doc) return;
-    darkPaper = false;
-    if (wantDark) {
-      if (hasOwnBackground(doc)) {
-        // Kendi tasarımı olan posta (bülten, fatura) açık kağıtta, olduğu gibi.
-        doc.documentElement.classList.add('mh-light');
-      } else {
-        adaptDark(doc, { ink: token('--ink'), ink2: token('--ink-2'), paper: token('--paper') });
-        darkPaper = true;
-      }
-    }
+    appliedDark = null;
+    applyTheme(doc);
     shown = true;
     measure();
     // Görseller geç yüklenebilir; birkaç kez yeniden ölç.
@@ -86,6 +121,86 @@
       e.preventDefault();
       void openExternal(a.getAttribute('href') ?? '');
     });
+    if (remoteAllowed) rescueImages(doc);
+  }
+
+  // ------------------------------------------------------ yüklenemeyen görseller
+
+  /** Bu posta için indirilmiş görseller (adres → data:); tema geçişinde yeniden istenmez. */
+  let rescued: { id: MessageId | null; map: Map<string, string> } = { id: null, map: new Map() };
+  let rescueTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Yüklenemeyen görseller, adrese göre (aynı adres birden çok yerde olabilir). */
+  let failed = new Map<string, HTMLImageElement[]>();
+
+  function isHttp(url: string | null): url is string {
+    return !!url && /^https?:\/\//i.test(url);
+  }
+
+  /**
+   * Çerçevenin yükleyemediği izinli uzak görselleri toplar ve arka uçtan
+   * ister. Yükleme bitmişse (`complete`) ve boyut yoksa görsel gelmemiştir;
+   * sonradan hata verenler de aynı kuyruğa girer.
+   */
+  function rescueImages(doc: Document) {
+    if (rescued.id !== id) rescued = { id, map: new Map() };
+    failed = new Map();
+    for (const img of doc.querySelectorAll('img')) {
+      const url = img.getAttribute('src');
+      if (!isHttp(url)) continue;
+      const data = rescued.map.get(url);
+      if (data) {
+        img.src = data;
+        continue;
+      }
+      if (img.complete) {
+        if (img.naturalWidth === 0) note(url, img);
+      } else {
+        img.addEventListener(
+          'error',
+          () => {
+            note(url, img);
+            schedule();
+          },
+          { once: true },
+        );
+      }
+    }
+    schedule();
+  }
+
+  function note(url: string, img: HTMLImageElement) {
+    const list = failed.get(url);
+    if (list) list.push(img);
+    else failed.set(url, [img]);
+  }
+
+  /** Kısa süre bekleyip tüm başarısız görselleri tek çağrıda ister. */
+  function schedule() {
+    if (rescueTimer) clearTimeout(rescueTimer);
+    rescueTimer = setTimeout(() => void flush(), 150);
+  }
+
+  async function flush() {
+    rescueTimer = null;
+    if (!failed.size) return;
+    const batch = failed;
+    failed = new Map();
+    const urls = [...batch.keys()].slice(0, MAX_RESCUE);
+    const forId = id;
+    let got: { url: string; data: string }[];
+    try {
+      got = await call('remote_images', { id: forId, urls });
+    } catch {
+      // İnmeyen görsel alt metniyle kalır; posta yeniden açılınca yeniden denenir.
+      return;
+    }
+    // Bu arada başka posta açıldıysa geç gelen yanıt yok sayılır.
+    if (rescued.id !== forId) return;
+    for (const { url, data } of got) {
+      rescued.map.set(url, data);
+      for (const img of batch.get(url) ?? []) img.src = data;
+    }
+    measure();
   }
 
   const paragraphs = $derived(

@@ -9,6 +9,7 @@
   import { showToast } from '../ui/toast.svelte';
   import { displayName, fileSize } from '../util/format';
   import { allowRemote, mail, toggleStar, unsubscribe } from '../stores/mail.svelte';
+  import { darkMailWanted, settings } from '../stores/settings.svelte';
   import ContactCard from './ContactCard.svelte';
   import { openCompose } from './open';
   import InviteCard from './InviteCard.svelte';
@@ -30,6 +31,15 @@
     return [...d.to, ...d.cc].map((a) => (a.email.toLowerCase() === mine ? t('read.me') : displayName(a))).join(', ');
   });
   const totalSize = $derived(d.attachments.reduce((s, a) => s + a.size, 0));
+
+  /** Koyu temada posta kendi renkleriyle ("Özgün renkler"); ileti değişince sıfırlanır. */
+  let original = $state(false);
+  $effect(() => {
+    void d.id;
+    original = false;
+  });
+  /** Geçiş yalnız HTML postada ve koyu uyarlama etkinken; ayardan bilinir, yerleşim oynamaz. */
+  const canToggleColors = $derived(d.bodyHtml != null && darkMailWanted(settings.value));
 
   let card = $state<{ x: number; y: number } | null>(null);
   /** Kişi kartını açan düğme; kart kapanınca odak buraya döner. */
@@ -85,6 +95,18 @@
     <button class="btn-icon small" aria-label={t('act.reply')} title={t('act.reply')} onclick={() => compose('reply')}><Icon name="reply" size={16} /></button>
     <button class="btn-icon small" aria-label={t('act.forward')} title={t('act.forward')} onclick={() => compose('forward')}><Icon name="forward" size={16} /></button>
   {/if}
+  {#if canToggleColors}
+    <button
+      class="btn-icon"
+      class:on={original}
+      aria-pressed={original}
+      aria-label={t('read.originalColors')}
+      title={t('read.originalColors')}
+      onclick={() => (original = !original)}
+    >
+      <Icon name="contrast" />
+    </button>
+  {/if}
   <button class="btn-icon" aria-label={d.starred ? t('act.unstar') : t('act.star')} title="{t('act.star')} · S" onclick={star}>
     <span class:star={d.starred}><Icon name="star" filled={d.starred} /></span>
   </button>
@@ -117,7 +139,7 @@
   {#if d.bodyText == null && d.bodyHtml == null}
     <p class="meta">{t('read.noBody')}</p>
   {:else}
-    <MailBody text={d.bodyText} html={d.bodyHtml} remoteAllowed={d.remoteAllowed} />
+    <MailBody id={d.id} text={d.bodyText} html={d.bodyHtml} remoteAllowed={d.remoteAllowed} bind:original />
   {/if}
 </div>
 

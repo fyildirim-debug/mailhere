@@ -21,6 +21,7 @@ import {
   type MessageDetail,
   type MessageSummary,
   type QrMatrix,
+  type RemoteImage,
   type Rule,
   type RuleAction,
   type RuleCondition,
@@ -83,6 +84,34 @@ const SETTINGS_KEY = 'mailhere.mock.settings';
 
 function fail(code: AppError['code'], message: string): never {
   throw { code, message } satisfies AppError;
+}
+
+/** Öznitelik değerindeki karakter göndermelerini çözer (arka uçtaki `decode_entities` gibi). */
+function decodeEntities(s: string): string {
+  const named: Record<string, string> = { amp: '&', quot: '"', lt: '<', gt: '>', apos: "'", nbsp: '\u00a0' };
+  return s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (whole, name: string) => {
+    if (name[0] === '#') {
+      const code = name[1] === 'x' || name[1] === 'X' ? parseInt(name.slice(2), 16) : parseInt(name.slice(1), 10);
+      return Number.isFinite(code) ? String.fromCodePoint(code) : whole;
+    }
+    return named[name.toLowerCase()] ?? whole;
+  });
+}
+
+/**
+ * Tanıtımda "indirilen" görsel: kapak için uygulamanın renklerinde sade bir
+ * SVG, izleme pikseli için 1×1 saydam PNG (gerçek arka uç sunucunun verdiği
+ * baytları aynı biçimde `data:` adresi olarak döner).
+ */
+function demoImage(url: string): string {
+  if (/\.gif(\?|$)/i.test(url) || /\/p\.gif/i.test(url)) {
+    return 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+  }
+  const svg =
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 200"><rect width="560" height="200" fill="#e6e8fb"/>' +
+    '<circle cx="118" cy="100" r="54" fill="#4655d4"/><rect x="214" y="58" width="252" height="14" rx="7" fill="#aab2fa"/>' +
+    '<rect x="214" y="92" width="196" height="14" rx="7" fill="#c9cdfb"/><rect x="214" y="126" width="224" height="14" rx="7" fill="#c9cdfb"/></svg>';
+  return `data:image/svg+xml;base64,${btoa(svg)}`;
 }
 
 function lower(s: string): string {
@@ -791,6 +820,15 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       const who = lower(m.from.email);
       if (!state.settings.remoteAllow.includes(who)) state.settings.remoteAllow.push(who);
       return detail(m);
+    },
+    remote_images: ({ id, urls }) => {
+      const d = detail(find(id));
+      if (!d.remoteAllowed) fail('invalid', 'Bu göndericinin uzak görsellerine izin verilmemiş. Görselleri görmek için önce “Bu göndericiye izin ver”e tıkla.');
+      // Yalnız postanın temizlenmiş HTML'inde geçen http(s) görsel adresleri (çözülmüş).
+      const known = new Set([...(d.bodyHtml ?? '').matchAll(/<img\b[^>]*\ssrc="(https?:[^"]*)"/gi)].map((m) => decodeEntities(m[1])));
+      const picked = [...new Set(urls.map((u) => u.trim()))].filter((u) => known.has(u)).slice(0, 40);
+      if (!picked.length) fail('invalid', 'İstenen görsel adresleri bu postada geçmiyor. Postayı kapatıp yeniden aç.');
+      return picked.map((url): RemoteImage => ({ url, data: demoImage(url) }));
     },
     attachment_open: ({ id, index }) => {
       const a = find(id).attachments.find((x) => x.index === index);

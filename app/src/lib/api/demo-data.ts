@@ -189,6 +189,18 @@ export function createDemoData(now = new Date()): DemoData {
       subject: 'Renk, ışık ve odak',
       body:
         'Merhaba,\n\nUzun ekran saatlerinde gözü yoran şey çoğu zaman parlaklık değil, karşıtlığın dağınıklığıdır.\n\nBu sayıda beş küçük karar var: zemin tonunu kırmak, tek vurgu rengi seçmek, satır aralığını açmak, hareketi azaltmak ve bildirimleri gruplamak.\n\nGörüşmek üzere,\nTasarım Notları',
+      // Kendi açık zemini olan tablo bülteni: koyu header bandı, beyaz kart, vurgu düğmesi,
+      // gri alt bilgi; koyu temada eşleme ve "Özgün renkler" bu postada denenir.
+      html:
+        '<table width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f4f4f6" style="background-color:#f4f4f6;font-family:Helvetica,Arial,sans-serif"><tr><td align="center" style="padding:28px 12px">' +
+        '<table width="560" cellpadding="0" cellspacing="0" border="0" bgcolor="#ffffff" style="background-color:#ffffff;max-width:560px;border:1px solid #e3e4e8">' +
+        '<tr><td bgcolor="#1b1d24" style="background-color:#1b1d24;padding:18px 28px;color:#ffffff;font-size:12px;letter-spacing:.08em">TASARIM NOTLARI · SAYI 18</td></tr>' +
+        '<tr><td style="padding:0"><img data-mh-src="https://tasarimnotlari.co/sayi-18.png" alt="Sayı 18 kapak" width="560" height="200" style="display:block;width:100%;height:auto;background:#e9ebf0"></td></tr>' +
+        '<tr><td style="padding:28px 28px 8px;color:#15171c;font-size:24px;font-weight:bold">Renk, ışık ve odak</td></tr>' +
+        '<tr><td style="padding:0 28px;color:#333333;font-size:15px;line-height:1.6"><p style="margin:0 0 14px">Uzun ekran saatlerinde gözü yoran şey çoğu zaman parlaklık değil, karşıtlığın dağınıklığıdır.</p><p style="margin:0 0 14px">Bu sayıda beş küçük karar var: zemin tonunu kırmak, tek vurgu rengi seçmek, satır aralığını açmak, hareketi azaltmak ve bildirimleri gruplamak.</p></td></tr>' +
+        '<tr><td style="padding:8px 28px 28px"><a href="https://tasarimnotlari.co/18" target="_blank" rel="noopener noreferrer" style="display:inline-block;background-color:#4655d4;color:#ffffff;text-decoration:none;padding:10px 18px;border-radius:6px;font-size:15px">Sayıyı oku</a></td></tr>' +
+        '<tr><td style="padding:16px 28px;border-top:1px solid #e3e4e8;color:#8a8f9a;font-size:12px">Bu postayı listeye üye olduğun için aldın. <a href="mailto:ayril@tasarimnotlari.co?subject=ayril" style="color:#8a8f9a">Ayrıl</a></td></tr>' +
+        '</table><img data-mh-src="https://izleme.tasarimnotlari.co/p.gif" width="1" height="1" alt=""></td></tr></table>',
       date: at(now, -3, 8, 0), category: 'newsletters', remote: true,
       unsubscribe: { url: null, mailto: 'mailto:ayril@tasarimnotlari.co?subject=ayril', oneClick: false },
     },

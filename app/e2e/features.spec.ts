@@ -209,7 +209,7 @@ test('hızlı okuma: hızlı yanıtlar düzenlenir', async ({ page }) => {
   expect(saved).toEqual(['Teşekkürler!', 'Tamam, uygun.', 'Yarın ararım.']);
 });
 
-test('koyu tema: zeminsiz posta koyu, bülten açık kağıtta', async ({ page }) => {
+test('koyu tema (sistem): zeminsiz posta da bülten de koyuya eşlenir; ayar kapalıysa posta kendi renklerinde', async ({ page }) => {
   await page.emulateMedia({ colorScheme: 'dark' });
   await page.goto('/#/main');
   await list(page).getByText('Re: Kitap kulübü').click();
@@ -221,9 +221,24 @@ test('koyu tema: zeminsiz posta koyu, bülten açık kağıtta', async ({ page }
   const color = await frame.getByText('Pazar akşamına kadar listeyi gönderirim.').evaluate((el) => getComputedStyle(el).color);
   expect(color).not.toBe('rgb(0, 0, 0)');
 
+  // Kendi zemini (kapak yer tutucusu) olan bülten de koyu kağıtta; "Özgün renkler" beyaz kağıda döndürür.
   await list(page).getByText('Sayı 142 · Sakin arayüzler üzerine').click();
   const news = page.frameLocator('iframe[title="posta"]');
   await expect(news.getByText('Bu hafta üç yazı seçtik.')).toBeVisible();
-  const paper = await news.locator('body').evaluate((b) => getComputedStyle(b).backgroundColor);
-  expect(paper).toBe('rgb(255, 255, 255)');
+  await expect(news.locator('html')).toHaveClass(/mh-dark/);
+  const paper = () => news.locator('body').evaluate((b) => getComputedStyle(b).backgroundColor);
+  expect(await paper()).toBe('rgb(25, 28, 34)');
+  await page.getByRole('button', { name: 'Özgün renkler' }).click();
+  await expect(news.locator('html')).not.toHaveClass(/mh-dark/);
+  expect(await paper()).toBe('rgb(255, 255, 255)');
+
+  // Ayar kapalı: koyu temada da posta kendi renklerinde, geçiş düğmesi yok.
+  await page.getByRole('button', { name: 'Ayarlar' }).click();
+  await page.getByRole('switch', { name: 'Postaları koyu temaya uyarla' }).uncheck();
+  await page.getByRole('button', { name: 'Ayarları kapat' }).click();
+  await list(page).getByText('Re: Kitap kulübü').click();
+  await expect(frame.getByText('Pazar akşamına kadar listeyi gönderirim.')).toBeVisible();
+  await expect(frame.locator('html')).not.toHaveClass(/mh-dark/);
+  expect(await frame.locator('body').evaluate((b) => getComputedStyle(b).backgroundColor)).toBe('rgb(255, 255, 255)');
+  await expect(page.getByRole('button', { name: 'Özgün renkler' })).toHaveCount(0);
 });

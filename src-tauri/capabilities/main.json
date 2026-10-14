@@ -28,6 +28,7 @@
     "allow-messages-snooze",
     "allow-search",
     "allow-remote-allow",
+    "allow-remote-images",
     "allow-attachment-open",
     "allow-send",
     "allow-send-cancel",

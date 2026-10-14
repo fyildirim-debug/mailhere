@@ -25,6 +25,10 @@ tracing-subscriber.workspace = true
 chrono.workspace = true
 rustls.workspace = true
 uuid.workspace = true
+# İzinli uzak görsellerin indirilmesi (`remote_images`): çerezsiz, Referer'siz
+# HTTP istemcisi ve `data:` adresi için base64.
+reqwest.workspace = true
+base64.workspace = true
 # Aktarım paketindeki gizli değerler düşerken sıfırlanır.
 zeroize.workspace = true
 # Kabuğa değil Tauri'ye bağlı: yalnız webview çalışma zamanı (kök Cargo.toml).
