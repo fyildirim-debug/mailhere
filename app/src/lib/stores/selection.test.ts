@@ -41,6 +41,16 @@ describe('çoklu seçim', () => {
     expect([...mail.checked].sort()).toEqual([1, 2, 3, 4, 5]);
   });
 
+  it('Shift+tık çapası görünüm değişince listede yoksa okunan satırdan başlar', () => {
+    toggleCheck(2);
+    // Görünüm değişti: 2 artık listede yok, işaretler düştü, okunan 4.
+    mail.items = [m(3), m(4), m(5)];
+    mail.checked = [];
+    mail.selectedId = 4;
+    checkRange(5);
+    expect(mail.checked).toEqual([4, 5]);
+  });
+
   it('konuşmanın tüm iletileri toplu işleme girer', () => {
     checkRange(2);
     expect(checkedIds()).toEqual([1, 6, 2]);

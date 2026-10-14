@@ -50,14 +50,24 @@
   // Seçili ileti okundu sayılınca açık gelen diğer okunmamışlar da okundu sayılır.
   $effect(() => {
     if (selected.unread) return;
-    const ids = untrack(() => items.filter((m) => m.unread && m.id !== selected.id && open.has(m.id)).map((m) => m.id));
-    if (ids.length) markRead(ids);
+    untrack(markOpenUnread);
   });
+
+  /** Açık gelen, seçili olmayan okunmamış iletileri okundu sayar. */
+  function markOpenUnread() {
+    const ids = items.filter((m) => m.unread && m.id !== selected.id && open.has(m.id)).map((m) => m.id);
+    if (ids.length) markRead(ids);
+  }
 
   function markRead(ids: MessageId[]) {
     const set = new Set(ids);
     items = items.map((m) => (set.has(m.id) ? { ...m, unread: false } : m));
     void setUnread(ids, false, { quiet: true });
+  }
+
+  /** Bir ileti değişince (yıldız, uzak içerik izni) listedeki kopyası güncellenir. */
+  function update(d: MessageDetail) {
+    items = items.map((m) => (m.id === d.id ? d : m));
   }
 
   async function load() {
@@ -72,6 +82,8 @@
       const newest = list[list.length - 1]?.id;
       open.clear();
       for (const m of list) if (m.unread || m.id === newest || m.id === id) open.add(m.id);
+      // Konuşma, seçili ileti okundu sayıldıktan sonra gelmiş olabilir; açık okunmamışlar burada işaretlenir.
+      if (!untrack(() => selected.unread)) markOpenUnread();
     } catch (e) {
       if (my === token) error = toAppError(e).message;
     } finally {
@@ -141,7 +153,7 @@
                   <Icon name="chevronUp" size={16} />
                 </button>
               {/if}
-              <MessageView detail={m} actions />
+              <MessageView detail={m} actions onupdate={update} />
             </div>
           {:else}
             <button class="prior" aria-expanded="false" aria-label={t('conv.expand', { name: label(m) })} onclick={() => toggle(m)}>

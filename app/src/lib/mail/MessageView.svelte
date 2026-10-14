@@ -17,9 +17,11 @@
     detail: MessageDetail;
     /** Yanıtla / ilet düğmeleri (konuşma görünümünde her iletide). */
     actions?: boolean;
+    /** İleti burada değişince (yıldız, uzak içerik izni) kapsayıcı kendi kopyasını günceller. */
+    onupdate?: (d: MessageDetail) => void;
   }
 
-  let { detail: d, actions = false }: Props = $props();
+  let { detail: d, actions = false, onupdate }: Props = $props();
 
   const account = $derived(mail.accounts.find((a) => a.id === d.accountId));
   const recipients = $derived.by(() => {
@@ -29,10 +31,31 @@
   const totalSize = $derived(d.attachments.reduce((s, a) => s + a.size, 0));
 
   let card = $state<{ x: number; y: number } | null>(null);
+  /** Kişi kartını açan düğme; kart kapanınca odak buraya döner. */
+  let cardOpener: HTMLElement | null = null;
 
   function openCard(e: MouseEvent) {
-    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    cardOpener = e.currentTarget as HTMLElement;
+    const r = cardOpener.getBoundingClientRect();
     card = { x: r.left, y: r.bottom + 6 };
+  }
+
+  function closeCard() {
+    card = null;
+    cardOpener?.focus();
+  }
+
+  /** Yıldız iyimser çevrilir; arka uç kabul etmezse eski haline döner. */
+  async function star() {
+    const was = d.starred;
+    onupdate?.({ ...d, starred: !was });
+    const now = await toggleStar(d.id, was);
+    if (now === was) onupdate?.({ ...d, starred: was });
+  }
+
+  async function allow() {
+    const next = await allowRemote(d.id);
+    if (next) onupdate?.(next);
   }
 
   async function openAttachment(index: number) {
@@ -61,12 +84,12 @@
     <button class="btn-icon small" aria-label={t('act.reply')} title={t('act.reply')} onclick={() => compose('reply')}><Icon name="reply" size={16} /></button>
     <button class="btn-icon small" aria-label={t('act.forward')} title={t('act.forward')} onclick={() => compose('forward')}><Icon name="forward" size={16} /></button>
   {/if}
-  <button class="btn-icon" aria-label={d.starred ? t('act.unstar') : t('act.star')} title="{t('act.star')} · S" onclick={() => toggleStar(d.id)}>
+  <button class="btn-icon" aria-label={d.starred ? t('act.unstar') : t('act.star')} title="{t('act.star')} · S" onclick={star}>
     <span class:star={d.starred}><Icon name="star" filled={d.starred} /></span>
   </button>
 </div>
 {#if card}
-  <ContactCard address={d.from} accountId={d.accountId} at={card} onclose={() => (card = null)} />
+  <ContactCard address={d.from} accountId={d.accountId} at={card} onclose={closeCard} />
 {/if}
 
 {#if d.invite}
@@ -85,7 +108,7 @@
   <div class="remote">
     <Icon name="shield" />
     <span class="remote-text">{t('read.remoteBlocked')}</span>
-    <button class="link small" onclick={() => allowRemote(d.id)}>{t('read.remoteAllow')}</button>
+    <button class="link small" onclick={allow}>{t('read.remoteAllow')}</button>
   </div>
 {/if}
 

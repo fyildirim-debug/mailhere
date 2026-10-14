@@ -41,6 +41,21 @@ describe('yanıt hatırlatması', () => {
     expect((await b.call('messages_list', { query: inbox })).items[0].id).not.toBe(sent[0].id);
   });
 
+  it('arama ve kişi kartı özetlerinde hatırlatma gerçek değerdir (dizin değil)', async () => {
+    const b = createMockBackend({ now: NOW });
+    const hits = await b.call('search', { q: 'Q4', limit: 10 });
+    expect(hits.length).toBeGreaterThan(1);
+    expect(hits.every((m) => m.followUp === null)).toBe(true);
+    const sent = hits.find((m) => m.subject === 'Q4 bütçe taslağı')!;
+    const soon = NOW.getTime() + 60_000;
+    await b.call('followup_set', { id: sent.id, at: soon });
+    const again = await b.call('search', { q: 'Q4', limit: 10 });
+    expect(again.map((m) => m.followUp)).toEqual(again.map((m) => (m.id === sent.id ? soon : null)));
+    const info = await b.call('contact_get', { email: 'kerem.aydin@ornek.com.tr' });
+    expect(info.recent.length).toBeGreaterThan(1);
+    expect(info.recent.map((m) => m.followUp)).toEqual(info.recent.map((m) => (m.id === sent.id ? soon : null)));
+  });
+
   it('gönderimle birlikte kurulur; alıcı bilinen gönderici olur', async () => {
     vi.useFakeTimers();
     try {

@@ -18,10 +18,34 @@ async function restore(selected: MessageId | null) {
   void refreshCounts();
 }
 
-/** Arşivle ya da çöpe at; geri alınca gelen kutusuna döner. */
+/** Postaların geldiği klasörler (listeden ve okunan postadan bilinenler). */
+function originsOf(ids: MessageId[]): Map<MessageId, string> {
+  const from = new Map(mail.items.filter((m) => ids.includes(m.id)).map((m) => [m.id, m.mailboxId]));
+  if (mail.detail && ids.includes(mail.detail.id)) from.set(mail.detail.id, mail.detail.mailboxId);
+  return from;
+}
+
+/** Her postayı geldiği klasöre geri taşır; klasörü bilinmeyen gelen kutusuna döner. */
+async function moveBack(ids: MessageId[], from: Map<MessageId, string>) {
+  const back = new Map<string, MessageId[]>();
+  const unknown: MessageId[] = [];
+  for (const id of ids) {
+    const b = from.get(id);
+    if (b) back.set(b, [...(back.get(b) ?? []), id]);
+    else unknown.push(id);
+  }
+  for (const [box, list] of back) await call('messages_move_to', { ids: list, mailboxId: box });
+  if (unknown.length) await call('messages_move', { ids: unknown, target: 'inbox' });
+}
+
+/** Arşivle ya da çöpe at; geri alınca her posta geldiği klasöre döner. */
 export async function bulkMove(ids: MessageId[], target: MoveTarget) {
   if (!ids.length) return;
   const selected = mail.selectedId;
+  const from = originsOf(ids);
+  // Klasör görünümünde listede olmayanlar da (göndericiye göre temizlik) o klasördendir.
+  const view = mail.view;
+  if (view.kind === 'mailbox') for (const id of ids) if (!from.has(id)) from.set(id, view.id);
   takeOut(ids);
   clearChecked();
   try {
@@ -32,7 +56,7 @@ export async function bulkMove(ids: MessageId[], target: MoveTarget) {
       action: {
         label: t('act.undo'),
         run: async () => {
-          await call('messages_move', { ids, target: 'inbox' });
+          await moveBack(ids, from);
           await restore(selected);
         },
       },
@@ -47,7 +71,7 @@ export async function bulkMove(ids: MessageId[], target: MoveTarget) {
 export async function bulkMoveToFolder(ids: MessageId[], mailbox: Mailbox, label: string) {
   if (!ids.length) return;
   const selected = mail.selectedId;
-  const from = new Map(mail.items.filter((m) => ids.includes(m.id)).map((m) => [m.id, m.mailboxId]));
+  const from = originsOf(ids);
   takeOut(ids);
   clearChecked();
   try {
@@ -59,12 +83,7 @@ export async function bulkMoveToFolder(ids: MessageId[], mailbox: Mailbox, label
       action: {
         label: t('act.undo'),
         run: async () => {
-          const back = new Map<string, MessageId[]>();
-          for (const id of ids) {
-            const b = from.get(id);
-            if (b) back.set(b, [...(back.get(b) ?? []), id]);
-          }
-          for (const [box, list] of back) await call('messages_move_to', { ids: list, mailboxId: box });
+          await moveBack(ids, from);
           await restore(selected);
         },
       },

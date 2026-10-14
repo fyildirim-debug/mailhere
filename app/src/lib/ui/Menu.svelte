@@ -2,6 +2,8 @@
   import type { IconName } from './icons';
 
   export interface MenuItem {
+    /** Listeleme anahtarı; aynı adlı öğeler (eş adlı klasörler) için. Yoksa `label`. */
+    key?: string;
     label: string;
     icon?: IconName;
     /** Sağda soluk ek bilgi (kısayol, sayı). */
@@ -94,7 +96,7 @@
   onkeydown={onKeydown}
 >
   {#if title}<div class="menu-title">{title}</div>{/if}
-  {#each items as item (item.label)}
+  {#each items as item (item.key ?? item.label)}
     <button
       class="menu-item"
       class:danger={item.danger}

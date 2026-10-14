@@ -13,7 +13,7 @@
   import FollowUpMenu from '../../lib/mail/FollowUpMenu.svelte';
   import { followUpDue } from '../../lib/util/followup';
   import { fillVariables } from '../../lib/util/variables';
-  import { displayName, fileSize, foreignReplyDomains, replyTargets } from '../../lib/util/format';
+  import { displayName, fileSize, foreignReplyDomains } from '../../lib/util/format';
   import {
     blockSender,
     mail,
@@ -21,6 +21,7 @@
     moveToFolder,
     newRuleFrom,
     openSettings,
+    quickReplyTargets,
     screenerDecide,
     select,
     selectedIds,
@@ -45,7 +46,7 @@
   const d = $derived(mail.detail);
   const account = $derived(d ? mail.accounts.find((a) => a.id === d.accountId) : undefined);
   // Yanıt alıcıları adresleriyle gösterilir: gizli bir Reply-To fark edilsin.
-  const replyList = $derived(d ? replyTargets(d).map((a) => a.email).join(', ') : '');
+  const replyList = $derived(d ? quickReplyTargets(d, account).map((a) => a.email).join(', ') : '');
   const replyForeign = $derived(d ? foreignReplyDomains(d) : []);
   const isDraft = $derived(d ? mail.mailboxes.find((b) => b.id === d.mailboxId)?.role === 'drafts' : false);
   /** Konuşma görünümü: ayar açık ve taslak değil. */
@@ -53,13 +54,15 @@
   const isSent = $derived(d ? mail.mailboxes.find((b) => b.id === d.mailboxId)?.role === 'sent' : false);
   /** Elek görünümünde: gönderici için kabul / engelle kararı. */
   const screening = $derived(mail.view.kind === 'screener' && mail.search == null);
+  /** Göndericiye göre temizlik yalnız arka ucun kapsadığı görünümlerde: gelen kutusu, klasör, etiket (arama dışı). */
+  const senderScope = $derived(mail.search == null && (mail.view.kind === 'inbox' || mail.view.kind === 'mailbox' || mail.view.kind === 'tag'));
   const chips = $derived(quickReplies(settings.value));
 
   /** Hızlı yanıt değişkenleri: yanıtlanan kişi ve hesabın gönderen adı. */
   function useChip(text: string) {
     if (!d) return;
     reply = fillVariables(text, {
-      recipient: replyTargets(d)[0] ?? null,
+      recipient: quickReplyTargets(d, account)[0] ?? null,
       sender: account ? { name: account.displayName, email: account.email } : null,
       locale: locale(),
     });
@@ -137,6 +140,7 @@
       at: anchorOf(e),
       title: t('read.moveTo'),
       items: nodes.map((n) => ({
+        key: n.mailbox.id,
         label: `${'  '.repeat(n.depth)}${folderLabel(n.mailbox)}`,
         icon: 'folder' as const,
         onclick: () => void moveToFolder(selectedIds(), n.mailbox, folderLabel(n.mailbox)),
@@ -149,7 +153,7 @@
     const msg = d;
     const items: MenuItem[] = tagStore.list.map((tg) => {
       const has = msg.tags.includes(tg.id);
-      return { label: tg.name, checked: has, onclick: () => void setTag(selectedIds(), tg, !has) };
+      return { key: tg.id, label: tg.name, checked: has, onclick: () => void setTag(selectedIds(), tg, !has) };
     });
     items.push({ label: t('tag.manage'), icon: 'settings', onclick: () => openSettings('tags') });
     menu = { at: anchorOf(e), title: t('tag.menu'), items };
@@ -201,9 +205,13 @@
         // Gönderilmiş posta: yanıt gelmezse hatırlat.
         ...(isSent ? [{ label: t('follow.menu'), icon: 'followUp' as const, onclick: () => (followAt = at) }] : []),
         ...(msg.unsubscribe ? [{ label: t('read.unsubscribe'), icon: 'unsubscribe' as const, onclick: () => void unsubscribe(msg) }] : []),
-        { label: t('bulk.senderArchive'), icon: 'archive', onclick: () => void senderAction('archive', at) },
-        { label: t('bulk.senderKeepLatest'), icon: 'archive', onclick: () => void senderAction('keepLatest', at) },
-        { label: t('bulk.senderTrash'), icon: 'trash', onclick: () => void senderAction('trash', at) },
+        ...(senderScope
+          ? [
+              { label: t('bulk.senderArchive'), icon: 'archive' as const, onclick: () => void senderAction('archive', at) },
+              { label: t('bulk.senderKeepLatest'), icon: 'archive' as const, onclick: () => void senderAction('keepLatest', at) },
+              { label: t('bulk.senderTrash'), icon: 'trash' as const, onclick: () => void senderAction('trash', at) },
+            ]
+          : []),
         {
           label: t('read.ruleFromSender'),
           icon: 'rules',
@@ -231,7 +239,7 @@
 
 {#snippet tagChips()}
   {#if tags.length}
-    <div class="tagchips" aria-label={t('list.tagsOf', { list: tags.map((x) => x.name).join(', ') })}>
+    <div class="tagchips" role="group" aria-label={t('list.tagsOf', { list: tags.map((x) => x.name).join(', ') })}>
       {#each tags as tg (tg.id)}
         <button class="tagchip" title={t('tag.open')} onclick={() => setView({ kind: 'tag', id: tg.id })}>
           <span class="tdot" style:background={tg.color}></span>{tg.name}
@@ -411,7 +419,7 @@
 {#if menu}<Menu at={menu.at} title={menu.title} items={menu.items} onclose={() => (menu = null)} />{/if}
 {#if followAt && d}
   <FollowUpMenu
-    style="position: fixed; z-index: 60; left: {followAt.x}px; top: {followAt.y}px"
+    at={followAt}
     current={d.followUp}
     onpick={(at) => {
       const id = d.id;

@@ -609,7 +609,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
         .filter((m) => !needle || [m.subject, m.from.name ?? '', m.from.email, m.bodyText ?? ''].some((f) => lower(f).includes(needle)))
         .sort((a, b) => b.date - a.date)
         .slice(0, limit)
-        .map(summary);
+        .map((m) => summary(m, followUpOf(m.id)));
     },
     remote_allow: ({ id }) => {
       const m = find(id);
@@ -977,7 +977,13 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
         const k = `${m.accountId}|${m.threadId}`;
         if (!threads.has(k)) threads.set(k, m);
       }
-      return { email: e, name: named[0]?.from.name ?? null, total: hits.length, lastDate: hits[0]?.date ?? null, recent: [...threads.values()].slice(0, 5).map(summary) };
+      return {
+        email: e,
+        name: named[0]?.from.name ?? null,
+        total: hits.length,
+        lastDate: hits[0]?.date ?? null,
+        recent: [...threads.values()].slice(0, 5).map((m) => summary(m, followUpOf(m.id))),
+      };
     },
     message_save_eml: ({ id }) => {
       const m = find(id);

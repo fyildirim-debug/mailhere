@@ -200,7 +200,7 @@
     padding: 0;
     border: 0;
     border-radius: 50%;
-    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+    box-shadow: inset 0 0 0 1px var(--line-strong);
     transition: transform var(--t-fast) var(--ease);
   }
 

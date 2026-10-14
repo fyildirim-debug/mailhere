@@ -10,10 +10,10 @@
   import MailBody from '../../lib/mail/MailBody.svelte';
   import QuickRepliesEditor from '../../lib/mail/QuickRepliesEditor.svelte';
   import SnoozeMenu from '../../lib/mail/SnoozeMenu.svelte';
-  import { baseSubject, displayName, fileSize, foreignReplyDomains, replyTargets } from '../../lib/util/format';
+  import { baseSubject, displayName, fileSize, foreignReplyDomains } from '../../lib/util/format';
   import { fillVariables } from '../../lib/util/variables';
   import { locale } from '../../lib/i18n/index.svelte';
-  import { quoteFor, signatureFor } from '../../lib/stores/mail.svelte';
+  import { quickReplyTargets, quoteFor, signatureFor } from '../../lib/stores/mail.svelte';
   import { quickReplies, settings } from '../../lib/stores/settings.svelte';
 
   interface Props {
@@ -35,12 +35,14 @@
 
   const chips = $derived(quickReplies(settings.value));
   let editingChips = $state(false);
+  /** Yanıtın gideceği adresler (kendi postamızda alıcılar). */
+  const targets = $derived(d ? quickReplyTargets(d, account) : []);
 
   /** Hızlı yanıttaki değişkenler: yanıtlanan kişi ve hesabın gönderen adı. */
   function useChip(text: string) {
     if (!d) return;
     reply = fillVariables(text, {
-      recipient: replyTargets(d)[0] ?? null,
+      recipient: targets[0] ?? null,
       sender: account ? { name: account.displayName, email: account.email } : null,
       locale: locale(),
     });
@@ -113,7 +115,7 @@
       const item = await call('send', {
         msg: {
           accountId: d.accountId,
-          to: replyTargets(d),
+          to: targets,
           cc: [],
           bcc: [],
           subject: `Re: ${baseSubject(d.subject)}`,
@@ -260,11 +262,11 @@
           <textarea
             bind:value={reply}
             rows="2"
-            placeholder={t('quick.replyTo', { name: displayName(replyTargets(d)[0]) })}
+            placeholder={t('quick.replyTo', { name: displayName(targets[0]) })}
             aria-label={t('act.reply')}
           ></textarea>
           <div class="box-bar">
-            <span class="meta trunc" title={replyTargets(d).map((a) => a.email).join(', ')}>{t('read.replyTo', { list: replyTargets(d).map((a) => a.email).join(', ') })}</span>
+            <span class="meta trunc" title={targets.map((a) => a.email).join(', ')}>{t('read.replyTo', { list: targets.map((a) => a.email).join(', ') })}</span>
             <span class="grow"></span>
             <button class="btn-primary small" disabled={!reply.trim() || sending} onclick={send}><Icon name="send" size={15} />{t('act.send')}</button>
           </div>

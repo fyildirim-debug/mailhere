@@ -95,7 +95,7 @@
       title: t('sig.pick'),
       items: [
         { label: t('sig.noneOption'), checked: sigId == null, onclick: () => (sigId = null) },
-        ...from.signatures.map((x) => ({ label: x.name || t('sig.unnamed'), checked: x.id === sigId, onclick: () => (sigId = x.id) })),
+        ...from.signatures.map((x) => ({ key: x.id, label: x.name || t('sig.unnamed'), checked: x.id === sigId, onclick: () => (sigId = x.id) })),
       ],
     };
   }
@@ -132,7 +132,7 @@
       at: below(e),
       title: t('tpl.insert'),
       items: list.length
-        ? list.map((x) => ({ label: x.name, icon: 'template' as const, onclick: () => insertTemplate(x.id) }))
+        ? list.map((x) => ({ key: x.id, label: x.name, icon: 'template' as const, onclick: () => insertTemplate(x.id) }))
         : [{ label: t('tpl.noneCompose'), disabled: true, onclick: () => {} }],
     };
   }

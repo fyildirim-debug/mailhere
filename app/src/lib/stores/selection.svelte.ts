@@ -44,7 +44,11 @@ export function toggleCheck(rowId: MessageId) {
 /** Shift+tık: son tıklanan (yoksa okunan) satırdan bu satıra kadar işaretler. */
 export function checkRange(rowId: MessageId) {
   const rows = currentRows();
-  const from = anchor ?? rows.find((r) => mail.selectedId != null && r.ids.includes(mail.selectedId))?.id ?? rowId;
+  // Çapa görünüm değişince listede kalmamışsa yok sayılır; okunan satırdan başlanır.
+  const from =
+    (anchor != null && rows.some((r) => r.id === anchor) ? anchor : null) ??
+    rows.find((r) => mail.selectedId != null && r.ids.includes(mail.selectedId))?.id ??
+    rowId;
   const a = rows.findIndex((r) => r.id === from);
   const b = rows.findIndex((r) => r.id === rowId);
   if (a < 0 || b < 0) {

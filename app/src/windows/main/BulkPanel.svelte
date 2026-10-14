@@ -35,6 +35,7 @@
       at: anchorOf(e),
       title: t('read.moveTo'),
       items: nodes.map((x) => ({
+        key: x.mailbox.id,
         label: `${'  '.repeat(x.depth)}${folderLabel(x.mailbox)}`,
         icon: 'folder' as const,
         onclick: () => void bulkMoveToFolder(ids, x.mailbox, folderLabel(x.mailbox)),
@@ -45,7 +46,7 @@
   function tagMenu(e: MouseEvent) {
     const items: MenuItem[] = tagStore.list.map((tg) => {
       const all = rows.every((r) => r.tags.includes(tg.id));
-      return { label: tg.name, checked: all, onclick: () => void setTag(ids, tg, !all) };
+      return { key: tg.id, label: tg.name, checked: all, onclick: () => void setTag(ids, tg, !all) };
     });
     items.push({ label: t('tag.manage'), icon: 'settings', onclick: () => openSettings('tags') });
     menu = { at: anchorOf(e), title: t('tag.menu'), items };

@@ -8,6 +8,7 @@ import {
   openExternal,
   toAppError,
   type Account,
+  type Address,
   type Category,
   type Counts,
   type ListOnly,
@@ -156,6 +157,7 @@ export async function refreshList(keepSelection = true) {
       if (token !== listToken) return;
       mail.items = items;
       mail.nextCursor = null;
+      pruneChecked();
       if ((!keepSelection || mail.selectedId == null) && items.length) void select(items[0].id, { markRead: false });
       return;
     }
@@ -165,6 +167,7 @@ export async function refreshList(keepSelection = true) {
     if (token !== listToken) return;
     mail.items = page.items;
     mail.nextCursor = page.nextCursor;
+    pruneChecked();
     // Seçili posta bu görünümde yoksa okuma alanı açık kalır; liste yalnız vurguyu kaybeder.
     if ((!keepSelection || mail.selectedId == null) && page.items.length) void select(page.items[0].id, { markRead: false });
   } catch (e) {
@@ -191,6 +194,13 @@ export async function loadMore() {
   } finally {
     mail.loading = false;
   }
+}
+
+/** Liste yenilenince artık satır olmayan işaretler düşer; yoksa toplu işlem paneli boş kalırdı. */
+function pruneChecked() {
+  if (!mail.checked.length) return;
+  const rows = new Set(currentRows().map((r) => r.id));
+  if (mail.checked.some((id) => !rows.has(id))) mail.checked = mail.checked.filter((id) => rows.has(id));
 }
 
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -236,11 +246,13 @@ export function searchAll(q: string) {
 
 export function setCategory(category: Category | null) {
   mail.category = category;
+  mail.checked = [];
   void refreshList();
 }
 
 export function setOnly(only: ListOnly | null) {
   mail.only = mail.only === only ? null : only;
+  mail.checked = [];
   void refreshList(false);
 }
 
@@ -363,16 +375,22 @@ export async function setUnread(ids: MessageId[], unread: boolean, opts: { quiet
   }
 }
 
-export async function toggleStar(id: MessageId) {
+/**
+ * Yıldızı çevirir; sonucu döndürür. Listede ve okuma alanında olmayan ileti
+ * (konuşmadaki eski ileti) için `current` verilmelidir, yoksa hep yıldızlanır.
+ */
+export async function toggleStar(id: MessageId, current?: boolean): Promise<boolean> {
   const m = mail.items.find((x) => x.id === id) ?? (mail.detail?.id === id ? mail.detail : null);
-  const starred = !m?.starred;
+  const starred = !(current ?? m?.starred ?? false);
   patchLocal([id], { starred });
   try {
     await call('messages_flag', { ids: [id], unread: null, starred });
     if (mail.view.kind === 'starred' && !starred) takeOut([id]);
+    return starred;
   } catch (e) {
     patchLocal([id], { starred: !starred });
     errorToast(e);
+    return !starred;
   }
 }
 
@@ -490,13 +508,16 @@ export async function markAllRead() {
   });
 }
 
-export async function allowRemote(id: MessageId) {
+/** Uzak içeriğe izin verir; güncel iletiyi döndürür (hata olursa null). */
+export async function allowRemote(id: MessageId): Promise<MessageDetail | null> {
   try {
     const d = await call('remote_allow', { id });
     if (mail.detail?.id === id) mail.detail = d;
     showToast({ text: t('toast.remoteAllowed', { name: displayName(d.from) }) });
+    return d;
   } catch (e) {
     errorToast(e);
+    return null;
   }
 }
 
@@ -509,10 +530,29 @@ export function quoteFor(d: MessageDetail, text: string): string {
   return `${text.trim()}\n\n${t('compose.wrote', { date: when(d.date), name: displayName(d.from) })}\n${quoted}\n`;
 }
 
+/**
+ * Hızlı yanıtın alıcıları: Reply-To ya da gönderen, hesabın kendi adresi
+ * çıkarılmış. Kendi gönderdiğimiz postada (Gönderilenler, "Yanıt bekleniyor")
+ * kimse kalmazsa postanın alıcılarına gider. Yazma penceresindeki `prefill`
+ * ile aynı kural; en kötü durumda yine yanıt adresleri.
+ */
+export function quickReplyTargets(
+  d: Pick<MessageDetail, 'accountId' | 'from' | 'replyTo' | 'to'>,
+  account: Account | null | undefined = mail.accounts.find((a) => a.id === d.accountId),
+): Address[] {
+  const me = account?.email.toLowerCase();
+  const notMe = (a: Address) => a.email.toLowerCase() !== me;
+  const targets = replyTargets(d);
+  const others = targets.filter(notMe);
+  if (others.length) return others;
+  const to = d.to.filter(notMe);
+  return to.length ? to : targets;
+}
+
 /** Hızlı yanıtı giden kutusuna koyar; geri alınırsa metni geri verir. */
 export async function sendQuickReply(d: MessageDetail, text: string, restore: (text: string) => void): Promise<boolean> {
   const account = mail.accounts.find((a) => a.id === d.accountId);
-  const to = replyTargets(d);
+  const to = quickReplyTargets(d, account);
   try {
     const item = await call('send', {
       msg: {
