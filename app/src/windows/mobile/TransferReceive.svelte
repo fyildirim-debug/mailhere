@@ -128,12 +128,7 @@
       return;
     }
     busy = false;
-    // Android 13+: bildirim izni. Komut yoksa ya da reddedilirse sessizce geçilir.
-    try {
-      await call('notification_permission');
-    } catch {
-      // İzin isteği isteğe bağlıdır.
-    }
+    // Bildirim izni burada sorulmaz: hesaplar gelince MobileApp bir kez ister.
   }
 
   function accountFor(email: string) {

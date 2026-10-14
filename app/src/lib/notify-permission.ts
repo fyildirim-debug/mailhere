@@ -46,10 +46,16 @@ function markAsked() {
  * bilgisayardan aldı fark etmez. Sonra yalnız Ayarlar › Bildirimler'den sorulur;
  * her açılışta sormak rahatsız eder ve Android ikinci retten sonra kalıcı reddeder.
  */
-export async function askNotificationsOnce(): Promise<void> {
-  if (asked()) return;
-  const state = await notifyPermission();
-  if (state === 'unsupported') return;
-  markAsked();
-  if (state === 'prompt' || state === 'promptWithRationale') await requestNotifyPermission();
+let asking: Promise<void> | null = null;
+
+export function askNotificationsOnce(): Promise<void> {
+  // Aynı anda gelen çağrılar tek isteğe bağlanır; iki sistem penceresi açılmaz.
+  asking ??= (async () => {
+    if (asked()) return;
+    const state = await notifyPermission();
+    if (state === 'unsupported') return;
+    markAsked();
+    if (state === 'prompt' || state === 'promptWithRationale') await requestNotifyPermission();
+  })();
+  return asking;
 }
