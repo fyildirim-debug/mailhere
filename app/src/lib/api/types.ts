@@ -897,6 +897,10 @@ export interface Commands {
   qr_scan: [Record<string, never>, string | null];
   /** Bildirim izni ister; sonuç "granted" | "denied" | "prompt" (Android 13 öncesi hep "granted"). */
   notification_permission: [Record<string, never>, string];
+  /** Android: bildirim izni durumu, sormadan (`granted` | `denied` | `prompt` | `promptWithRationale`). */
+  notification_status: [Record<string, never>, string];
+  /** Android: uygulamanın sistem bildirim ayarlarını açar (izin kalıcı reddedildiyse). */
+  notification_settings: [Record<string, never>, null];
   /** Android: durum ve gezinme çubuğu simgelerini uygulamanın temasına uydurur. */
   system_bars: [{ dark: boolean }, null];
 }

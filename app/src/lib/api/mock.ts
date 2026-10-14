@@ -376,6 +376,8 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
   // Sunucudan bulunan (otomatik) roller: elle atama sıfırlanınca geri gelir.
   const autoRole = new Map(state.mailboxes.map((b) => [b.id, b.role]));
   const handlers = new Map<string, Set<Handler>>();
+  /** Android bildirim izni (yalnız mobil kabuk sorar). */
+  let notifyPerm = 'prompt';
   let nextId = 1000;
 
   function emit<E extends keyof EventPayloads>(event: E, payload: EventPayloads[E]) {
@@ -1415,7 +1417,13 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     },
     // Yalnız mobil kabuk: kamera yerine geçerli görünümlü örnek kod; bildirim izni verilmiş sayılır.
     qr_scan: () => `mailhere://aktar?v=1&h=192.168.1.20&p=51234&t=${fakeB64(16, 41)}&k=${fakeB64(32, 42)}`,
-    notification_permission: () => 'granted',
+    // Bildirim izni: ilk istekte verilmiş sayılır; ayar açma bir şey yapmaz.
+    notification_permission: () => {
+      notifyPerm = 'granted';
+      return notifyPerm;
+    },
+    notification_status: () => notifyPerm,
+    notification_settings: () => null,
     system_bars: () => null,
   };
 

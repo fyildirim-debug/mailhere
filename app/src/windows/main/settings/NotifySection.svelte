@@ -7,6 +7,7 @@
   import { mail, reloadAccounts } from '../../../lib/stores/mail.svelte';
   import { settings, updateSettings } from '../../../lib/stores/settings.svelte';
   import { accountUpdate } from './account';
+  import { notifyPermission, requestNotifyPermission, type NotifyPermission } from '../../../lib/notify-permission';
 
   const s = $derived(settings.value);
   // Mobilde kart yok, işletim sistemi bildirimi var: kart konumu/süresi, yerel
@@ -40,6 +41,27 @@
     void updateSettings({ vip });
   }
 
+  // Android: sistem bildirim izni. Ayarlardan dönünce (görünürlük) yeniden okunur.
+  let perm = $state<NotifyPermission>('unsupported');
+  $effect(() => {
+    if (!mobile) return;
+    const read = () => void notifyPermission().then((p) => (perm = p));
+    read();
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') read();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  });
+
+  async function allowNotifications() {
+    perm = await requestNotifyPermission();
+  }
+
+  function openNotificationSettings() {
+    call('notification_settings').catch((e) => showToast({ text: t('toast.error', { message: toAppError(e).message }) }));
+  }
+
   async function setAccountNotify(a: Account, notify: boolean) {
     try {
       await call('account_update', { id: a.id, update: { ...accountUpdate(a), notify } });
@@ -51,6 +73,23 @@
 </script>
 
 <h2 class="page">{t('set.nav.notifications')}</h2>
+
+{#if mobile && perm !== 'unsupported'}
+  <div class="set-row">
+    <span class="set-name"
+      >{t('mob.notify.system')}<span class="set-hint"
+        >{t(perm === 'granted' ? 'mob.notify.onHint' : perm === 'denied' ? 'mob.notify.deniedHint' : 'mob.notify.askHint')}</span
+      ></span
+    >
+    {#if perm === 'granted'}
+      <span class="perm-on">{t('mob.notify.on')}</span>
+    {:else if perm === 'denied'}
+      <button class="btn-soft" onclick={openNotificationSettings}>{t('mob.notify.openSettings')}</button>
+    {:else}
+      <button class="btn-primary" onclick={allowNotifications}>{t('mob.notify.allow')}</button>
+    {/if}
+  </div>
+{/if}
 
 <h3 class="set-h">{t('set.notifyWhat')}</h3>
 <div class="set-row top">
@@ -162,6 +201,12 @@
 </div>
 
 <style>
+  .perm-on {
+    flex: none;
+    font-weight: 500;
+    color: var(--ok);
+  }
+
   .page {
     font-size: var(--fs-title);
     font-weight: 600;

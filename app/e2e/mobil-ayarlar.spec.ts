@@ -93,6 +93,30 @@ test('masaüstüne özgü alanlar mobilde gizli: bildirim kartı, güncelleyici,
   await expect(page.getByText('Klavye kısayolları')).toHaveCount(0);
 });
 
+test('bildirim izni: hesap varken ilk açılışta bir kez istenir', async ({ page }) => {
+  await page.goto('#/main');
+  await expect(h1(page, 'Gelen Kutusu')).toBeVisible();
+  // Sahte arka uç isteği onaylar; bölüm izni açık gösterir.
+  await openSettings(page, 'Bildirimler');
+  const row = page.locator('.set-row', { hasText: 'Telefon bildirimleri' });
+  await expect(row).toContainText('Yeni posta telefon bildirimi olarak gelir.');
+  await expect(row.getByText('Açık', { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem('mailhere.notifyAsked'))).toBe('1');
+});
+
+test('bildirim izni: daha önce sorulduysa yeniden sorulmaz; ayarlardan verilir', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('mailhere.notifyAsked', '1'));
+  await page.goto('#/main');
+  await openSettings(page, 'Bildirimler');
+  const row = page.locator('.set-row', { hasText: 'Telefon bildirimleri' });
+  await expect(row).toContainText('bildirim izni gerekir');
+  const allow = row.getByRole('button', { name: 'İzin ver', exact: true });
+  await expectTouchHeight(allow);
+  await allow.click();
+  await expect(row.getByText('Açık', { exact: true })).toBeVisible();
+  await expect(allow).toHaveCount(0);
+});
+
 test('tema ve dil Genel bölümünden değişir', async ({ page }) => {
   await page.goto('#/main');
   await openSettings(page, 'Genel');

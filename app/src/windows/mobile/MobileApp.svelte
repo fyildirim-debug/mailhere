@@ -22,6 +22,7 @@
   import { parseRoute } from '../../lib/stores/route.svelte';
   import { checkAll, clearChecked } from '../../lib/stores/selection.svelte';
   import { settings } from '../../lib/stores/settings.svelte';
+  import { askNotificationsOnce } from '../../lib/notify-permission';
   import { tagById } from '../../lib/stores/tags.svelte';
   import Onboarding from '../main/Onboarding.svelte';
   import ScheduledView from '../main/ScheduledView.svelte';
@@ -96,6 +97,12 @@
     if (nav.current.name === 'compose') nav.replace(screen);
     else nav.push(screen);
   }
+
+  // Android 13+: ilk hesap olunca bildirim izni bir kez istenir (hesap elle
+  // eklense de bilgisayardan alınsa da); sonrası Ayarlar › Bildirimler'de.
+  $effect(() => {
+    if (mail.ready && mail.accounts.length > 0) void askNotificationsOnce();
+  });
 
   // Android sistem çubuklarının simgeleri uygulamanın temasını izler (telefon
   // açık kipteyken uygulama koyu temada olabilir).
