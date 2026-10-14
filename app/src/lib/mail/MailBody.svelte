@@ -4,7 +4,9 @@
   // koyulaşır, koyu yazı açılır, görseller ve koyu tasarlanmış alanlar kalır.
   // `original` ile posta kendi renklerine döner. Çerçevenin yükleyemediği
   // izinli uzak görseller (CORP başlığı) arka uçtan `data:` olarak alınır.
+  import { onDestroy } from 'svelte';
   import { call, openExternal, type MessageId } from '../api';
+  import { t } from '../i18n/index.svelte';
   import { darkMailWanted, settings } from '../stores/settings.svelte';
   import { linkify } from '../util/format';
   import { adaptDark } from './darkmail';
@@ -81,7 +83,7 @@
     root.classList.remove('mh-dark');
     if (!darkPaper) return;
     // Okuma açık varsayılanlarla yapılır, sonra koyu sınıf eklenir.
-    undo = adaptDark(doc, {
+    const back = adaptDark(doc, {
       ink: token('--ink'),
       ink2: token('--ink-2'),
       paper: token('--paper'),
@@ -89,6 +91,9 @@
       lineStrong: token('--line-strong'),
       lightLink: LIGHT.link,
     });
+    // Eşlenemeyen (çok büyük) posta özgün renklerinde kalır.
+    if (!back) return;
+    undo = back;
     root.classList.add('mh-dark');
   }
 
@@ -185,23 +190,32 @@
     if (!failed.size) return;
     const batch = failed;
     failed = new Map();
-    const urls = [...batch.keys()].slice(0, MAX_RESCUE);
+    const all = [...batch.keys()];
     const forId = id;
-    let got: { url: string; data: string }[];
-    try {
-      got = await call('remote_images', { id: forId, urls });
-    } catch {
-      // İnmeyen görsel alt metniyle kalır; posta yeniden açılınca yeniden denenir.
-      return;
+    // Arka uç çağrı başına en çok MAX_RESCUE adres alır; kalanlar sıradaki partide.
+    for (let i = 0; i < all.length; i += MAX_RESCUE) {
+      let got: { url: string; data: string }[];
+      try {
+        got = await call('remote_images', { id: forId, urls: all.slice(i, i + MAX_RESCUE) });
+      } catch {
+        // İnmeyen görsel alt metniyle kalır; posta yeniden açılınca yeniden denenir.
+        return;
+      }
+      // Bu arada başka posta açıldıysa ya da okuma kapandıysa geç gelen yanıt yok sayılır.
+      if (closed || rescued.id !== forId) return;
+      for (const { url, data } of got) {
+        rescued.map.set(url, data);
+        for (const img of batch.get(url) ?? []) img.src = data;
+      }
+      measure();
     }
-    // Bu arada başka posta açıldıysa geç gelen yanıt yok sayılır.
-    if (rescued.id !== forId) return;
-    for (const { url, data } of got) {
-      rescued.map.set(url, data);
-      for (const img of batch.get(url) ?? []) img.src = data;
-    }
-    measure();
   }
+
+  let closed = false;
+  onDestroy(() => {
+    closed = true;
+    if (rescueTimer) clearTimeout(rescueTimer);
+  });
 
   const paragraphs = $derived(
     (text ?? '')
@@ -217,7 +231,7 @@
   <div class="paper" class:dark={darkPaper} class:pending={!shown}>
     <iframe
       bind:this={frame}
-      title="posta"
+      title={t('read.frame')}
       sandbox="allow-same-origin"
       referrerpolicy="no-referrer"
       {srcdoc}

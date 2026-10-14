@@ -165,6 +165,8 @@ describe('mobil gezinme yığını', () => {
     expect(nav.stack).toEqual([{ name: 'list' }]);
     expect(nav.layer).toBeNull();
     expect(nav.depth()).toBe(0);
+    // Geçmiş girdileri de geri alınır: Android geri tuşu ölü girdiye düşmez.
+    expect(h.index).toBe(0);
   });
 
   it('home tüm girdileri tek seferde geri alır; geçmiş imleci köke iner, kökte sessiz', () => {

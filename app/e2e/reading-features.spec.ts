@@ -159,7 +159,7 @@ test('koyu temada açık zeminli bülten koyuya eşlenir; “Özgün renkler” 
   await page.getByRole('button', { name: 'Temayı değiştir' }).click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   await list(page).getByText('Renk, ışık ve odak').click();
-  const frame = page.frameLocator('iframe[title="posta"]');
+  const frame = page.frameLocator('iframe[title="Posta içeriği"]');
   const outer = frame.locator('table').first();
   const card = frame.locator('table').nth(1);
   const header = frame.locator('td[bgcolor="#1b1d24"]');
@@ -215,7 +215,7 @@ test('izinli uzak görsel çerçevede yüklenemezse arka uçtan indirilip göste
   await page.route(/^https:\/\/(izleme\.)?tasarimnotlari\.co\//, (route) => route.abort());
   await page.goto('/#/main');
   await list(page).getByText('Renk, ışık ve odak').click();
-  const frame = page.frameLocator('iframe[title="posta"]');
+  const frame = page.frameLocator('iframe[title="Posta içeriği"]');
   const cover = frame.getByRole('img', { name: 'Sayı 18 kapak' });
   // İzin yokken görsel istenmez (kaynak yok).
   await expect(cover).not.toHaveAttribute('src', /./);

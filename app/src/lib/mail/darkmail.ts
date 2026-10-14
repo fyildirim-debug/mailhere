@@ -159,10 +159,10 @@ interface Write {
  * varsayılanlarla (beyaz kağıt, koyu mürekkep) yerleşmiş olmalıdır; okuma
  * ondan yapılır, sonra çağıran koyu sınıfı ekler.
  */
-export function adaptDark(doc: Document, tokens: DarkTokens): () => void {
+export function adaptDark(doc: Document, tokens: DarkTokens): (() => void) | null {
   const view = doc.defaultView;
   const body = doc.body;
-  if (!view || !body) return () => {};
+  if (!view || !body) return null;
   const paper = parseAny(tokens.paper) ?? { r: 25, g: 28, b: 34, a: 1 };
   const lightLink = parseAny(tokens.lightLink);
   const bodyStyle = view.getComputedStyle(body);
@@ -172,7 +172,10 @@ export function adaptDark(doc: Document, tokens: DarkTokens): () => void {
 
   // 1. aşama: yalnız okuma.
   const all = body.querySelectorAll<HTMLElement>('*');
-  const n = Math.min(all.length, MAX_ELEMENTS);
+  // Çok büyük bültende kısmi eşleme açık zemin üstünde açık yazı bırakırdı;
+  // posta özgün renklerinde kalır.
+  if (all.length > MAX_ELEMENTS) return null;
+  const n = all.length;
   const recs = new Map<Element, Rec>();
   const list: Rec[] = [];
   for (let i = 0; i < n; i++) {
@@ -228,7 +231,8 @@ export function adaptDark(doc: Document, tokens: DarkTokens): () => void {
     // Yazı ve kenar yalnız özgün zemini açık olan bölgede değişir.
     const region = bg ?? rec.effective;
     if (!isLight(region)) continue;
-    if (color && !rec.inherits && !rec.defaultLink) {
+    // Saydam yazı (gizli ön başlık) gizli kalır: mürekkebe çevrilmez.
+    if (color && opaque(color) && !rec.inherits && !rec.defaultLink) {
       if (contrast(color, region) < HIDDEN) {
         // Zeminle gizlenmiş yazı (ön başlık hilesi) koyuda da gizli kalsın.
         const host = bg ? el : nearestPainted(el, recs);

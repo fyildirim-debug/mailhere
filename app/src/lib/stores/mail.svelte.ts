@@ -145,6 +145,11 @@ export async function reloadAccounts() {
   const [accounts, mailboxes] = await Promise.all([call('accounts_list'), call('mailboxes_list')]);
   mail.accounts = accounts;
   mail.mailboxes = mailboxes;
+  // Kapsamdaki hesap kaldırıldıysa tüm hesaplara dönülür (yoksa liste boş kalırdı).
+  if (mail.accountId && !accounts.some((a) => a.id === mail.accountId)) {
+    mail.accountId = null;
+    if (mail.view.kind === 'mailbox') mail.view = { kind: 'inbox' };
+  }
   if (!accounts.length) {
     mail.screen = 'onboarding';
     mail.items = [];

@@ -42,7 +42,8 @@
   const anything = $derived(
     pickedIds.length > 0 || (takeRules && !!preview?.rules) || (takeTags && !!preview?.tags) || (takeSettings && !!preview?.settings),
   );
-  const heading = $derived(onback ? 'h1' : 'h2');
+  // Kendi ekranında (karşılama) h1; Ayarlar › Cihazlar içinde bölüm başlığının altında h3.
+  const heading = $derived(onback ? 'h1' : 'h3');
 
   function authLabel(a: TransferPreviewAccount): string {
     return a.kind === 'jmap' ? 'JMAP' : t(`acc.via.${a.auth}` as MessageKey);
@@ -92,7 +93,9 @@
     try {
       text = await navigator.clipboard.readText();
     } catch {
-      text = '';
+      // Pano okunamadı (izin ya da destek yok): boş demek yanıltır.
+      error = t('aktar.clipboardDenied');
+      return;
     }
     if (!/mailhere:\/\/aktar\?/i.test(text)) {
       error = t('aktar.clipboardEmpty');

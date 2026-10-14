@@ -38,6 +38,8 @@
 
   function down(e: PointerEvent) {
     if (leaving || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    // Android uzun basıştan sonra click üretmez; asılı bayrak sonraki dokunuşu yutmasın.
+    swallowClick = false;
     start = { x: e.clientX, y: e.clientY, id: e.pointerId };
     dragging = false;
     clearPress();

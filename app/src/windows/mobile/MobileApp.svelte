@@ -62,8 +62,10 @@
     // Yazma istekleri (okuma ekranı, kişi kartı) yeni pencere yerine yığına.
     bindComposeOpener((p) => openCompose(composeScreen(p)));
     // Bildirimden açılan posta okuma ekranına iter.
+    // Yazma ekranının üstüne itilmez: sökülen yazma taslağa kaydedilir ve geri
+    // dönünce boş bir yazma ekranı açılırdı. Yerine geçer; taslak Taslaklar'da.
     const offOpen = on(EVENTS.open, (p) => {
-      if (nav.current.name === 'read') nav.replace({ name: 'read', id: p.id });
+      if (nav.current.name === 'read' || nav.current.name === 'compose') nav.replace({ name: 'read', id: p.id });
       else nav.push({ name: 'read', id: p.id });
     });
     // Android kabuğu (Platform::open_compose) yazma rotasını olayla verir.

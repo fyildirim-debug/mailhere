@@ -213,7 +213,7 @@ test('koyu tema (sistem): zeminsiz posta da bülten de koyuya eşlenir; ayar kap
   await page.emulateMedia({ colorScheme: 'dark' });
   await page.goto('/#/main');
   await list(page).getByText('Re: Kitap kulübü').click();
-  const frame = page.frameLocator('iframe[title="posta"]');
+  const frame = page.frameLocator('iframe[title="Posta içeriği"]');
   await expect(frame.getByText('Pazar akşamına kadar listeyi gönderirim.')).toBeVisible();
   const bg = await frame.locator('body').evaluate((b) => getComputedStyle(b).backgroundColor);
   expect(bg).not.toBe('rgb(255, 255, 255)');
@@ -223,7 +223,7 @@ test('koyu tema (sistem): zeminsiz posta da bülten de koyuya eşlenir; ayar kap
 
   // Kendi zemini (kapak yer tutucusu) olan bülten de koyu kağıtta; "Özgün renkler" beyaz kağıda döndürür.
   await list(page).getByText('Sayı 142 · Sakin arayüzler üzerine').click();
-  const news = page.frameLocator('iframe[title="posta"]');
+  const news = page.frameLocator('iframe[title="Posta içeriği"]');
   await expect(news.getByText('Bu hafta üç yazı seçtik.')).toBeVisible();
   await expect(news.locator('html')).toHaveClass(/mh-dark/);
   const paper = () => news.locator('body').evaluate((b) => getComputedStyle(b).backgroundColor);

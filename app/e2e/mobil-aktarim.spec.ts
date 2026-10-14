@@ -27,7 +27,7 @@ async function openDevices(page: Page) {
   expect(names.indexOf('Cihazlar')).toBeLessThan(names.indexOf('Gizlilik ve güvenlik'));
   await nav.getByRole('button', { name: 'Cihazlar', exact: true }).click();
   await expect(h1(page, 'Cihazlar')).toBeVisible();
-  await expect(page.getByRole('heading', { level: 2, name: 'Bilgisayardan al' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 3, name: 'Bilgisayardan al' })).toBeVisible();
 }
 
 test('ilk kurulum: ilk seçenek → kodu yapıştır → önizleme → kural seçimi kaldır → uygula → rapor → gelen kutusu', async ({ page }) => {
@@ -94,18 +94,18 @@ test('Ayarlar › Cihazlar: sahte kamerayla okut → var olan hesap güncellenec
   await page.goto('#/main');
   await openDevices(page);
   await page.getByRole('button', { name: 'QR’ı okut' }).click();
-  await expect(page.getByRole('heading', { level: 2, name: 'Gelenler' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 3, name: 'Gelenler' })).toBeVisible();
   await expect(page.getByText('güncellenecek')).toHaveCount(1);
   await expect(page.getByText('eklenecek')).toHaveCount(1);
   // Önizlemeden geri → kod adımı; kod girdide durur, yeniden bağlanılır.
   await page.getByRole('button', { name: 'Geri', exact: true }).last().click();
-  await expect(page.getByRole('heading', { level: 2, name: 'Bilgisayardan al' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 3, name: 'Bilgisayardan al' })).toBeVisible();
   await expect(page.getByLabel('Aktarım kodu')).toHaveValue(/^mailhere:\/\/aktar\?v=1/);
   await page.getByRole('button', { name: 'Bağlan', exact: true }).click();
-  await expect(page.getByRole('heading', { level: 2, name: 'Gelenler' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 3, name: 'Gelenler' })).toBeVisible();
 
   await page.getByRole('button', { name: 'Uygula' }).click();
-  await expect(page.getByRole('heading', { level: 2, name: 'Aktarıldı' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 3, name: 'Aktarıldı' })).toBeVisible();
   await expect(page.getByText('1 hesap eklendi')).toBeVisible();
   await expect(page.getByText('1 hesap güncellendi')).toBeVisible();
   await expect(page.getByText('2 kural eklendi')).toBeVisible();
@@ -126,7 +126,7 @@ test('Ayarlar › Cihazlar: "Gelen kutusuna git" yığını tek seferde köke in
   await page.getByLabel('Aktarım kodu').fill(CODE);
   await page.getByRole('button', { name: 'Bağlan', exact: true }).click();
   await page.getByRole('button', { name: 'Uygula' }).click();
-  await expect(page.getByRole('heading', { level: 2, name: 'Aktarıldı' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 3, name: 'Aktarıldı' })).toBeVisible();
   await page.getByRole('button', { name: 'Gelen kutusuna git' }).click();
   await expect(h1(page, 'Gelen Kutusu')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Geri', exact: true })).toHaveCount(0);
@@ -157,9 +157,9 @@ test('bozuk, eski sürümlü ve ulaşılamayan kod: ne oldu + ne yapılabilir', 
   await expect(page.getByRole('alert')).toContainText('aynı Wi-Fi');
 
   // Hata önizlemeye geçirmez; doğru kodla geçer.
-  await expect(page.getByRole('heading', { level: 2, name: 'Bilgisayardan al' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 3, name: 'Bilgisayardan al' })).toBeVisible();
   await code.fill(CODE);
   await connect.click();
-  await expect(page.getByRole('heading', { level: 2, name: 'Gelenler' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 3, name: 'Gelenler' })).toBeVisible();
   await expect(page.getByRole('alert')).toHaveCount(0);
 });

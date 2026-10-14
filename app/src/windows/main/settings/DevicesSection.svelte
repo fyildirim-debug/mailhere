@@ -50,7 +50,10 @@
 
   onMount(() => {
     const off = on(EVENTS.transfer, (s) => (status = s));
-    const tick = setInterval(() => (now = Date.now()), 1000);
+    // Geri sayım yalnız açık teklif varken ilerler.
+    const tick = setInterval(() => {
+      if (active) now = Date.now();
+    }, 1000);
     return () => {
       off();
       clearInterval(tick);
@@ -136,7 +139,7 @@
     <div class="stage">
       <div class="qr-card" class:idle={!active}>
         {#if active}
-          <QrCode qr={offer.qr} label={t('aktar.qrLabel')} />
+          <QrCode qr={offer.qr} label={t('aktar.qrLabel')} size={Math.max(240, (offer.qr.size + 8) * 4)} />
         {:else if kind}
           <span class="glyph {tone}"><Icon name={stateIcon[kind]} size={32} /></span>
         {/if}
@@ -298,6 +301,12 @@
 
   .busy .pip {
     animation: pulse 1.6s ease-in-out infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .busy .pip {
+      animation: none;
+    }
   }
 
   .ok .pip {

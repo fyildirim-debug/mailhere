@@ -48,16 +48,18 @@ export interface NavState {
 
 /**
  * Görünümün sayacı. Gelen kutusu kapsamdaki hesabın okunmamış sayısını
- * gösterir; diğer sayaçlar (ertelenen, taslak, elek…) uygulama genelidir.
+ * gösterir. Diğer sayaçlar (ertelenen, taslak, elek…) yalnız uygulama
+ * genelinde bilinir; kapsamdayken liste hesaba daraldığından yanıltmasın
+ * diye gösterilmez.
  */
 export function viewCount(item: ViewItem, counts: Counts, scope: string | null = null): number {
-  if (item.kind === 'inbox' && scope) return counts.perAccountUnread[scope] ?? 0;
+  if (scope) return item.kind === 'inbox' ? (counts.perAccountUnread[scope] ?? 0) : 0;
   return item.count?.(counts) ?? 0;
 }
 
-/** Öğe görünsün mü: isteğe bağlı öğeler sayaç ya da etkinlik ister. */
+/** Öğe görünsün mü: isteğe bağlı öğeler (uygulama genelinde) sayaç ya da etkinlik ister. */
 export function viewVisible(item: ViewItem, s: NavState): boolean {
-  return !item.optional || viewCount(item, s.counts, s.accountId) > 0 || viewActive(item.kind, s);
+  return !item.optional || viewCount(item, s.counts) > 0 || viewActive(item.kind, s);
 }
 
 /** Görünüm satırı etkin mi (kapsam ne olursa olsun). */

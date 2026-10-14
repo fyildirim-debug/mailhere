@@ -183,7 +183,7 @@ test('koyu temada bülten koyuya eşlenir; “Özgün renkler” 44 px hedefle k
   await page.keyboard.press('Escape');
   await row(page, 'Renk, ışık ve odak').click();
   await expect(page.getByRole('heading', { level: 2, name: 'Renk, ışık ve odak' })).toBeVisible();
-  const frame = page.frameLocator('iframe[title="posta"]');
+  const frame = page.frameLocator('iframe[title="Posta içeriği"]');
   const bg = (sel: string) => frame.locator(sel).first().evaluate((el) => getComputedStyle(el).backgroundColor);
   await expect(frame.locator('html')).toHaveClass(/mh-dark/);
   expect(await bg('body')).toBe('rgb(25, 28, 34)');
@@ -209,7 +209,7 @@ test('izinli uzak görsel çerçevede yüklenemezse arka uçtan indirilir', asyn
   await page.route(/^https:\/\/(izleme\.)?tasarimnotlari\.co\//, (route) => route.abort());
   await row(page, 'Renk, ışık ve odak').click();
   await page.getByRole('button', { name: 'Bu göndericiye izin ver' }).click();
-  const cover = page.frameLocator('iframe[title="posta"]').getByRole('img', { name: 'Sayı 18 kapak' });
+  const cover = page.frameLocator('iframe[title="Posta içeriği"]').getByRole('img', { name: 'Sayı 18 kapak' });
   await expect(cover).toHaveAttribute('src', /^data:image\/svg\+xml;base64,/);
   await expect.poll(() => cover.evaluate((el) => (el as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
 });

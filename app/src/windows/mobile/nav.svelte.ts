@@ -150,11 +150,16 @@ export function createNav(history: HistoryLike) {
       reconcile(depthOf(data));
     },
 
-    /** Köke döner (ör. hesap kalmayınca); geçmiş girdileri geride kalır ama işaretsizdir. */
+    /**
+     * Köke döner (ör. hesap kalmayınca). Bizim geçmiş girdilerimiz de geri
+     * alınır; yoksa Android geri tuşu her basışta ölü bir girdiye düşerdi.
+     */
     reset() {
+      const d = depth();
       state.stack = [{ name: 'list' }];
       state.layer = null;
-      mark();
+      if (d > 0) history.go(-d);
+      else mark();
     },
   };
 }

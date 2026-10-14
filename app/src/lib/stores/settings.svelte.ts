@@ -20,7 +20,9 @@ export function resolvedTheme(s: Settings = settings.value): 'light' | 'dark' {
 
 /** Postalar koyu temaya uyarlanır mı: tema koyu ve "Postaları koyu temaya uyarla" açık. */
 export function darkMailWanted(s: Settings = settings.value): boolean {
-  return resolvedTheme(s) === 'dark' && s.darkMail;
+  // Varsayılanda uygulanan tema okunur: sistem teması değişince de tepki verir.
+  const theme = s === settings.value ? settings.resolved : resolvedTheme(s);
+  return theme === 'dark' && s.darkMail;
 }
 
 function apply(s: Settings) {
