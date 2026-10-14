@@ -75,6 +75,7 @@ pub fn invite_reply_message(
         send_at: None,
         forward_from: None,
         draft_id: None,
+        follow_up_at: None,
     }
 }
 

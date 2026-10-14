@@ -358,6 +358,7 @@ impl Engines<'_> {
             send_at: None,
             forward_from: Some(input.id),
             draft_id: None,
+            follow_up_at: None,
         };
         if let Err(e) = self.outbox.enqueue_auto(&msg, now) {
             let _ = self.store.rule_forward_release(rule_id, &key);

@@ -83,6 +83,19 @@
   </div>
 </div>
 
+<h3 class="set-h">{t('set.screenerTitle')}</h3>
+<div class="set-row top">
+  <span class="set-name">{t('set.screener')}<span class="set-hint">{t('set.screenerHint')}</span></span>
+  <input
+    type="checkbox"
+    role="switch"
+    class="switch"
+    aria-label={t('set.screener')}
+    checked={s.screener}
+    onchange={(e) => updateSettings({ screener: (e.currentTarget as HTMLInputElement).checked })}
+  />
+</div>
+
 <h3 class="set-h">{t('set.cardTitle')}</h3>
 <div class="set-row">
   <span class="set-name">{t('set.cardPosition')}</span>

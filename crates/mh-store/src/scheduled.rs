@@ -148,6 +148,7 @@ mod tests {
             send_at: Some(500),
             forward_from: None,
             draft_id: None,
+            follow_up_at: None,
         }
     }
 

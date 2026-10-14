@@ -66,6 +66,10 @@ fn main() {
         "message_save_eml",
         "invite_reply",
         "invite_open",
+        "followup_set",
+        "followups_list",
+        "screener_list",
+        "screener_decide",
     ];
     tauri_build::try_build(
         tauri_build::Attributes::new()

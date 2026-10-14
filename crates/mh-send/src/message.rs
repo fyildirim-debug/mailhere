@@ -285,6 +285,7 @@ mod tests {
             send_at: None,
             forward_from: None,
             draft_id: None,
+            follow_up_at: None,
         }
     }
 

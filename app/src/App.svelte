@@ -11,7 +11,10 @@
 {:else if route.current.name === 'quick'}
   <QuickWindow id={route.current.id} />
 {:else if route.current.name === 'compose'}
-  <ComposeWindow mode={route.current.mode} messageId={route.current.id} initialTo={route.current.to} />
+  <!-- Karma değişince (tarayıcı, testler) yazma penceresi baştan kurulur. -->
+  {#key route.current}
+    <ComposeWindow mode={route.current.mode} messageId={route.current.id} initialTo={route.current.to} />
+  {/key}
 {:else}
   <MainWindow />
 {/if}

@@ -72,6 +72,10 @@ export const icons = {
   mapPin: '<path d="M12 21s-6.5-5.4-6.5-11a6.5 6.5 0 0 1 13 0c0 5.6-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.5"/>',
   users: '<circle cx="9" cy="8.5" r="3.2"/><path d="M3 19.5a6 6 0 0 1 12 0"/><path d="M15.5 5.6a3.2 3.2 0 0 1 0 5.8"/><path d="M16.5 13.8a6 6 0 0 1 4.5 5.7"/>',
   chevronUp: '<path d="M6 15l6-6 6 6"/>',
+  // Yanıt hatırlatması: dönen ok ve küçük saat.
+  followUp: '<path d="M9 6.5L3.5 12 9 17.5"/><path d="M3.5 12h7.5"/><circle cx="16.5" cy="15" r="4"/><path d="M16.5 13.2v1.9l1.3.9"/>',
+  // Elek: delikli süzgeç.
+  sieve: '<path d="M3.5 7.5h17"/><path d="M5.5 7.5l1.6 8.6A2 2 0 0 0 9.1 17.8h5.8a2 2 0 0 0 2-1.7l1.6-8.6"/><circle cx="10" cy="11.5" r=".9" fill="currentColor"/><circle cx="14" cy="11.5" r=".9" fill="currentColor"/><circle cx="12" cy="14.5" r=".9" fill="currentColor"/>',
 } as const;
 
 export type IconName = keyof typeof icons;

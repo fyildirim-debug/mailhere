@@ -16,8 +16,10 @@ mod cmd_rules;
 mod cmd_unsubscribe;
 mod cmd_vacation;
 mod commands;
+mod followups;
 mod notify;
 mod rules;
+mod screener;
 mod secrets;
 mod signatures;
 mod sink;
@@ -163,6 +165,10 @@ fn main() {
             cmd_reading::message_save_eml,
             cmd_reading::invite_reply,
             cmd_reading::invite_open,
+            followups::followup_set,
+            followups::followups_list,
+            screener::screener_list,
+            screener::screener_decide,
         ])
         .build(tauri::generate_context!())
         .expect("Mailhere başlatılamadı");

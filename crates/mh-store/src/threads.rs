@@ -3,7 +3,7 @@
 use mh_core::{AppResult, MessageId, MessageSummary};
 use rusqlite::{params, OptionalExtension};
 
-use crate::messages::{row_to_summary, SUMMARY_COLS};
+use crate::messages::{row_to_summary, SUMMARY_COLS, SUMMARY_LEN};
 use crate::Store;
 
 /// Bir konuşmadan en çok bu kadar ileti gösterilir (en yeniler).
@@ -37,7 +37,7 @@ impl Store {
                  ORDER BY m.date DESC, m.id DESC LIMIT ?4"
             ))?;
             let rows = st.query_map(params![account, thread, id, limit as i64], |r| {
-                Ok((row_to_summary(r)?, r.get::<_, Option<String>>(14)?))
+                Ok((row_to_summary(r)?, r.get::<_, Option<String>>(SUMMARY_LEN)?))
             })?;
             // Yeniden eskiye gelen satırlar; kopyalar Message-ID ile birleşir.
             let mut out: Vec<(MessageSummary, Option<String>)> = Vec::new();

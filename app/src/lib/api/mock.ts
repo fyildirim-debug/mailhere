@@ -15,6 +15,7 @@ import {
   type CommandResult,
   type Counts,
   type EventPayloads,
+  type FollowUp,
   type Mailbox,
   type MailboxRole,
   type MessageDetail,
@@ -22,6 +23,7 @@ import {
   type Rule,
   type RuleCondition,
   type ScheduledItem,
+  type ScreenedSender,
   type ServerConfig,
   type Settings,
   type Signature,
@@ -47,7 +49,19 @@ export interface MockBackend {
   on<E extends keyof EventPayloads>(event: E, handler: (p: EventPayloads[E]) => void): () => void;
   emit<E extends keyof EventPayloads>(event: E, payload: EventPayloads[E]): void;
   /** Testler için iç durum. */
-  state: { accounts: Account[]; mailboxes: Mailbox[]; messages: MessageDetail[]; settings: Settings; rules: Rule[] };
+  state: {
+    accounts: Account[];
+    mailboxes: Mailbox[];
+    messages: MessageDetail[];
+    settings: Settings;
+    rules: Rule[];
+    /** Yanıt hatırlatmaları: posta kimliği → an. */
+    followUps: Record<number, { at: number; createdAt: number }>;
+    /** Elekte bekleyen posta kimlikleri. */
+    screened: MessageId[];
+    /** Bilinen göndericiler: "hesap|adres". */
+    known: string[];
+  };
 }
 
 const SETTINGS_KEY = 'mailhere.mock.settings';
@@ -60,11 +74,11 @@ function lower(s: string): string {
   return s.toLocaleLowerCase('tr');
 }
 
-function summary(m: MessageDetail): MessageSummary {
+function summary(m: MessageDetail, followUp: number | null = m.followUp): MessageSummary {
   const {
     id, accountId, mailboxId, threadId, from, to, subject, snippet, date, unread, starred, hasAttachments, category, snoozedUntil,
   } = m;
-  return { id, accountId, mailboxId, threadId, from, to, subject, snippet, date, unread, starred, hasAttachments, category, snoozedUntil };
+  return { id, accountId, mailboxId, threadId, from, to, subject, snippet, date, unread, starred, hasAttachments, category, snoozedUntil, followUp };
 }
 
 /** Arka uçtaki `normalize_settings` ile aynı kurallar. */
@@ -178,6 +192,9 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
             actions: [{ kind: 'move', mailboxId: 'demo-kisisel:Faturalar' }, { kind: 'markRead' }], stop: true,
           },
         ] satisfies Rule[]) as Rule[],
+    followUps: {} as Record<number, { at: number; createdAt: number }>,
+    screened: [] as MessageId[],
+    known: [] as string[],
   };
   const scheduled = new Map<string, { item: ScheduledItem; msg: OutgoingMessage; timer: ReturnType<typeof setTimeout> }>();
   const vacations = new Map<string, Vacation>();
@@ -206,18 +223,32 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     return m;
   }
 
+  /** Açık yanıt hatırlatmasının anı (yoksa null). */
+  function followUpOf(id: MessageId): number | null {
+    return state.followUps[id]?.at ?? null;
+  }
+
+  function isScreened(id: MessageId): boolean {
+    return state.screened.includes(id);
+  }
+
   function inView(m: MessageDetail, view: View): boolean {
     const role = roleOf(m.mailboxId);
     const snoozed = m.snoozedUntil != null && m.snoozedUntil > now();
     switch (view.kind) {
       case 'inbox':
-        return role === 'inbox' && !snoozed;
+        // Elekte bekleyenler gelen kutusunda görünmez.
+        return role === 'inbox' && !snoozed && !isScreened(m.id);
       case 'snoozed':
         return snoozed;
       case 'starred':
         return m.starred && role !== 'trash';
       case 'mailbox':
         return m.mailboxId === view.id;
+      case 'followups':
+        return followUpOf(m.id) != null && role !== 'trash' && role !== 'junk';
+      case 'screener':
+        return isScreened(m.id);
       default:
         return role === view.kind;
     }
@@ -238,6 +269,8 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       drafts: state.messages.filter((m) => roleOf(m.mailboxId) === 'drafts').length,
       scheduled: scheduled.size,
       perAccountUnread,
+      followUps: state.messages.filter((m) => inView(m, { kind: 'followups' })).length,
+      screener: state.messages.filter((m) => isScreened(m.id)).length,
     };
   }
 
@@ -249,7 +282,21 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     const allowed = m.remoteAllowed || state.settings.remoteAllow.includes(lower(m.from.email));
     let bodyHtml = m.bodyHtml;
     if (bodyHtml && allowed) bodyHtml = bodyHtml.replace(/data-mh-src=/g, 'src=');
-    return structuredClone({ ...m, thread, remoteAllowed: allowed, bodyHtml });
+    return structuredClone({ ...m, thread, remoteAllowed: allowed, bodyHtml, followUp: followUpOf(m.id) });
+  }
+
+  /** Süresi dolan hatırlatmaların postaları, gelen kutusunun ilk sayfasının üstüne (en eski önce). */
+  function dueFollowUps(accountId: string | null, category: string | null): MessageSummary[] {
+    return state.messages
+      .filter((m) => inView(m, { kind: 'followups' }) && followUpOf(m.id)! <= now())
+      .filter((m) => !accountId || m.accountId === accountId)
+      .filter((m) => !category || m.category === category)
+      .sort((a, b) => followUpOf(a.id)! - followUpOf(b.id)! || a.id - b.id)
+      .map((m) => summary(m, followUpOf(m.id)));
+  }
+
+  function knownKey(accountId: string, email: string) {
+    return `${accountId}|${lower(email.trim())}`;
   }
 
   function addMailboxes(accountId: string) {
@@ -300,7 +347,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       id, accountId: account.id, mailboxId: boxFor(account.id, 'drafts'), threadId: `draft-${id}`,
       from: { name: account.displayName, email: account.email }, to: msg.to, subject: msg.subject,
       snippet: msg.bodyText.replace(/\s+/g, ' ').slice(0, 200), date: now(), unread: false, starred: false,
-      hasAttachments: msg.attachments.length > 0, category: 'people', snoozedUntil: null, cc: msg.cc, bcc: msg.bcc, replyTo: [],
+      hasAttachments: msg.attachments.length > 0, category: 'people', snoozedUntil: null, followUp: null, cc: msg.cc, bcc: msg.bcc, replyTo: [],
       messageIdHeader: null, references: [], bodyText: msg.bodyText, bodyHtml: null, hasRemoteContent: false,
       remoteAllowed: false, attachments: [], thread: [], unsubscribe: null, invite: null,
     };
@@ -314,14 +361,23 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     const { msg } = entry;
     const account = state.accounts.find((a) => a.id === msg.accountId);
     if (account) {
+      const sentId = nextId++;
+      // Yanıtlanan postanın konuşmasında kalır.
+      const original = msg.inReplyTo != null ? state.messages.find((m) => m.id === msg.inReplyTo) : undefined;
       state.messages.push({
-        id: nextId++, accountId: account.id, mailboxId: boxFor(account.id, 'sent'), threadId: `out-${id}`,
+        id: sentId, accountId: account.id, mailboxId: boxFor(account.id, 'sent'), threadId: original?.threadId ?? `out-${id}`,
         from: { name: account.displayName, email: account.email }, to: msg.to, subject: msg.subject,
         snippet: msg.bodyText.replace(/\s+/g, ' ').slice(0, 200), date: now(), unread: false, starred: false,
-        hasAttachments: msg.attachments.length > 0, category: 'people', snoozedUntil: null, cc: msg.cc, bcc: [], replyTo: [],
+        hasAttachments: msg.attachments.length > 0, category: 'people', snoozedUntil: null, followUp: null, cc: msg.cc, bcc: [], replyTo: [],
         messageIdHeader: null, references: [], bodyText: msg.bodyText, bodyHtml: null, hasRemoteContent: false,
         remoteAllowed: false, attachments: [], thread: [], unsubscribe: null, invite: null,
       });
+      // Alıcılar bilinen gönderici olur; istenmişse yanıt hatırlatması kurulur.
+      for (const a of [...msg.to, ...msg.cc]) {
+        const k = knownKey(account.id, a.email);
+        if (!state.known.includes(k)) state.known.push(k);
+      }
+      if (msg.followUpAt != null) state.followUps[sentId] = { at: msg.followUpAt, createdAt: now() };
     }
     emit(EVENTS.outbox, { id, ok: true, error: null });
     emit(EVENTS.changed, { mailboxIds: [] });
@@ -393,14 +449,26 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
         .filter((m) => !query.category || m.category === query.category)
         .filter((m) => (query.only === 'unread' ? m.unread : query.only === 'starred' ? m.starred : query.only === 'attachments' ? m.hasAttachments : true))
         .sort((a, b) => b.date - a.date || b.id - a.id);
+      // Yanıt bekleyenler: hatırlatma anına göre, imleçsiz (küçük liste).
+      if (query.view.kind === 'followups') {
+        items.sort((a, b) => followUpOf(a.id)! - followUpOf(b.id)! || a.id - b.id);
+        return { items: items.map((m) => summary(m, followUpOf(m.id))), nextCursor: null };
+      }
       if (query.cursor) {
         const [d, i] = query.cursor.split(':').map(Number);
         items = items.filter((m) => m.date < d || (m.date === d && m.id < i));
       }
       const page = items.slice(0, query.limit);
       const last = page[page.length - 1];
+      let out = page.map((m) => summary(m, followUpOf(m.id)));
+      // Süresi dolan hatırlatmalar gelen kutusunun ilk sayfasının en üstüne düşer.
+      if (query.view.kind === 'inbox' && !query.cursor && !query.only) {
+        const due = dueFollowUps(query.accountId, query.category);
+        const dup = new Set(due.map((m) => m.id));
+        out = [...due, ...out.filter((m) => !dup.has(m.id))];
+      }
       return {
-        items: page.map(summary),
+        items: out,
         nextCursor: items.length > query.limit && last ? `${last.date}:${last.id}` : null,
       };
     },
@@ -803,7 +871,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
         snippet: `${account.displayName} daveti yanıtladı: ${m.invite.summary}`, date: now(), unread: false, starred: false,
         hasAttachments: false, category: 'people', snoozedUntil: null, cc: [], bcc: [], replyTo: [],
         messageIdHeader: null, references: [], bodyText: `${account.displayName} daveti yanıtladı: ${m.invite.summary}`, bodyHtml: null,
-        hasRemoteContent: false, remoteAllowed: false, attachments: [], thread: [], unsubscribe: null, invite: null,
+        hasRemoteContent: false, remoteAllowed: false, attachments: [], thread: [], unsubscribe: null, invite: null, followUp: null,
       });
       emit(EVENTS.changed, { mailboxIds: [] });
       return null;
@@ -819,6 +887,48 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
         const a = state.accounts.find((x) => x.id === m.accountId);
         emit(EVENTS.notify, { message: summary(m), accountName: a?.name ?? '', accountColor: a?.color ?? '#4C6FD8' });
       }
+      return null;
+    },
+    followup_set: ({ id, at }) => {
+      const m = find(id);
+      if (at == null) {
+        delete state.followUps[id];
+      } else {
+        if (roleOf(m.mailboxId) !== 'sent') fail('invalid', 'Yanıt hatırlatması yalnız gönderilmiş postalara kurulabilir.');
+        if (at <= now()) fail('invalid', 'Hatırlatma anı ileride olmalı.');
+        state.followUps[id] = { at, createdAt: now() };
+      }
+      emit(EVENTS.changed, { mailboxIds: [] });
+      return null;
+    },
+    followups_list: () =>
+      state.messages
+        .filter((m) => inView(m, { kind: 'followups' }))
+        .map((m): FollowUp => ({ id: m.id, accountId: m.accountId, at: state.followUps[m.id].at, createdAt: state.followUps[m.id].createdAt, subject: m.subject, to: m.to }))
+        .sort((a, b) => a.at - b.at || a.id - b.id),
+    screener_list: () => {
+      const groups = new Map<string, ScreenedSender>();
+      for (const m of [...state.messages].sort((a, b) => b.date - a.date || b.id - a.id)) {
+        if (!isScreened(m.id)) continue;
+        const key = knownKey(m.accountId, m.from.email);
+        const g = groups.get(key);
+        if (g) g.count++;
+        else groups.set(key, { accountId: m.accountId, email: lower(m.from.email), name: m.from.name?.trim() || null, count: 1, latest: m.date, subject: m.subject });
+      }
+      return [...groups.values()].sort((a, b) => b.latest - a.latest);
+    },
+    screener_decide: ({ email, accountId, allow }) => {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) fail('invalid', 'Gönderici adresi eksik ya da bozuk.');
+      if (!state.accounts.some((a) => a.id === accountId)) fail('notFound', 'Hesap bulunamadı; kaldırılmış olabilir.');
+      const key = knownKey(accountId, email);
+      const ids = state.messages.filter((m) => isScreened(m.id) && knownKey(m.accountId, m.from.email) === key).map((m) => m.id);
+      state.screened = state.screened.filter((id) => !ids.includes(id));
+      if (allow) {
+        if (!state.known.includes(key)) state.known.push(key);
+      } else {
+        for (const id of ids) find(id).mailboxId = boxFor(accountId, 'trash');
+      }
+      emit(EVENTS.changed, { mailboxIds: [] });
       return null;
     },
   };

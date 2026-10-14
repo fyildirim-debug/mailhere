@@ -6,6 +6,7 @@
   import Menu, { type MenuItem } from '../../lib/ui/Menu.svelte';
   import { folderLabel } from '../../lib/mail/folders';
   import { dateGroup, type DateGroup } from '../../lib/util/format';
+  import { followUpDue } from '../../lib/util/followup';
   import { loadMore, mail, markAllRead, rowsOf, setCategory, setOnly, setView } from '../../lib/stores/mail.svelte';
   import { settings } from '../../lib/stores/settings.svelte';
   import MessageRow from './MessageRow.svelte';
@@ -24,6 +25,7 @@
   });
 
   const compact = $derived(settings.value.density === 'compact');
+  const isInbox = $derived(mail.view.kind === 'inbox' && mail.search == null);
   const rowH = $derived(compact ? 58 : 82);
 
   type Entry =
@@ -42,11 +44,15 @@
   const layout = $derived.by(() => {
     const entries: Entry[] = [];
     let top = 0;
-    let last: DateGroup | null = null;
+    let last: DateGroup | 'due' | null = null;
     rows.forEach((m, index) => {
-      const g = dateGroup(m.date, now);
+      // Süresi dolan hatırlatmalar gelen kutusunun başında kendi başlığıyla durur;
+      // liste tarihe göre sıralı olmayabilir (arama, hatırlatma), başlık anahtarı
+      // bu yüzden konuma bağlıdır.
+      const g = isInbox && followUpDue(m.followUp, now) ? 'due' : dateGroup(m.date, now);
       if (g !== last) {
-        entries.push({ kind: 'group', key: `g-${g}`, label: t(groupKey[g]), top, h: GROUP_H });
+        const label = g === 'due' ? t('nav.followups') : t(groupKey[g]);
+        entries.push({ kind: 'group', key: `g-${index}`, label, top, h: GROUP_H });
         top += GROUP_H;
         last = g;
       }
@@ -110,7 +116,18 @@
     sent: 'nav.sent',
     archive: 'nav.archive',
     trash: 'nav.trash',
+    followups: 'nav.followups',
+    screener: 'nav.screener',
   };
+
+  /** Boş durum metni: görünüme özel, yoksa genel. */
+  const empty = $derived.by((): { title: MessageKey; body: MessageKey } => {
+    if (mail.search == null && !mail.category && !mail.only) {
+      if (mail.view.kind === 'followups') return { title: 'follow.emptyTitle', body: 'follow.emptyBody' };
+      if (mail.view.kind === 'screener') return { title: 'screen.emptyTitle', body: 'screen.emptyBody' };
+    }
+    return { title: 'list.emptyTitle', body: mail.category || mail.only ? 'list.emptyFilteredBody' : 'list.emptyBody' };
+  });
 
   const title = $derived.by(() => {
     if (mail.search != null) return t('list.searchTitle', { q: mail.search });
@@ -137,7 +154,6 @@
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
     filterMenu = { x: r.right - 220, y: r.bottom + 4 };
   }
-  const isInbox = $derived(mail.view.kind === 'inbox' && mail.search == null);
 </script>
 
 <section class="list" aria-label={t('list.label')}>
@@ -199,8 +215,8 @@
     {:else if !mail.loading}
       <div class="empty">
         <Icon name="check" size={28} />
-        <div class="empty-title">{t('list.emptyTitle')}</div>
-        <div class="empty-body">{mail.category || mail.only ? t('list.emptyFilteredBody') : t('list.emptyBody')}</div>
+        <div class="empty-title">{t(empty.title)}</div>
+        <div class="empty-body">{t(empty.body)}</div>
       </div>
     {/if}
   </div>

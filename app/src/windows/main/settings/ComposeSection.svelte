@@ -1,11 +1,12 @@
 <script lang="ts">
   import { toAppError, type Template } from '../../../lib/api';
-  import { t } from '../../../lib/i18n/index.svelte';
+  import { t, type MessageKey } from '../../../lib/i18n/index.svelte';
   import QuickRepliesEditor from '../../../lib/mail/QuickRepliesEditor.svelte';
   import Icon from '../../../lib/ui/Icon.svelte';
   import { showToast } from '../../../lib/ui/toast.svelte';
   import { openSettings } from '../../../lib/stores/mail.svelte';
   import { settings, updateSettings } from '../../../lib/stores/settings.svelte';
+  import { VARIABLE_HELP } from '../../../lib/util/variables';
 
   const s = $derived(settings.value);
   const undoSeconds = [5, 10, 20, 30];
@@ -96,6 +97,15 @@
   {/if}
 </div>
 
+<h3 class="set-h">{t('var.title')}</h3>
+<p class="set-lead">{t('var.lead')}</p>
+<dl class="vars">
+  {#each VARIABLE_HELP as v (v.tr)}
+    <dt><code>{`{${v.tr}}`}</code><code class="alt">{`{${v.en}}`}</code></dt>
+    <dd>{t(`var.${v.tr}` as MessageKey)}</dd>
+  {/each}
+</dl>
+
 {#snippet form()}
   {#if editing}
     <div class="edit">
@@ -176,5 +186,38 @@
 
   .span {
     grid-column: 1 / -1;
+  }
+
+  .vars {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: 20px;
+    row-gap: 8px;
+    margin: 8px 0 0;
+    max-width: 560px;
+  }
+
+  .vars dt {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+  }
+
+  .vars dd {
+    margin: 0;
+    color: var(--ink-2);
+  }
+
+  code {
+    font-family: var(--font-mono);
+    font-size: var(--fs-meta);
+    padding: 1px 6px;
+    border-radius: var(--r-kbd);
+    background: var(--surface);
+    border: 1px solid var(--line);
+  }
+
+  code.alt {
+    color: var(--ink-3);
   }
 </style>

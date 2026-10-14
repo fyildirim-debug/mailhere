@@ -3,6 +3,7 @@
   import { locale, t } from '../../lib/i18n/index.svelte';
   import Avatar from '../../lib/ui/Avatar.svelte';
   import Icon from '../../lib/ui/Icon.svelte';
+  import { followUpDue } from '../../lib/util/followup';
   import { displayName, listTime, snoozeOptions } from '../../lib/util/format';
   import { mail, moveTo, select, snooze, type Row } from '../../lib/stores/mail.svelte';
 
@@ -16,6 +17,9 @@
 
   const selected = $derived(mail.selectedId != null && message.ids.includes(mail.selectedId));
   const tomorrow = $derived(snoozeOptions(now).find((o) => o.key === 'tomorrow')!.at);
+  // Yanıt hatırlatmalı (gönderilmiş) satırda beklenen kişi, yani ilk alıcı görünür.
+  const who = $derived(message.followUp != null && message.to[0] ? message.to[0] : message.from);
+  const awaiting = $derived(followUpDue(message.followUp, now));
 </script>
 
 <div class="row" class:selected class:unread={message.unread} class:compact data-id={message.id}>
@@ -26,10 +30,11 @@
     ondblclick={() => call('open_quick', { id: message.id })}
   >
     <span class="dot" aria-hidden="true"></span>
-    <Avatar address={message.from} />
+    <Avatar address={who} />
     <span class="text">
       <span class="line1">
-        <span class="sender trunc">{displayName(message.from)}</span>
+        <span class="sender trunc">{displayName(who)}</span>
+        {#if awaiting}<span class="tag">{t('follow.awaiting')}</span>{/if}
         {#if message.count > 1}<span class="count num">{message.count}</span>{/if}
         {#if message.hasAttachments}<Icon name="paperclip" size={14} label={t('list.attachment')} class="quiet" />{/if}
         {#if message.starred}<span class="star"><Icon name="star" size={14} filled label={t('list.starred')} /></span>{/if}

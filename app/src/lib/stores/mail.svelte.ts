@@ -37,7 +37,7 @@ export const mail = $state({
   screen: 'mail' as Screen,
   accounts: [] as Account[],
   mailboxes: [] as Mailbox[],
-  counts: { inboxUnread: 0, snoozed: 0, drafts: 0, scheduled: 0, perAccountUnread: {} } as Counts,
+  counts: { inboxUnread: 0, snoozed: 0, drafts: 0, scheduled: 0, perAccountUnread: {}, followUps: 0, screener: 0 } as Counts,
   sync: {} as Record<string, SyncStatus>,
 
   view: { kind: 'inbox' } as View,
@@ -535,6 +535,33 @@ export async function sendQuickReply(d: MessageDetail, text: string, restore: (t
   } catch (e) {
     showToast({ text: t('toast.sendFailed', { message: toAppError(e).message }) });
     return false;
+  }
+}
+
+/** Gönderilmiş postaya yanıt hatırlatması kurar (`at`) ya da kaldırır (null). */
+export async function setFollowUp(id: MessageId, at: number | null) {
+  try {
+    await call('followup_set', { id, at });
+    patchLocal([id], { followUp: at });
+    // Kaldırılan hatırlatma "Yanıt bekleyenler"den ve gelen kutusunun üstünden çıkar.
+    if (at == null && (mail.view.kind === 'followups' || mail.view.kind === 'inbox')) takeOut([id]);
+    void refreshCounts();
+    showToast({ text: at == null ? t('follow.cleared') : t('follow.setToast', { when: when(at) }) });
+  } catch (e) {
+    errorToast(e);
+  }
+}
+
+/** Elekten karar: kabul edilen gönderici gelen kutusuna döner; engellenen çöpe gider ve kural kurulur. */
+export async function screenerDecide(accountId: string, email: string, allow: boolean) {
+  try {
+    await call('screener_decide', { email, accountId, allow });
+    if (allow) showToast({ text: t('screen.allowed', { email }) });
+    else await blockSender(accountId, email);
+    void refreshList(false);
+    void refreshCounts();
+  } catch (e) {
+    errorToast(e);
   }
 }
 

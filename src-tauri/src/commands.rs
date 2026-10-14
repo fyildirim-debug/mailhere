@@ -694,6 +694,7 @@ pub fn show_demo_card(app: &AppHandle) -> AppResult<()> {
             has_attachments: false,
             category: Category::People,
             snoozed_until: None,
+            follow_up: None,
         },
     };
     let account = state.store.account(&message.account_id)?;

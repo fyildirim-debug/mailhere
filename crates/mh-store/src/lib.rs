@@ -10,6 +10,7 @@ mod contacts;
 mod demo;
 mod drafts;
 mod encryption;
+mod followups;
 mod jmap;
 mod key;
 mod mailboxes;
@@ -18,6 +19,7 @@ mod outbox;
 mod rules;
 mod scheduled;
 mod schema;
+mod screener;
 mod search;
 mod settings;
 mod threads;
@@ -44,6 +46,7 @@ pub use rules::{
     plan as rule_plan, CompiledRule, ForwardClaim, MoveDest, RuleInput, RulePlan,
     FORWARDS_PER_HOUR, MAX_RULES,
 };
+pub use screener::normalize_email;
 pub use search::{fold_loose, fts_query};
 pub use threads::THREAD_LIMIT;
 

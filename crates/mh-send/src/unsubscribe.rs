@@ -282,6 +282,7 @@ pub fn mailto_message(account_id: &str, uri: &str) -> Option<OutgoingMessage> {
         send_at: None,
         forward_from: None,
         draft_id: None,
+        follow_up_at: None,
     })
 }
 

@@ -70,6 +70,10 @@
     "allow-contact-get",
     "allow-message-save-eml",
     "allow-invite-reply",
-    "allow-invite-open"
+    "allow-invite-open",
+    "allow-followup-set",
+    "allow-followups-list",
+    "allow-screener-list",
+    "allow-screener-decide"
   ]
 }

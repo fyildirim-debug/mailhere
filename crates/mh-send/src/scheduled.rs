@@ -124,6 +124,7 @@ mod tests {
             send_at: Some(9_000_000_000_000),
             forward_from: None,
             draft_id: None,
+            follow_up_at: None,
         }
     }
 

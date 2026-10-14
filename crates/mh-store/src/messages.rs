@@ -201,8 +201,12 @@ fn free_uid(
     Ok(())
 }
 
+/// Özet sütunları; son sütun açık yanıt hatırlatmasının anı (`followups`).
 pub(crate) const SUMMARY_COLS: &str = "m.id, m.account_id, m.mailbox_id, m.thread_id, m.from_addr, m.to_addrs,
-    m.subject, m.snippet, m.date, m.unread, m.starred, m.has_attachments, m.category, m.snoozed_until";
+    m.subject, m.snippet, m.date, m.unread, m.starred, m.has_attachments, m.category, m.snoozed_until,
+    (SELECT f.due_at FROM followups f WHERE f.message_id = m.id)";
+/// `SUMMARY_COLS` sütun sayısı (ardına eklenen sütunların başlangıcı).
+pub(crate) const SUMMARY_LEN: usize = 15;
 
 pub(crate) fn row_to_summary(r: &Row<'_>) -> rusqlite::Result<MessageSummary> {
     Ok(MessageSummary {
@@ -220,6 +224,7 @@ pub(crate) fn row_to_summary(r: &Row<'_>) -> rusqlite::Result<MessageSummary> {
         has_attachments: r.get(11)?,
         category: category_from(&r.get::<_, String>(12)?),
         snoozed_until: r.get(13)?,
+        follow_up: r.get(14)?,
     })
 }
 
@@ -469,6 +474,8 @@ impl Store {
                 }
             }
             let id = insert(tx, m)?;
+            // Gönderilenler'e düşen postanın alıcıları bilinen gönderici olur (`screener`).
+            crate::screener::note_sent_tx(tx, m)?;
             Ok(UpsertOutcome { id, inserted: true })
         })
     }
@@ -586,9 +593,20 @@ impl Store {
         let role = |r: MailboxRole| Value::Text(role_str(r).into());
         match &q.view {
             View::Inbox => {
-                sql += " AND b.role = ? AND (m.snoozed_until IS NULL OR m.snoozed_until <= ?)";
+                // Elekte bekleyen postalar gelen kutusunda görünmez (`screener`).
+                sql += " AND b.role = ? AND (m.snoozed_until IS NULL OR m.snoozed_until <= ?)
+                    AND NOT EXISTS (SELECT 1 FROM screened s WHERE s.message_id = m.id)";
                 p.push(role(MailboxRole::Inbox));
                 p.push(Value::Integer(now));
+            }
+            // Açık yanıt hatırlatmaları: süresi gelenler önce (`followups`).
+            View::Followups => {
+                sql += " AND EXISTS (SELECT 1 FROM followups f WHERE f.message_id = m.id)
+                    AND b.role NOT IN ('trash', 'junk')";
+            }
+            // Elekte bekleyenler (`screener`).
+            View::Screener => {
+                sql += " AND EXISTS (SELECT 1 FROM screened s WHERE s.message_id = m.id)";
             }
             View::Snoozed => {
                 sql += " AND m.snoozed_until > ? AND b.role NOT IN ('trash', 'junk')";
@@ -623,25 +641,41 @@ impl Store {
             Some(ListOnly::Attachments) => " AND m.has_attachments = 1",
             None => "",
         };
+        let first_page = q.cursor.as_deref().is_none_or(str::is_empty);
         if let Some(c) = q.cursor.as_deref().filter(|c| !c.is_empty()) {
             let (d, i) = parse_cursor(c)?;
             sql += " AND (m.date < ? OR (m.date = ? AND m.id < ?))";
             p.extend([Value::Integer(d), Value::Integer(d), Value::Integer(i)]);
         }
-        sql += " ORDER BY m.date DESC, m.id DESC LIMIT ?";
-        p.push(Value::Integer(limit + 1));
+        // Hatırlatma listesi küçüktür ve hatırlatma anına göre sıralanır; imleçsiz.
+        if q.view == View::Followups {
+            sql += " ORDER BY (SELECT f.due_at FROM followups f WHERE f.message_id = m.id), m.id LIMIT 500";
+        } else {
+            sql += " ORDER BY m.date DESC, m.id DESC LIMIT ?";
+            p.push(Value::Integer(limit + 1));
+        }
 
         let mut items = self.with(|c| {
             let mut st = c.prepare_cached(&sql)?;
             let rows = st.query_map(params_from_iter(p), row_to_summary)?;
             rows.collect::<rusqlite::Result<Vec<_>>>()
         })?;
-        let next_cursor = if items.len() as i64 > limit {
+        let next_cursor = if q.view != View::Followups && items.len() as i64 > limit {
             items.truncate(limit as usize);
             items.last().map(|m| format!("{}:{}", m.date, m.id))
         } else {
             None
         };
+        // Süresi dolan yanıt hatırlatmaları gelen kutusunun ilk sayfasının
+        // en üstüne, "Yanıt bekleniyor" işaretiyle (`follow_up`) düşer.
+        if q.view == View::Inbox && first_page && q.only.is_none() {
+            let due = self.followups_due_summaries(q.account_id.as_deref(), q.category, now)?;
+            if !due.is_empty() {
+                let dup: std::collections::HashSet<MessageId> = due.iter().map(|m| m.id).collect();
+                items.retain(|m| !dup.contains(&m.id));
+                items.splice(0..0, due);
+            }
+        }
         Ok(Page { items, next_cursor })
     }
 
@@ -1018,9 +1052,11 @@ impl Store {
     pub fn counts(&self, now: Millis) -> AppResult<Counts> {
         self.with(|c| {
             let mut counts = Counts::default();
+            // Elekte bekleyen postalar sayılmaz (`screener`).
             let mut st = c.prepare_cached(
                 "SELECT m.account_id, COUNT(*) FROM messages m JOIN mailboxes b ON b.id = m.mailbox_id
                  WHERE b.role = 'inbox' AND m.unread = 1 AND (m.snoozed_until IS NULL OR m.snoozed_until <= ?1)
+                   AND NOT EXISTS (SELECT 1 FROM screened s WHERE s.message_id = m.id)
                  GROUP BY m.account_id",
             )?;
             for row in st.query_map([now], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as u32)))? {
@@ -1041,6 +1077,14 @@ impl Store {
             )? as u32;
             counts.scheduled =
                 c.query_row("SELECT COUNT(*) FROM outbox", [], |r| r.get::<_, i64>(0))? as u32;
+            counts.follow_ups = c.query_row(
+                "SELECT COUNT(*) FROM followups f JOIN messages m ON m.id = f.message_id
+                 JOIN mailboxes b ON b.id = m.mailbox_id WHERE b.role NOT IN ('trash', 'junk')",
+                [],
+                |r| r.get::<_, i64>(0),
+            )? as u32;
+            counts.screener =
+                c.query_row("SELECT COUNT(*) FROM screened", [], |r| r.get::<_, i64>(0))? as u32;
             Ok(counts)
         })
     }
@@ -1104,13 +1148,14 @@ impl Store {
                 ),
                 [id],
                 |r| {
+                    let i = SUMMARY_LEN;
                     Ok((
                         row_to_summary(r)?,
-                        addr_list(14, &r.get::<_, String>(14)?)?,
-                        addr_list(15, &r.get::<_, String>(15)?)?,
-                        r.get::<_, Option<String>>(16)?,
-                        from_json::<Vec<String>>(17, &r.get::<_, String>(17)?)?,
-                        r.get::<_, Option<Vec<u8>>>(18)?,
+                        addr_list(i, &r.get::<_, String>(i)?)?,
+                        addr_list(i + 1, &r.get::<_, String>(i + 1)?)?,
+                        r.get::<_, Option<String>>(i + 2)?,
+                        from_json::<Vec<String>>(i + 3, &r.get::<_, String>(i + 3)?)?,
+                        r.get::<_, Option<Vec<u8>>>(i + 4)?,
                     ))
                 },
             )

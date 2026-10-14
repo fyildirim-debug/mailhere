@@ -11,6 +11,7 @@
   import QuickRepliesEditor from '../../lib/mail/QuickRepliesEditor.svelte';
   import SnoozeMenu from '../../lib/mail/SnoozeMenu.svelte';
   import { baseSubject, displayName, fileSize, foreignReplyDomains, replyTargets } from '../../lib/util/format';
+  import { fillVariables } from '../../lib/util/variables';
   import { locale } from '../../lib/i18n/index.svelte';
   import { quoteFor, signatureFor } from '../../lib/stores/mail.svelte';
   import { quickReplies, settings } from '../../lib/stores/settings.svelte';
@@ -34,6 +35,16 @@
 
   const chips = $derived(quickReplies(settings.value));
   let editingChips = $state(false);
+
+  /** Hızlı yanıttaki değişkenler: yanıtlanan kişi ve hesabın gönderen adı. */
+  function useChip(text: string) {
+    if (!d) return;
+    reply = fillVariables(text, {
+      recipient: replyTargets(d)[0] ?? null,
+      sender: account ? { name: account.displayName, email: account.email } : null,
+      locale: locale(),
+    });
+  }
 
   onMount(() => {
     void load();
@@ -235,7 +246,7 @@
         {:else}
           <div class="chips">
             {#each chips as c (c)}
-              <button class="chip" onclick={() => (reply = c)}>{c}</button>
+              <button class="chip" onclick={() => useChip(c)}>{c}</button>
             {/each}
             <button class="chip edit" aria-label={t('qr.edit')} title={t('qr.edit')} onclick={() => (editingChips = true)}>
               <Icon name={chips.length ? 'pen' : 'plus'} size={14} />{#if !chips.length}{t('qr.add')}{/if}
