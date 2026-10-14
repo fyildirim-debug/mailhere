@@ -39,7 +39,8 @@ test('ilk kurulum: ilk seçenek → kodu yapıştır → önizleme → kural se�
   const first = await alts.first().boundingBox();
   const google = await page.getByRole('button', { name: 'Google hesabı' }).boundingBox();
   expect(first!.y).toBeLessThan(google!.y);
-  expect(first!.height).toBeGreaterThanOrEqual(44);
+  // Yüzde bire yuvarlanır: yüksek piksel oranında 44 px 43.99998 ölçülebilir.
+  expect(Math.round(first!.height * 100) / 100).toBeGreaterThanOrEqual(44);
 
   await alts.first().click();
   await expect(h1(page, 'Bilgisayardan al')).toBeVisible();

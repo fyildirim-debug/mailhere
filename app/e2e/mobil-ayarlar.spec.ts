@@ -30,11 +30,14 @@ async function openSettings(page: Page, section?: string) {
   }
 }
 
-/** Öğenin dokunma hedefi en az 44 px yüksek. */
+/**
+ * Öğenin dokunma hedefi en az 44 px yüksek. Ölçü yüzde bire yuvarlanır:
+ * yüksek piksel oranında (Pixel 7: 2.625) 44 px'lik kutu 43.99998 ölçülebilir.
+ */
 async function expectTouchHeight(locator: ReturnType<Page['getByRole']>) {
   const box = await locator.boundingBox();
   expect(box, 'öğe görünür olmalı').not.toBeNull();
-  expect(box!.height).toBeGreaterThanOrEqual(44);
+  expect(Math.round(box!.height * 100) / 100).toBeGreaterThanOrEqual(44);
 }
 
 test('ayarlar: liste → bölüm → geri; kenar çubuğu yok, yatay taşma yok', async ({ page }) => {
