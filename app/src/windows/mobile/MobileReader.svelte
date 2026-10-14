@@ -553,19 +553,58 @@
     min-height: var(--m-touch);
   }
 
-  /* Gönderen satırı iki sıra: ad ve alıcılar tam genişlik; altta tarih ve ileti eylemleri. */
+  /* Gönderen satırı iki sıra: üstte ad, altında "tarih · kime"; altta ileti
+     eylemleri metin sütununun hizasında. Tarih eylemlerle yarışmaz, kesilmez;
+     koyu uyarlama düğmesi de gelince yıldız ayrı satıra düşmez. */
   .article :global(.sender) {
     flex-wrap: wrap;
-    row-gap: 2px;
+    column-gap: 0;
+    row-gap: 0;
   }
 
   .article :global(.sender .who-btn) {
     flex: 1 1 100%;
+    margin-bottom: 2px;
   }
 
   .article :global(.sender > .meta) {
-    flex: 1;
-    padding-left: 52px;
+    display: none;
+  }
+
+  .article :global(.sender .when-inline) {
+    display: inline;
+  }
+
+  /* İlk eylem simgesi ad sütununa hizalanır: metin 52 px'te, simge düğme
+     kutusunda 12 px içeride (40 px kutuda 16, 44 px kutuda 20 px simge). */
+  .article :global(.sender > .meta + .btn-icon) {
+    margin-left: 40px;
+  }
+
+  /* Şeritler dar ekranda kısa: açıklama cümlesi düşer, boşluklar daralır. */
+  .article :global(.unsub),
+  .article :global(.remote) {
+    margin-top: 12px;
+    padding: 2px 4px 2px 12px;
+  }
+
+  .article :global(.unsub + .remote) {
+    margin-top: 6px;
+  }
+
+  .article :global(.remote-why) {
+    display: none;
+  }
+
+  .article :global(.unsub .link),
+  .article :global(.remote .link) {
+    flex: none;
+    min-height: var(--m-touch);
+    padding: 0 8px;
+  }
+
+  .article :global(.body) {
+    margin-top: 12px;
   }
 
   .article :global(.conv) {

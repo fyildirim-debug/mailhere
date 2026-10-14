@@ -205,6 +205,44 @@ test('koyu temada bülten koyuya eşlenir; “Özgün renkler” 44 px hedefle k
   expect(overflow).toBe(false);
 });
 
+test('okuma başlığı: tarih ve ileti eylemleri tek sırada; engellenen görsel kırık simge olarak çizilmez', async ({ page }) => {
+  // Dar telefon (360 px): eskiden yıldız düğmesi üçüncü satıra düşüyordu.
+  await page.setViewportSize({ width: 360, height: 780 });
+  await page.getByRole('button', { name: 'Menü', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Kutular ve hesaplar' }).getByRole('button', { name: 'Temayı değiştir' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await page.keyboard.press('Escape');
+  await row(page, 'Renk, ışık ve odak').click();
+  const sender = page.locator('.sender').filter({ has: page.getByRole('button', { name: 'Özgün renkler' }) });
+  // Koyu uyarlama düğmesi de görünür: yanıtla, ilet, özgün renkler, yıldız aynı sırada.
+  const names = ['Yanıtla', 'İlet', 'Özgün renkler', 'Yıldızla'];
+  const mids: number[] = [];
+  for (const name of names) {
+    const box = await sender.getByRole('button', { name, exact: true }).boundingBox();
+    expect(box, `${name} görünür olmalı`).not.toBeNull();
+    mids.push(box!.y + box!.height / 2);
+  }
+  expect(Math.max(...mids) - Math.min(...mids), `orta noktalar: ${mids.join(', ')}`).toBeLessThan(2);
+  // Tarih kesilmeden alıcı satırının başında.
+  const to = sender.locator('.who > .meta');
+  await expect(to).toHaveText(/^\S+ \d{2}:\d{2} · kime: /);
+  await expect(to.locator('.when-inline')).toBeVisible();
+  await expect(sender.locator(':scope > .meta')).toBeHidden();
+
+  // Şerit kısa: açıklama cümlesi dar ekranda gizli, eylem 44 px hedef.
+  await expect(page.getByText('Uzak görseller ve izleme pikselleri engellendi.')).toBeVisible();
+  await expect(page.getByText('Gönderici postayı açtığını göremez.')).toBeHidden();
+  const allow = await page.getByRole('button', { name: 'Bu göndericiye izin ver' }).boundingBox();
+  expect(Math.round(allow!.height)).toBeGreaterThanOrEqual(44);
+
+  // Engellenmiş görsel yerini korur ama çizilmez (kırık simge, çerçeve, alt metin yok).
+  const frame = page.frameLocator('iframe[title="Posta içeriği"]');
+  const blocked = frame.locator('img[data-mh-src]').first();
+  expect(await blocked.evaluate((el) => getComputedStyle(el).opacity)).toBe('0');
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
+  expect(overflow).toBe(false);
+});
+
 test('izinli uzak görsel çerçevede yüklenemezse arka uçtan indirilir', async ({ page }) => {
   await page.route(/^https:\/\/(izleme\.)?tasarimnotlari\.co\//, (route) => route.abort());
   await row(page, 'Renk, ışık ve odak').click();

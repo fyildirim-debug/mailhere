@@ -40,7 +40,7 @@
   }
 
   /** Açık kağıdın renkleri: posta kendi renkleriyle tasarlandığı için temadan bağımsız. */
-  const LIGHT = { ink: '#15171c', ink2: '#4f5562', link: '#3a47b8', rule: '#d2d6de', placeholder: '#eef0f4' };
+  const LIGHT = { ink: '#15171c', ink2: '#4f5562', link: '#3a47b8', rule: '#d2d6de' };
 
   const srcdoc = $derived.by(() => {
     if (html == null) return '';
@@ -48,8 +48,7 @@
     // Koyu kurallar yalnız koyu temada üretilir; `mh-dark` sınıfı uyarlamadan sonra eklenir.
     const dark = wantDark
       ? `html.mh-dark{color-scheme:dark}html.mh-dark,html.mh-dark body{background:${token('--paper')};color:${token('--ink')}}` +
-        `html.mh-dark a{color:${token('--accent-text')}}html.mh-dark blockquote{border-left-color:${token('--line-strong')};color:${token('--ink-2')}}` +
-        `html.mh-dark img[data-mh-src]:not([src]){background:${token('--raised')}}`
+        `html.mh-dark a{color:${token('--accent-text')}}html.mh-dark blockquote{border-left-color:${token('--line-strong')};color:${token('--ink-2')}}`
       : '';
     return (
       `<!doctype html><html><head><meta charset="utf-8">` +
@@ -57,7 +56,10 @@
       // İzin verilen uzak görsellerde bile uygulamayı ele veren Referer gitmesin.
       `<meta name="referrer" content="no-referrer">` +
       `<style>:root{color-scheme:light}html,body{margin:0;background:${paper};color:${LIGHT.ink}}body{padding:20px 22px;font:15px/1.6 'Geist Variable',ui-sans-serif,system-ui,sans-serif;word-wrap:break-word;overflow-wrap:anywhere}` +
-      `img{max-width:100%;height:auto}img[data-mh-src]:not([src]){background:${LIGHT.placeholder};border-radius:6px}table{max-width:100%!important}a{color:${LIGHT.link}}pre{white-space:pre-wrap}blockquote{margin:0 0 0 4px;padding-left:12px;border-left:1px solid ${LIGHT.rule};color:${LIGHT.ink2}}` +
+      // Engellenmiş görsel (adresi `data-mh-src`'de) yerini korur ama çizilmez (alt
+      // metni ekran okuyucuda kalır);
+      // Chromium kaynaksız görseli kırık simge, çerçeve ve alt metinle gösterirdi.
+      `img{max-width:100%;height:auto}img[data-mh-src]:not([src]){opacity:0}table{max-width:100%!important}a{color:${LIGHT.link}}pre{white-space:pre-wrap}blockquote{margin:0 0 0 4px;padding-left:12px;border-left:1px solid ${LIGHT.rule};color:${LIGHT.ink2}}` +
       `${dark}</style>` +
       `</head><body>${html}</body></html>`
     );

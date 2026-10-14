@@ -87,7 +87,7 @@
     <Avatar address={d.from} size={40} />
     <span class="who">
       <span class="trunc"><span class="name">{displayName(d.from)}</span><span class="meta addr">{d.from.email}</span></span>
-      <span class="meta trunc">{t('read.to', { list: recipients })}</span>
+      <span class="meta trunc"><span class="when-inline num">{`${when(d.date)} · `}</span>{t('read.to', { list: recipients })}</span>
     </span>
   </button>
   <span class="meta num">{when(d.date)}</span>
@@ -130,7 +130,7 @@
 {#if d.hasRemoteContent && !d.remoteAllowed}
   <div class="remote">
     <Icon name="shield" />
-    <span class="remote-text">{t('read.remoteBlocked')}</span>
+    <span class="remote-text">{t('read.remoteBlocked')} <span class="remote-why">{t('read.remoteWhy')}</span></span>
     <button class="link small" onclick={allow}>{t('read.remoteAllow')}</button>
   </div>
 {/if}
@@ -202,6 +202,11 @@
 
   .addr {
     margin-left: 8px;
+  }
+
+  /* Dar okuma ekranı tarihi alıcı satırının başında gösterir (MobileReader). */
+  .when-inline {
+    display: none;
   }
 
   .star {
