@@ -383,9 +383,9 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
   const handlers = new Map<string, Set<Handler>>();
   /** Android bildirim izni (yalnız mobil kabuk sorar). */
   let notifyPerm = 'prompt';
-  /** Android bildirim sağlığı: pil kısıtlaması ve anlık bildirim (sürekli bağlantı). */
+  /** Android bildirim sağlığı: pil kısıtlaması ve anlık bildirim (sürekli bağlantı; kabukta varsayılan açık). */
   let battery: CommandResult<'battery_status'> = 'optimized';
-  let backgroundMode = false;
+  let backgroundMode = true;
   let nextId = 1000;
 
   function emit<E extends keyof EventPayloads>(event: E, payload: EventPayloads[E]) {

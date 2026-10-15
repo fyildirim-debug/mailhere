@@ -141,14 +141,16 @@ test('bildirim izni: daha önce sorulduysa yeniden sorulmaz; ayarlardan verilir'
   await expect(allow).toHaveCount(0);
 });
 
-test('bildirim sağlığı: anlık bildirim açılır, pil kısıtlaması kaldırılır', async ({ page }) => {
+test('bildirim sağlığı: anlık bildirim varsayılan açık, kapatılıp açılır; pil kısıtlaması kaldırılır', async ({ page }) => {
   await page.goto('#/main');
   await openSettings(page, 'Bildirimler');
   const system = page.locator('.set-row', { hasText: 'Telefon bildirimleri' });
   const instant = page.getByRole('switch', { name: 'Anlık bildirim' });
   const row = page.locator('.set-row', { has: instant });
-  await expect(instant).not.toBeChecked();
-  await expect(row).toContainText('Kapalıyken yeni posta');
+  // Varsayılan açık: uygulama kapalıyken ve telefon yeniden başladıktan sonra da bağlı.
+  await expect(instant).toBeChecked();
+  await expect(row).toContainText('Arka planda da bağlı');
+  await expect(row).toContainText('telefon yeniden başladıktan sonra');
   // Telefon bildirimleri satırının altında; anahtar adıyla aynı satırda, sağ kenarda.
   const above = await system.boundingBox();
   const own = await row.boundingBox();
@@ -156,11 +158,11 @@ test('bildirim sağlığı: anlık bildirim açılır, pil kısıtlaması kaldı
   const sw = await instant.boundingBox();
   expect(sw!.x + sw!.width).toBeGreaterThan(page.viewportSize()!.width - 40);
   await instant.click();
+  await expect(instant).not.toBeChecked();
+  await expect(row).toContainText('15 dakikada bir');
+  await instant.click();
   await expect(instant).toBeChecked();
   await expect(row).toContainText('Arka planda da bağlı');
-  await instant.click();
-  await expect(instant).not.toBeChecked();
-  await expect(row).toContainText('Kapalıyken yeni posta');
 
   // Pil kısıtlaması: açıklama + düğme; kaldırılınca "Yok" ve düğme kalkar.
   const battery = page.locator('.set-row', { hasText: 'Pil kısıtlaması' });
