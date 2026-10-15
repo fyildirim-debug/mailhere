@@ -378,6 +378,9 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
   const handlers = new Map<string, Set<Handler>>();
   /** Android bildirim izni (yalnız mobil kabuk sorar). */
   let notifyPerm = 'prompt';
+  /** Android bildirim sağlığı: pil kısıtlaması ve anlık bildirim (sürekli bağlantı). */
+  let battery: CommandResult<'battery_status'> = 'optimized';
+  let backgroundMode = false;
   let nextId = 1000;
 
   function emit<E extends keyof EventPayloads>(event: E, payload: EventPayloads[E]) {
@@ -1414,6 +1417,17 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       }
       emit(EVENTS.changed, { mailboxIds: [] });
       return report;
+    },
+    // Yalnız mobil kabuk: bildirim sağlığı. Kısıtlamayı kaldırma isteği onaylanmış sayılır.
+    battery_status: () => battery,
+    battery_settings: () => {
+      battery = 'unrestricted';
+      return null;
+    },
+    background_mode_get: () => backgroundMode,
+    background_mode_set: ({ on }) => {
+      backgroundMode = on;
+      return backgroundMode;
     },
     // Yalnız mobil kabuk: kamera yerine geçerli görünümlü örnek kod; bildirim izni verilmiş sayılır.
     qr_scan: () => `mailhere://aktar?v=1&h=192.168.1.20&p=51234&t=${fakeB64(16, 41)}&k=${fakeB64(32, 42)}`,
