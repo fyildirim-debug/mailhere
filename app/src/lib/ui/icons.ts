@@ -86,6 +86,8 @@ export const icons = {
   devices: '<rect x="3" y="5" width="12.5" height="9" rx="1.5"/><path d="M7 18.5h5M9.25 14v4.5"/><rect x="17" y="9" width="4" height="10.5" rx="1.2"/><path d="M19 17h.01"/>',
   qr: '<rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><path d="M7 7h.01M17 7h.01M7 17h.01"/><path d="M14 14h3v3h-3z"/><path d="M20 14v3M14 20h3M20 20h.01"/>',
   clipboard: '<rect x="5.5" y="5" width="13" height="15.5" rx="1.5"/><path d="M9 5V3.5h6V5"/><path d="M9 11.5h6M9 15h4"/>',
+  /** Uyarı üçgeni (gönderen güveni). */
+  alert: '<path d="M10.4 4.6 3.3 17.2A1.8 1.8 0 0 0 4.9 20h14.2a1.8 1.8 0 0 0 1.6-2.8L13.6 4.6a1.8 1.8 0 0 0-3.2 0z"/><path d="M12 9.5v4.2"/><circle cx="12" cy="16.6" r=".9" fill="currentColor"/>',
 } as const;
 
 export type IconName = keyof typeof icons;
