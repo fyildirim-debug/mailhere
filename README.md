@@ -15,7 +15,7 @@ Yeni posta geldiğinde koca bir pencere açılmaz: ekranın köşesinde küçük
 ## Öne çıkanlar
 
 - **Telefona tek QR ile aktar** — Ayarlar › Cihazlar: hesaplar, kurallar, etiketler ve ayarlar (istersen parolalar) Android uygulamasına uçtan uca şifreli, yalnız yerel ağ üzerinden geçer; hiçbir sunucuya uğramaz.
-- **Köşe kartı ve hızlı okuma** — bildirimler yalnız kişilerden gelen postada çıkar; bülten ve otomatik bildirimler tepsideki sayaçta kalır. Sessiz saatler, bir saat sessize alma, kart konumu ve süresi ayarlanır.
+- **Köşe kartı ve hızlı okuma** — bildirimler yalnız kişilerden gelen postada çıkar; bülten ve otomatik bildirimler tepsideki sayaçta kalır. Kartta "Aç"ın yanında seçtiğin en çok üç düğme durur (Yanıtla, Okundu, Arşivle, Sil, İstenmeyen; Android bildiriminde de): kısa yanıt kartın içinde yazılıp gönderilir, her eylem birkaç saniye geri alınabilir. Sessiz saatler, bir saat sessize alma, kart konumu ve süresi ayarlanır.
 - **Akıllı süzgeç** — gelen kutusu Kişiler, Bildirimler ve Bültenler diye kendiliğinden ayrılır.
 - **Klavye önce** — `J/K` gezin, `E` arşivle, `H` ertele, `R` yanıtla, `Ctrl K` her şeyi bul.
 - **Geri alınabilir her şey** — arşivleme, silme, erteleme ve gönderme birkaç saniye geri alınabilir.
