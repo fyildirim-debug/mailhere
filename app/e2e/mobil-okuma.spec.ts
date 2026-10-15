@@ -259,6 +259,26 @@ test('okuma başlığı sıkı: posta ekranın üst yarısında başlar; tarih k
   expect(overflow).toBe(false);
 });
 
+test('geniş bülten dar ekrana sığdırılır: sağdan taşma yok, alt kısım kırpılmaz', async ({ page }) => {
+  await page.setViewportSize({ width: 393, height: 855 });
+  await row(page, 'Renk, ışık ve odak').click();
+  const iframe = page.locator('iframe[title="Posta içeriği"]');
+  // Bültenin tablosu 560 px; 393 px ekranda oranla küçültülür.
+  await expect(iframe).toHaveAttribute('data-fit', /^0\.\d\d$/);
+  const m = await iframe.evaluate((f: HTMLIFrameElement) => {
+    const root = f.contentDocument!.documentElement;
+    const r = root.getBoundingClientRect();
+    return { right: r.right, bottom: r.bottom, frameW: f.clientWidth, frameH: f.clientHeight };
+  });
+  expect(m.right).toBeLessThanOrEqual(m.frameW + 1);
+  expect(m.bottom).toBeLessThanOrEqual(m.frameH + 1);
+  // Düz postalar ölçeklenmez.
+  await page.goBack();
+  await row(page, 'Cumartesi kahvaltı?').click();
+  await expect(page.getByRole('heading', { level: 2, name: 'Cumartesi kahvaltı?' })).toBeVisible();
+  await expect(page.locator('iframe[data-fit]')).toHaveCount(0);
+});
+
 test('konuşmada eski ileti açılınca kendi eylemleri ikinci sırada, ad sütununa hizalı', async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 780 });
   await row(page, 'Re: Yayın planı').click();

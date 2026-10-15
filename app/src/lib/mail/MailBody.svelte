@@ -56,10 +56,10 @@
       `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: cid:${remoteAllowed ? ' https: http:' : ''}; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'">` +
       // İzin verilen uzak görsellerde bile uygulamayı ele veren Referer gitmesin.
       `<meta name="referrer" content="no-referrer">` +
-      `<style>:root{color-scheme:light}html,body{margin:0;background:${paper};color:${LIGHT.ink}}body{padding:20px 22px;font:15px/1.6 'Geist Variable',ui-sans-serif,system-ui,sans-serif;word-wrap:break-word;overflow-wrap:anywhere}` +
-      // Engellenmiş görsel (adresi `data-mh-src`'de) yerini korur ama çizilmez (alt
-      // metni ekran okuyucuda kalır);
-      // Chromium kaynaksız görseli kırık simge, çerçeve ve alt metinle gösterirdi.
+      `<style>:root{color-scheme:light}html,body{margin:0;background:${paper};color:${LIGHT.ink}}body{padding:20px 22px;font:15px/1.6 'Geist Variable',ui-sans-serif,system-ui,sans-serif;word-wrap:break-word;overflow-wrap:anywhere}@media (max-width:480px){body{padding:14px 12px}}` +
+      // Engellenmiş görsel (adresi `data-mh-src`'de) yerini korur ama çizilmez;
+      // alt metni ekran okuyucuda kalır. Chromium kaynaksız görseli kırık simge,
+      // çerçeve ve alt metinle gösterirdi.
       `img{max-width:100%;height:auto}img[data-mh-src]:not([src]){opacity:0}table{max-width:100%!important}a{color:${LIGHT.link}}pre{white-space:pre-wrap}blockquote{margin:0 0 0 4px;padding-left:12px;border-left:1px solid ${LIGHT.rule};color:${LIGHT.ink2}}` +
       `${dark}</style>` +
       `</head><body>${html}</body></html>`
@@ -107,11 +107,53 @@
     if (shown && doc?.body && appliedDark !== want) applyTheme(doc);
   });
 
+  /** Sığdırmada en küçük oran; daha genişi (nadir) bu oranda kalır, sağı kırpılır. */
+  const MIN_FIT = 0.25;
+  /** Geniş postanın sığdırma oranı (1: doğal boyut). */
+  let fit = $state(1);
+
+  /**
+   * Yükseklik ve sığdırma. Sabit genişlikli (600 px tablolu) posta dar alanda
+   * taşar; kendi genişliğinde dizilir, sonra alana sığacak oranda küçültülür
+   * (`transform`: motorlar arası aynı ölçü, bağlantılar tıklanır kalır).
+   */
   function measure() {
     const doc = frame?.contentDocument;
-    if (!doc?.documentElement) return;
-    height = Math.max(80, doc.documentElement.scrollHeight);
+    const root = doc?.documentElement;
+    if (!frame || !root) return;
+    root.style.removeProperty('transform');
+    root.style.removeProperty('width');
+    root.style.removeProperty('overflow');
+    const avail = frame.clientWidth;
+    const natural = root.scrollWidth;
+    if (avail <= 0 || natural <= avail + 1) {
+      fit = 1;
+      height = Math.max(80, root.scrollHeight);
+      return;
+    }
+    fit = Math.max(MIN_FIT, avail / natural);
+    // Doğal genişlikte yerleşim: yükseklik dönüşümden önce ölçülür.
+    root.style.width = `${natural}px`;
+    const natH = root.getBoundingClientRect().height;
+    root.style.transformOrigin = '0 0';
+    root.style.transform = `scale(${fit})`;
+    root.style.overflow = 'hidden';
+    height = Math.max(80, Math.ceil(natH * fit));
   }
+
+  // Alan genişliği değişince (pencere, bölme, döndürme) yeniden sığdırılır.
+  $effect(() => {
+    const el = frame;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    let width = el.clientWidth;
+    const ro = new ResizeObserver(() => {
+      if (el.clientWidth === width) return;
+      width = el.clientWidth;
+      measure();
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  });
 
   function onLoad() {
     const doc = frame?.contentDocument;
@@ -258,6 +300,7 @@
       referrerpolicy="no-referrer"
       {srcdoc}
       style:height="{height}px"
+      data-fit={fit < 1 ? fit.toFixed(2) : undefined}
       onload={onLoad}
     ></iframe>
   </div>
