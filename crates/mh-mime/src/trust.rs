@@ -128,22 +128,60 @@ fn script_of(c: char) -> Option<Script> {
     }
 }
 
-/// Alan adı punycode (`xn--`) etiketi taşıyor ya da bir etikette Latin ile
-/// Kiril ya da Yunan harfleri karışık mı?
+/// Latin harfe benzeyen Kiril ve Yunan küçük harfleri (`аррӏе` → "apple").
+/// Kendi kısa listemiz; yalnız alan adında tek başına aldatıcı olanlar.
+const LATIN_LOOKALIKES: &[char] = &[
+    'а', 'с', 'е', 'һ', 'і', 'ј', 'к', 'ӏ', 'о', 'р', 'ԛ', 'ѕ', 'у', 'х', 'ԝ', 'ԁ', 'ь', 'ү', 'ѵ',
+    'α', 'ι', 'κ', 'ν', 'ο', 'ρ', 'τ', 'υ', 'χ',
+];
+
+/// Etikette Latin ile Kiril ya da Yunan harfleri karışık mı?
+fn mixed_script(label: &str) -> bool {
+    let mut seen: Option<Script> = None;
+    for s in label.chars().filter_map(script_of) {
+        match seen {
+            Some(prev) if prev != s => return true,
+            _ => seen = Some(s),
+        }
+    }
+    false
+}
+
+/// Etiket yalnız Latin'e benzeyen Kiril/Yunan harflerden (ve rakam, tire)
+/// mı oluşuyor? Gerçek Rusça ya da Yunanca bir sözcük benzemeyen harf taşır.
+fn whole_script_lookalike(label: &str) -> bool {
+    let mut foreign = false;
+    for c in label.chars() {
+        if c.is_ascii_digit() || c == '-' {
+            continue;
+        }
+        if !LATIN_LOOKALIKES.contains(&c) {
+            return false;
+        }
+        foreign = true;
+    }
+    foreign
+}
+
+/// Alan adı aldatıcı mı: bir etikette Latin ile Kiril/Yunan harfleri karışık
+/// (`pаypal`), ya da Latin bir üst alan altında etiket yalnız Latin'e benzeyen
+/// Kiril/Yunan harflerden oluşuyor (`аррӏе.com`). Punycode (`xn--`) önce
+/// çözülür: Türkçe ya da başka Latin harfli uluslararası alan adları
+/// (`şirket.com.tr`) ve Kiril üst alandaki Rusça adlar (`пример.рф`) uyarı almaz.
 pub fn lookalike_domain(domain: &str) -> bool {
-    domain.trim_end_matches('.').split('.').any(|label| {
-        if label.len() >= 4 && label[..4].eq_ignore_ascii_case("xn--") {
-            return true;
-        }
-        let mut seen: Option<Script> = None;
-        for s in label.chars().filter_map(script_of) {
-            match seen {
-                Some(prev) if prev != s => return true,
-                _ => seen = Some(s),
-            }
-        }
-        false
-    })
+    let domain = domain.trim_end_matches('.');
+    let (unicode, res) = idna::domain_to_unicode(domain);
+    if res.is_err() {
+        // Çözülemeyen punycode tarayıcıda da okunur bir ad göstermez: şüpheli.
+        return domain
+            .split('.')
+            .any(|l| l.len() >= 4 && l[..4].eq_ignore_ascii_case("xn--"));
+    }
+    let labels: Vec<&str> = unicode.split('.').collect();
+    let latin_tld = labels.last().is_some_and(|t| t.is_ascii());
+    labels
+        .iter()
+        .any(|label| mixed_script(label) || (latin_tld && whole_script_lookalike(label)))
 }
 
 #[cfg(test)]
@@ -184,18 +222,34 @@ mod tests {
         assert!(!name_has_other_address(&addr(None, "a@b.com")));
     }
 
+    /// Alan adının postada görüldüğü punycode biçimi.
+    fn ascii(domain: &str) -> String {
+        idna::domain_to_ascii(domain).expect("geçerli alan adı")
+    }
+
     #[test]
     fn benzetilmis_alan_adi() {
-        assert!(lookalike_domain("xn--pypal-4ve.com"));
-        assert!(lookalike_domain("posta.XN--80ak6aa92e.com"));
-        // Latin "p", "y", "l" + Kiril "а".
+        // Latin "p", "y", "l" + Kiril "а"; hem çözülmüş hem punycode biçimi.
         assert!(lookalike_domain("pаypal.com"));
+        assert!(lookalike_domain(&ascii("pаypal.com")));
         // Latin + Yunan omikron.
         assert!(lookalike_domain("gοogle.com"));
+        // Tamamı Kiril ama "apple" gibi okunan ünlü örnek (xn--80ak6aa92e).
+        assert!(lookalike_domain("posta.XN--80ak6aa92e.com"));
+        assert!(lookalike_domain("аррӏе.com"));
+        // Çözülemeyen punycode.
+        assert!(lookalike_domain("xn--zz.com"));
         assert!(!lookalike_domain("ornek.com.tr"));
-        assert!(!lookalike_domain("güzel.com"));
-        assert!(!lookalike_domain("пример.рф"));
         assert!(!lookalike_domain("my-xn.com"));
+        // Türkçe ve Latin harfli uluslararası alan adları uyarı almaz.
+        assert!(!lookalike_domain("güzel.com"));
+        assert!(!lookalike_domain(&ascii("şirket.com.tr")));
+        assert!(!lookalike_domain(&ascii("çiçekçi-ışık.com")));
+        assert!(!lookalike_domain(&ascii("müller.de")));
+        // Gerçek Rusça adlar: Kiril üst alanda ya da benzemeyen harflerle.
+        assert!(!lookalike_domain("пример.рф"));
+        assert!(!lookalike_domain(&ascii("пример.рф")));
+        assert!(!lookalike_domain(&ascii("пример.com")));
     }
 
     #[test]
@@ -236,8 +290,15 @@ mod tests {
             Some(SenderWarning::NameHasOtherAddress)
         );
         assert_eq!(
-            sender_warning(None, &addr(None, "a@xn--bnka-xxa.com")),
+            sender_warning(None, &addr(None, "a@xn--80ak6aa92e.com")),
             Some(SenderWarning::LookalikeDomain)
+        );
+        assert_eq!(
+            sender_warning(
+                None,
+                &addr(Some("Şirket"), &format!("a@{}", ascii("şirket.com.tr")))
+            ),
+            None
         );
         assert_eq!(
             sender_warning(None, &addr(Some("Ayşe"), "ayse@eposta.com")),

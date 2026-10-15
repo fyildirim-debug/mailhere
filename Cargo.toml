@@ -54,6 +54,8 @@ rusqlite = { version = "0.40.2", features = ["bundled-sqlcipher-vendored-openssl
 mail-parser = "0.11.9"
 mail-builder = "0.4.4"
 ammonia = "4.1.7"
+# Uluslararası alan adı (punycode) çözümü: benzetilmiş gönderen alan adı denetimi.
+idna = "1.1.0"
 
 # Ağ (yalnız ring sağlayıcısı; aws-lc derlemesi Windows'ta ek araç ister)
 rustls = { version = "0.23.45", default-features = false, features = ["ring", "logging", "std", "tls12"] }
