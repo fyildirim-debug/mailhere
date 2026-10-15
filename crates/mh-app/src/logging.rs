@@ -48,11 +48,18 @@ where
         .try_init();
 }
 
+/// Varsayılan TLS sağlayıcısını (ring) sabitler; ikinci çağrı etkisizdir.
+/// Kendi çalışma ortamını kuran kabuk (Android: Tauri'den önce de çekirdek
+/// açılabilir) bunu ayrıca çağırır.
+pub fn install_tls_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
 /// Çok iş parçacıklı tokio ortamı; Tauri'nin eşzamansız çalışma zamanı da
 /// buna bağlanır. Tüm TLS istemcileri ring kullanır; varsayılan sağlayıcı
 /// yine de sabitlenir. Dönen değer sürecin sonuna dek yaşatılmalıdır.
 pub fn runtime() -> tokio::runtime::Runtime {
-    let _ = rustls::crypto::ring::default_provider().install_default();
+    install_tls_provider();
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .thread_name("mailhere")

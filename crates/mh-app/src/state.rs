@@ -1,8 +1,9 @@
 //! Uygulama durumu ve açılış.
 //!
 //! [`Core`] Tauri bilmeyen çekirdektir (depo, eşitleyiciler, giden kutusu);
-//! ileride arka plan eşitlemesi (Android WorkManager) pencere olmadan onu
-//! açar. [`setup_core`] bunu Tauri durumuna bağlar ve zamanlayıcıları başlatır.
+//! penceresiz çalışma (Android arka plan hizmeti, `crate::headless`) onu
+//! Tauri'siz açar. [`setup_core`] bunu Tauri durumuna bağlar ve
+//! zamanlayıcıları başlatır.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -35,6 +36,25 @@ pub struct AppState {
     pub transfer: crate::transfer::TransferHub,
     /// Bağlantıları baştan kurmanın sıklık sınırı (uyku, arka plandan dönüş).
     pub reconnect: crate::wake::Reconnect,
+}
+
+impl AppState {
+    /// Açılmış çekirdekten durum: pencereli (`setup_core`) ve penceresiz
+    /// (`crate::headless`) kurulum aynı alanları aynı biçimde doldurur.
+    pub fn new(core: &Core, cache_dir: PathBuf, platform: Arc<dyn Platform>) -> Self {
+        Self {
+            store: core.store.clone(),
+            secrets: core.secrets.clone(),
+            sync: core.sync.clone(),
+            jmap: core.jmap.clone(),
+            outbox: core.outbox.clone(),
+            mute: Mute::new(),
+            cache_dir,
+            platform,
+            transfer: Default::default(),
+            reconnect: Default::default(),
+        }
+    }
 }
 
 pub fn now_ms() -> Millis {
@@ -222,6 +242,24 @@ impl Core {
         self.sync.start_all()?;
         self.jmap.start_all()
     }
+
+    /// Tüm hesapların eşitleme görevlerini durdurur (IMAP IDLE, JMAP akışı).
+    /// Giden kutusunun döngüsü çalışma ortamıyla birlikte kapanır; depo son
+    /// `Arc` düşünce kapanır. Penceresiz çekirdek yerini pencereliye
+    /// bırakırken kullanılır.
+    pub fn stop(&self) {
+        let accounts = match self.store.accounts() {
+            Ok(a) => a,
+            Err(e) => {
+                tracing::warn!(error = %e.message, "hesaplar okunamadı; eşitleme durdurulamadı");
+                return;
+            }
+        };
+        for a in &accounts {
+            self.sync.stop(&a.id);
+            self.jmap.stop(&a.id);
+        }
+    }
 }
 
 /// Çekirdeği açar, `AppState` olarak Tauri durumuna bağlar ve
@@ -253,18 +291,7 @@ pub fn setup_core(
             return Err(e);
         }
     };
-    app.manage(AppState {
-        store: core.store.clone(),
-        secrets: core.secrets.clone(),
-        sync: core.sync.clone(),
-        jmap: core.jmap.clone(),
-        outbox: core.outbox.clone(),
-        mute: Mute::new(),
-        cache_dir: dirs.cache,
-        platform: platform.clone(),
-        transfer: Default::default(),
-        reconnect: Default::default(),
-    });
+    app.manage(AppState::new(&core, dirs.cache, platform.clone()));
     if let Err(e) = core.start(&rt) {
         tracing::error!(code = %e.code, error = %e.message, "eşitleme başlatılamadı");
         platform.fatal(&handle, &e);

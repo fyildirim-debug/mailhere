@@ -62,20 +62,29 @@ fn gap(mono: Duration, wall_from: SystemTime, wall_to: SystemTime) -> Duration {
 
 /// Uyku izleyicisi: adım geç gelirse bağlantılar yenilenir.
 pub async fn sleep_watch(app: AppHandle) {
+    sleep_watch_with(move || {
+        let Some(state) = app.try_state::<AppState>() else {
+            return;
+        };
+        if let Err(e) = reconnect(&state, "uyku") {
+            tracing::warn!(error = %e.message, "uykudan sonra bağlantılar yenilenemedi");
+        }
+    })
+    .await
+}
+
+/// Uyku izleyicisinin kendisi: adım `SLEPT`ten geç gelirse `on_wake`
+/// çağrılır. Pencereli çekirdek `AppHandle` ile, penceresiz çekirdek
+/// (`crate::headless`) doğrudan durumla kullanır.
+pub async fn sleep_watch_with(on_wake: impl Fn() + Send) {
     let (mut mono, mut wall) = (Instant::now(), SystemTime::now());
     loop {
         tokio::time::sleep(TICK).await;
         let (m, w) = (Instant::now(), SystemTime::now());
         let late = gap(m.duration_since(mono), wall, w);
         (mono, wall) = (m, w);
-        if late < SLEPT {
-            continue;
-        }
-        let Some(state) = app.try_state::<AppState>() else {
-            continue;
-        };
-        if let Err(e) = reconnect(&state, "uyku") {
-            tracing::warn!(error = %e.message, "uykudan sonra bağlantılar yenilenemedi");
+        if late >= SLEPT {
+            on_wake();
         }
     }
 }

@@ -65,51 +65,64 @@ impl EventSink for TauriSink {
         let Some(state) = self.app.try_state::<AppState>() else {
             return;
         };
-        // Kartta hesabın güncel adı ve rengi görünsün (`account_update` sonrası).
-        let fresh = state.store.account(&account.id).ok().flatten();
-        let account = fresh.as_ref().unwrap_or(account);
-        // Bu hesap için bildirim kapalı: kart ve sistem bildirimi yok, yalnız
-        // tepsi sayacı güncellenir.
-        if !account.notify {
-            state.platform.counts_changed(&self.app);
-            return;
-        }
-        let settings = match state.store.settings() {
-            Ok(s) => s,
-            Err(_) => return,
-        };
-        let now = now_ms();
-        let minutes = {
-            let t = chrono::Local::now();
-            t.hour() * 60 + t.minute()
-        };
-        // Tam ekran (oyun, sunum, video) sırasında kart yok; bir kez sorulur.
-        let fullscreen = !messages.is_empty() && mh_notify::is_fullscreen();
-        for message in messages {
-            if state
-                .mute
-                .decide(&settings, &message, now, minutes, fullscreen)
-                == Decision::Card
-            {
-                // Doğrulama kodu kartta "Kodu kopyala" olarak sunulur.
-                let otp = state.store.otp(message.id).unwrap_or_default();
-                state.platform.notify(
-                    &self.app,
-                    NotifyEvent {
-                        message,
-                        account_name: account.name.clone(),
-                        account_color: account.color.clone(),
-                        otp,
-                    },
-                    &settings,
-                );
-            }
-        }
+        decide(&state, account, messages, |ev, settings| {
+            state.platform.notify(&self.app, ev, settings)
+        });
         state.platform.counts_changed(&self.app);
     }
 
     fn outbox(&self, event: OutboxEvent) {
         emit(&self.app, events::OUTBOX, event);
+    }
+}
+
+/// Bildirim kararı: hesabın bildirimi, kullanıcı ayarları (kime: herkes /
+/// kişiler / VIP, sessiz saat), susturma ve tam ekran bir arada; kart
+/// gösterilecek her posta için `notify` çağrılır. Pencereli (`TauriSink`) ve
+/// penceresiz (`crate::headless`) çekirdek aynı kararı verir.
+pub(crate) fn decide(
+    state: &AppState,
+    account: &Account,
+    messages: Vec<MessageSummary>,
+    mut notify: impl FnMut(NotifyEvent, &mh_core::Settings),
+) {
+    // Kartta hesabın güncel adı ve rengi görünsün (`account_update` sonrası).
+    let fresh = state.store.account(&account.id).ok().flatten();
+    let account = fresh.as_ref().unwrap_or(account);
+    // Bu hesap için bildirim kapalı: kart ve sistem bildirimi yok, yalnız
+    // sayaç güncellenir (çağıran yapar).
+    if !account.notify {
+        return;
+    }
+    let settings = match state.store.settings() {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let now = now_ms();
+    let minutes = {
+        let t = chrono::Local::now();
+        t.hour() * 60 + t.minute()
+    };
+    // Tam ekran (oyun, sunum, video) sırasında kart yok; bir kez sorulur.
+    let fullscreen = !messages.is_empty() && mh_notify::is_fullscreen();
+    for message in messages {
+        if state
+            .mute
+            .decide(&settings, &message, now, minutes, fullscreen)
+            == Decision::Card
+        {
+            // Doğrulama kodu kartta "Kodu kopyala" olarak sunulur.
+            let otp = state.store.otp(message.id).unwrap_or_default();
+            notify(
+                NotifyEvent {
+                    message,
+                    account_name: account.name.clone(),
+                    account_color: account.color.clone(),
+                    otp,
+                },
+                &settings,
+            );
+        }
     }
 }
 

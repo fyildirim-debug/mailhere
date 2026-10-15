@@ -53,7 +53,7 @@ pub fn followups_list(state: State<'_, AppState>) -> Res<Vec<FollowUp>> {
 }
 
 /// Listelerin yenilenmesi için: tüm gelen kutuları ve postaların kutuları.
-fn touched_for(store: &Store, ids: &[MessageId]) -> Vec<String> {
+pub(crate) fn touched_for(store: &Store, ids: &[MessageId]) -> Vec<String> {
     let mut out: Vec<String> = store
         .mailboxes()
         .unwrap_or_default()
@@ -127,7 +127,7 @@ pub fn card_event(mut message: MessageSummary, account: &Account, lang: Language
 }
 
 /// Yanıt gelen hatırlatmaları kapatır; kapananların kimliklerini döner.
-fn close_answered(state: &AppState) -> Vec<MessageId> {
+pub(crate) fn close_answered(state: &AppState) -> Vec<MessageId> {
     let own = own_addresses(&state.store);
     match state.store.followups_close_answered(&own) {
         Ok(ids) => ids,

@@ -46,9 +46,24 @@ pub fn screen(
     let Some(state) = app.try_state::<AppState>() else {
         return messages;
     };
+    let (kept, touched) = screen_with(&state, account, messages);
+    if !touched.is_empty() {
+        // Liste eşitlemenin `changed` olayıyla postayı göstermiş olabilir.
+        crate::sink::changed(app, touched);
+    }
+    kept
+}
+
+/// Eleğin kendisi (pencere bilmez): kalan postalar ve elenenlerin kutuları.
+/// Penceresiz çekirdek (`crate::headless`) de bunu kullanır.
+pub(crate) fn screen_with(
+    state: &AppState,
+    account: &Account,
+    messages: Vec<MessageSummary>,
+) -> (Vec<MessageSummary>, Vec<String>) {
     let enabled = state.store.settings().map(|s| s.screener).unwrap_or(false);
     if !enabled || messages.is_empty() {
-        return messages;
+        return (messages, Vec::new());
     }
     let own: HashSet<String> = state
         .store
@@ -90,13 +105,9 @@ pub fn screen(
             }
         }
     }
-    if !touched.is_empty() {
-        touched.sort();
-        touched.dedup();
-        // Liste eşitlemenin `changed` olayıyla postayı göstermiş olabilir.
-        crate::sink::changed(app, touched);
-    }
-    kept
+    touched.sort();
+    touched.dedup();
+    (kept, touched)
 }
 
 /// Açılışta bilinen göndericiler mevcut Gönderilenler'den bir kez doldurulur.

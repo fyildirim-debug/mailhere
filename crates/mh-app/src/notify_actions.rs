@@ -23,34 +23,44 @@ type Res<T> = Result<T, AppError>;
 /// önizleme alıntılanır.
 const BODY_WAIT: Duration = Duration::from_secs(8);
 
-/// Bildirim düğmesinin işini yapar (yanıt hariç: [`reply`]).
+/// Bildirim düğmesinin işini yapar (yanıt hariç: [`reply`]) ve listeleri
+/// yeniler.
 pub fn apply(
     app: &AppHandle,
     state: &AppState,
     id: MessageId,
     action: NotifyAction,
 ) -> AppResult<()> {
-    let touched = match action {
-        NotifyAction::MarkRead => crate::cmd_jmap::set_flags(state, &[id], Some(false), None)?,
-        NotifyAction::Archive => crate::cmd_jmap::move_messages(state, &[id], MoveTarget::Archive)?,
-        NotifyAction::Trash => crate::cmd_jmap::move_messages(state, &[id], MoveTarget::Trash)?,
+    let touched = apply_local(state, id, action)?;
+    crate::sink::changed(app, touched);
+    Ok(())
+}
+
+/// İşin kendisi (pencere bilmez): yerelde uygular, sunucu işlemini kuyruğa
+/// koyar; etkilenen kutuları döner. Penceresiz çekirdek (`crate::headless`)
+/// de bunu kullanır.
+pub fn apply_local(
+    state: &AppState,
+    id: MessageId,
+    action: NotifyAction,
+) -> AppResult<Vec<String>> {
+    match action {
+        NotifyAction::MarkRead => crate::cmd_jmap::set_flags(state, &[id], Some(false), None),
+        NotifyAction::Archive => crate::cmd_jmap::move_messages(state, &[id], MoveTarget::Archive),
+        NotifyAction::Trash => crate::cmd_jmap::move_messages(state, &[id], MoveTarget::Trash),
         NotifyAction::Spam => {
             let account = state.store.summary(id)?.ok_or_else(gone)?.account_id;
             let junk = state
                 .store
                 .mailbox_by_role(&account, MailboxRole::Junk)?
                 .ok_or_else(no_junk)?;
-            crate::rules::Engines::of(state).move_to_mailbox(&[id], &junk.mailbox.id)?
+            crate::rules::Engines::of(state).move_to_mailbox(&[id], &junk.mailbox.id)
         }
-        NotifyAction::Reply | NotifyAction::Unknown => {
-            return Err(AppError::new(
-                ErrorCode::Invalid,
-                "Bu düğme bildirimden çalıştırılamaz; postayı uygulamada aç.",
-            ))
-        }
-    };
-    crate::sink::changed(app, touched);
-    Ok(())
+        NotifyAction::Reply | NotifyAction::Unknown => Err(AppError::new(
+            ErrorCode::Invalid,
+            "Bu düğme bildirimden çalıştırılamaz; postayı uygulamada aç.",
+        )),
+    }
 }
 
 /// Hesabın İstenmeyen kutusu var mı (bildirimde düğme gösterilsin mi)?
@@ -107,19 +117,13 @@ pub async fn reply(app: &AppHandle, id: MessageId, text: &str) -> AppResult<Outb
             .await?
         }
     };
-    let store = state.store.clone();
-    let account_id = detail.summary.account_id.clone();
-    let (account, lang) = blocking(move || {
-        let account = store
-            .account(&account_id)?
-            .ok_or_else(|| AppError::new(ErrorCode::NotFound, "Bu postanın hesabı artık yok."))?;
-        Ok((account, store.settings()?.language))
+    let h = app.clone();
+    let item = blocking(move || {
+        let state = h.state::<AppState>();
+        let msg = build_reply(&state, &detail, &text)?;
+        state.outbox.enqueue(&msg, now_ms())
     })
     .await?;
-    let input = ReplyInput::from_detail(&detail);
-    let msg = reply_message(&input, &account, &text, lang, &format_date(input.date));
-    let outbox = state.outbox.clone();
-    let item = blocking(move || outbox.enqueue(&msg, now_ms())).await?;
     // Yanıtlanan posta okunmuş sayılır; olmazsa yanıt yine gider.
     let h = app.clone();
     let read = blocking(move || {
@@ -131,6 +135,35 @@ pub async fn reply(app: &AppHandle, id: MessageId, text: &str) -> AppResult<Outb
         tracing::warn!(error = %e.message, "yanıtlanan posta okundu sayılamadı");
     }
     Ok(item)
+}
+
+/// Yanıt postasını kurar: hesabın yanıt imzası, dil, alıntı (depo okur; ağ
+/// yok). Pencereli ve penceresiz yanıt aynı postayı üretir.
+pub fn build_reply(
+    state: &AppState,
+    detail: &MessageDetail,
+    text: &str,
+) -> AppResult<OutgoingMessage> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Err(AppError::new(
+            ErrorCode::Invalid,
+            "Yanıt boş. Bir şey yaz ya da postayı uygulamada aç.",
+        ));
+    }
+    let account = state
+        .store
+        .account(&detail.summary.account_id)?
+        .ok_or_else(|| AppError::new(ErrorCode::NotFound, "Bu postanın hesabı artık yok."))?;
+    let lang = state.store.settings()?.language;
+    let input = ReplyInput::from_detail(detail);
+    Ok(reply_message(
+        &input,
+        &account,
+        text,
+        lang,
+        &format_date(input.date),
+    ))
 }
 
 async fn blocking<T: Send + 'static>(
