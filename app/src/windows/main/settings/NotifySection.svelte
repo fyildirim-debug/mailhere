@@ -8,6 +8,13 @@
   import { settings, updateSettings } from '../../../lib/stores/settings.svelte';
   import { accountUpdate } from './account';
   import { notifyPermission, requestNotifyPermission, type NotifyPermission } from '../../../lib/notify-permission';
+  import {
+    backgroundMode,
+    batteryStatus,
+    liftBatteryRestriction,
+    setBackgroundMode,
+    type BatteryStatus,
+  } from '../../../lib/notify-health';
 
   const s = $derived(settings.value);
   // Mobilde kart yok, işletim sistemi bildirimi var: kart konumu/süresi, yerel
@@ -41,11 +48,27 @@
     void updateSettings({ vip });
   }
 
-  // Android: sistem bildirim izni. Ayarlardan dönünce (görünürlük) yeniden okunur.
+  // Android: sistem bildirim izni ve bildirim sağlığı (anlık bildirim, pil
+  // kısıtlaması). Ayarlardan dönünce (görünürlük) yeniden okunur; komut yoksa
+  // (masaüstü) satırlar gizli kalır.
   let perm = $state<NotifyPermission>('unsupported');
+  let instant = $state<boolean | null>(null);
+  let instantBusy = $state(false);
+  let battery = $state<BatteryStatus | null>(null);
+  const batteryHints: Record<BatteryStatus, MessageKey> = {
+    unrestricted: 'mob.notify.batteryNoneHint',
+    optimized: 'mob.notify.batteryOptimizedHint',
+    restricted: 'mob.notify.batteryRestrictedHint',
+  };
   $effect(() => {
     if (!mobile) return;
-    const read = () => void notifyPermission().then((p) => (perm = p));
+    const read = () => {
+      void notifyPermission().then((p) => (perm = p));
+      void backgroundMode().then((on) => {
+        if (!instantBusy) instant = on;
+      });
+      void batteryStatus().then((b) => (battery = b));
+    };
     read();
     const onVisible = () => {
       if (document.visibilityState === 'visible') read();
@@ -60,6 +83,28 @@
 
   function openNotificationSettings() {
     call('notification_settings').catch((e) => showToast({ text: t('toast.error', { message: toAppError(e).message }) }));
+  }
+
+  // Anlık bildirim: anahtar hemen döner; başlatılamazsa son durum okunur, neden yazılır.
+  async function toggleInstant(on: boolean) {
+    instant = on;
+    instantBusy = true;
+    try {
+      instant = await setBackgroundMode(on);
+    } catch (e) {
+      instant = await backgroundMode();
+      showToast({ text: t('toast.error', { message: toAppError(e).message }) });
+    } finally {
+      instantBusy = false;
+    }
+  }
+
+  async function liftBattery() {
+    try {
+      battery = await liftBatteryRestriction();
+    } catch (e) {
+      showToast({ text: t('toast.error', { message: toAppError(e).message }) });
+    }
   }
 
   async function setAccountNotify(a: Account, notify: boolean) {
@@ -89,6 +134,33 @@
       <button class="btn-primary" onclick={allowNotifications}>{t('mob.notify.allow')}</button>
     {/if}
   </div>
+  {#if instant !== null}
+    <div class="set-row top">
+      <span class="set-name"
+        >{t('mob.notify.instant')}<span class="set-hint">{t(instant ? 'mob.notify.instantOnHint' : 'mob.notify.instantOffHint')}</span></span
+      >
+      <input
+        type="checkbox"
+        role="switch"
+        class="switch"
+        aria-label={t('mob.notify.instant')}
+        checked={instant}
+        disabled={instantBusy}
+        onchange={(e) => toggleInstant((e.currentTarget as HTMLInputElement).checked)}
+      />
+    </div>
+  {/if}
+  {#if battery !== null}
+    <div class="set-row battery">
+      <span class="set-name">{t('mob.notify.battery')}<span class="set-hint">{t(batteryHints[battery])}</span></span>
+      {#if battery === 'unrestricted'}
+        <span class="perm-on">{t('mob.notify.batteryNone')}</span>
+      {:else}
+        <button class="btn-soft" onclick={liftBattery}>{t('mob.notify.batteryLift')}</button>
+      {/if}
+    </div>
+    <p class="set-hint vendor">{t('mob.notify.vendorNote')}</p>
+  {/if}
 {/if}
 
 <h3 class="set-h">{t('set.notifyWhat')}</h3>
@@ -205,6 +277,19 @@
     flex: none;
     font-weight: 500;
     color: var(--ok);
+  }
+
+  /* Üretici notu pil satırının açıklamasıdır: satırla aynı çizgide biter. */
+  .battery {
+    border-bottom: 0;
+    padding-bottom: 4px;
+  }
+
+  .vendor {
+    margin: 0;
+    padding: 0 0 14px;
+    border-bottom: 1px solid var(--line);
+    max-width: 62ch;
   }
 
   .page {

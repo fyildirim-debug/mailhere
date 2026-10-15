@@ -909,6 +909,20 @@ export interface Commands {
   transfer_apply: [{ previewId: string; choice: TransferChoice }, TransferReport];
 
   // Yalnız mobil kabuk (Android; masaüstü kabukta tanımlı değil)
+  /**
+   * Android: pil kısıtlaması. `unrestricted` pil optimizasyonundan muaf; `optimized` varsayılan
+   * (Android arka plandaki uygulamayı uyutabilir); `restricted` kullanıcı "Kısıtlı" seçmiş.
+   */
+  battery_status: [Record<string, never>, 'unrestricted' | 'optimized' | 'restricted'];
+  /**
+   * Android: kısıtlamayı kaldırma. Optimizasyondaysa sistemin "pil optimizasyonunu yok say" isteği,
+   * "Kısıtlı"ysa uygulamanın ayar sayfası açılır; kullanıcı dönünce biter, durum yeniden okunur.
+   */
+  battery_settings: [Record<string, never>, null];
+  /** Android: "Anlık bildirim" (sürekli bağlantı, sessiz ön plan hizmeti) açık mı. */
+  background_mode_get: [Record<string, never>, boolean];
+  /** Android: anlık bildirimi açar ya da kapatır; son durumu döner. Açılış uygulama ekrandayken yapılır. */
+  background_mode_set: [{ on: boolean }, boolean];
   /** Kamerayla QR okutur; okunan metin, vazgeçilirse null. */
   qr_scan: [Record<string, never>, string | null];
   /** Bildirim izni ister; sonuç "granted" | "denied" | "prompt" (Android 13 öncesi hep "granted"). */
