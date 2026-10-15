@@ -29,7 +29,7 @@ use crate::{is_syncable, ops, push, send, sync};
 pub struct Timing {
     /// Durum akışı yokken yoklama aralığı.
     pub poll: Duration,
-    /// Akış çalışsa da düzenli eşitleme.
+    /// Akış çalışsa da düzenli eşitleme (sessizce kopan akışın güvenlik ağı).
     pub periodic: Duration,
     /// Sunucudan istenen canlılık sinyali aralığı (saniye).
     pub ping_secs: u32,
@@ -41,7 +41,7 @@ impl Default for Timing {
     fn default() -> Self {
         Self {
             poll: Duration::from_secs(120),
-            periodic: Duration::from_secs(10 * 60),
+            periodic: Duration::from_secs(5 * 60),
             ping_secs: 60,
             min_backoff: Duration::from_secs(2),
             max_backoff: Duration::from_secs(300),

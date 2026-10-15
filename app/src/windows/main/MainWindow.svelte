@@ -77,7 +77,8 @@
     const offWidth = watchWidth(() => scale.css);
     // Bildirimden açılan posta dar pencerede okuma alanında görünür.
     const offOpen = on(EVENTS.open, () => showReader());
-    // Ağ geri gelince ölü bağlantılar yenilenir (uyku Rust tarafında yakalanır).
+    // Ağ geri gelince ölü bağlantılar yenilenir, pencereye dönülünce kutular
+    // eşitlenir (uyku Rust tarafında yakalanır).
     const offWake = watchWake({ background: false });
     return () => {
       offWidth();

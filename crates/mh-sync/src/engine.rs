@@ -15,7 +15,6 @@ mod drafts;
 mod moves;
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -50,13 +49,15 @@ const MAX_BACKOFF: Duration = Duration::from_secs(300);
 /// yoksa sunucu 2 saniyede bir yoklanırdı.
 const STABLE_SESSION: Duration = Duration::from_secs(60);
 /// Tüm kutuların düzenli eşitlenmesi (aynı zamanda bağlantıyı canlı tutar).
-const PERIODIC: Duration = Duration::from_secs(10 * 60);
+/// Gelen kutusu dışındaki klasörlere yeni posta en geç bu kadar sonra gelir.
+const PERIODIC: Duration = Duration::from_secs(5 * 60);
 /// IDLE en geç bu sürede yenilenir (RFC 2177: 29 dakikadan kısa). Kısa
 /// tutulur: sessizce kopan bağlantı en geç bu kadar sonra fark edilir (TCP
 /// canlılık yoklaması işletim sisteminde kapalıysa da).
 const IDLE_RENEW: Duration = Duration::from_secs(10 * 60);
-/// IDLE desteklemeyen sunucuda, ya da IDLE bağlantısı kurulamamışken gelen
-/// kutusu yoklama aralığı.
+/// Gelen kutusu yoklama aralığı. IDLE'siz sunucuda tek kaynak; IDLE varken
+/// güvenlik ağı: sessizce kopan (ya da yeni postayı bildirmeyen) IDLE
+/// bağlantısı yeni postayı en çok bu kadar geciktirir.
 const POLL: Duration = Duration::from_secs(120);
 const FULL_SYNC_TIMEOUT: Duration = Duration::from_secs(20 * 60);
 const ACTION_TIMEOUT: Duration = Duration::from_secs(120);
@@ -113,9 +114,6 @@ struct AccountCtx {
     secrets: Arc<dyn SecretStore>,
     tokens: Arc<TokenProvider>,
     sink: Arc<dyn EventSink>,
-    /// Gelen kutusu izleniyor (IDLE kurulu ya da IDLE'siz sunucu yoklanıyor).
-    /// Değilse komut bağlantısı gelen kutusunu kendisi yoklar.
-    watching: AtomicBool,
 }
 
 impl AccountCtx {
@@ -266,7 +264,6 @@ impl SyncManager {
             secrets: self.secrets.clone(),
             tokens: self.tokens.clone(),
             sink: self.sink.clone(),
-            watching: AtomicBool::new(false),
         });
         let tasks = vec![
             self.rt.spawn(account_loop(ctx.clone(), rx)),
@@ -765,10 +762,9 @@ async fn run_session(
                 Some(c) => enqueue(pending, c),
             },
             _ = periodic.tick() => pending.push_back(Command::SyncAll),
-            // IDLE kurulamıyorsa yeni posta 10 dakikalık tam eşitlemeyi beklemesin.
-            _ = poll.tick(), if !ctx.watching.load(Ordering::Relaxed) => {
-                enqueue(pending, Command::SyncInbox);
-            }
+            // Gelen kutusu IDLE'den bağımsız da yoklanır: IDLE kurulamasa,
+            // sessizce kopsa ya da sunucu desteklemese de yeni posta beklemesin.
+            _ = poll.tick() => enqueue(pending, Command::SyncInbox),
         }
     }
 }
@@ -1508,7 +1504,6 @@ async fn idle_loop(ctx: Arc<AccountCtx>, tx: UnboundedSender<Command>) {
     loop {
         let opened = Instant::now();
         let res = idle_session(&ctx, &tx).await;
-        ctx.watching.store(false, Ordering::Relaxed);
         match res {
             Ok(()) => return,
             Err(e) => {
@@ -1533,14 +1528,9 @@ async fn idle_session(ctx: &AccountCtx, tx: &UnboundedSender<Command>) -> SyncRe
     let mut session = ctx.connect().await?;
     let caps = timeout(ACTION_TIMEOUT, session.capabilities()).await??;
     if !caps.has_str("IDLE") {
+        // IDLE'siz sunucu: gelen kutusunu komut bağlantısının yoklaması izler.
         let _ = timeout(Duration::from_secs(5), session.logout()).await;
-        ctx.watching.store(true, Ordering::Relaxed);
-        loop {
-            tokio::time::sleep(POLL).await;
-            if tx.send(Command::SyncInbox).is_err() {
-                return Ok(());
-            }
-        }
+        return Ok(());
     }
     let inbox = ctx
         .store
@@ -1554,7 +1544,6 @@ async fn idle_session(ctx: &AccountCtx, tx: &UnboundedSender<Command>) -> SyncRe
         timeout(ACTION_TIMEOUT, idle.init()).await??;
         if first {
             first = false;
-            ctx.watching.store(true, Ordering::Relaxed);
             // Bağlantı kopukken gelen postalar: IDLE her kurulduğunda gelen
             // kutusu bir kez eşitlenir (ilk açılışta tam eşitlemeyle birleşir).
             if tx.send(Command::SyncInbox).is_err() {

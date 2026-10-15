@@ -2,8 +2,8 @@
 //!
 //! Dizüstü uykudan ya da telefon arka plandan dönünce IDLE ve komut
 //! bağlantıları çoğunlukla ölüdür ama TCP bunu dakikalarca fark etmez; yeni
-//! posta ancak IDLE yenilemesinde (25 dk) gelirdi. Bağlantılar baştan kurulur;
-//! kuyruktaki sunucu işlemleri kalır, yeni bağlantıda uygulanır.
+//! posta ancak yoklamada ya da IDLE yenilemesinde gelirdi. Bağlantılar baştan
+//! kurulur; kuyruktaki sunucu işlemleri kalır, yeni bağlantıda uygulanır.
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime};

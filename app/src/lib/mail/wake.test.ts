@@ -8,7 +8,7 @@ vi.mock('../api', () => ({
   },
 }));
 
-const { AWAY_MS, watchWake } = await import('./wake');
+const { AWAY_MS, REFRESH_MS, watchWake } = await import('./wake');
 
 /** Olay dinleyicilerini tutan en küçük hedef. */
 function target() {
@@ -82,5 +82,29 @@ describe('arka plandan dönüş', () => {
     expect(calls).toEqual(['sync_reconnect']);
     off();
     expect(win.count('online')).toBe(0);
+    expect(win.count('focus')).toBe(0);
+  });
+
+  it('masaüstünde pencereye dönüş en çok dakikada bir eşitler', () => {
+    watchWake({ background: false }, now);
+    win.fire('focus');
+    expect(calls).toEqual([]);
+    clock += REFRESH_MS;
+    win.fire('focus');
+    win.fire('focus');
+    expect(calls).toEqual(['sync_now']);
+    // Yeniden bağlanma da eşitler; hemen ardından gelen odak yinelemez.
+    clock += REFRESH_MS;
+    win.fire('online');
+    win.fire('focus');
+    expect(calls).toEqual(['sync_now', 'sync_reconnect']);
+    clock += REFRESH_MS;
+    win.fire('focus');
+    expect(calls).toEqual(['sync_now', 'sync_reconnect', 'sync_now']);
+  });
+
+  it('mobilde odak izlenmez (dönüşü görünürlük yakalar)', () => {
+    watchWake({ background: true }, now);
+    expect(win.count('focus')).toBe(0);
   });
 });
