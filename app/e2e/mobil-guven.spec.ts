@@ -68,6 +68,9 @@ test('aldatıcı bağlantı onayı ekrana sığar; geri tuşu önce onayı kapat
   await page.frameLocator('iframe[title="Posta içeriği"]').getByRole('link', { name: 'www.odememerkezi.com.tr' }).click();
   const dialog = page.getByRole('alertdialog', { name: 'Bağlantı başka bir siteye gidiyor' });
   await expect(dialog).toBeVisible();
+  // Ölçü giriş animasyonu (ölçekle büyüme) bitince alınır; yavaş makinede
+  // yarıda ölçülen düğme 44 px'ten kısa görünürdü.
+  await dialog.evaluate((el) => Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished)));
   const box = (await dialog.boundingBox())!;
   expect(box.x).toBeGreaterThanOrEqual(0);
   expect(box.x + box.width).toBeLessThanOrEqual(360);
