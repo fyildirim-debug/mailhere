@@ -283,8 +283,9 @@ pub fn validate_package(p: &TransferPackage) -> AppResult<()> {
 }
 
 /// Gelen ayarları yerel ayarların üstüne yazar; cihaza özgü olanlar
-/// (kart konumu ve süresi, yerel bildirim, otomatik güncelleme) ve onaylı
-/// sertifikalar yerelde kalır.
+/// (kart konumu ve süresi, yerel bildirim, otomatik güncelleme, telefonun
+/// kaydırma eylemleri ve silme sonrası davranışı) ve onaylı sertifikalar
+/// yerelde kalır.
 pub fn merge_settings(local: &Settings, incoming: Settings) -> Settings {
     Settings {
         card_position: local.card_position,
@@ -292,6 +293,9 @@ pub fn merge_settings(local: &Settings, incoming: Settings) -> Settings {
         native_notifications: local.native_notifications,
         auto_update: local.auto_update,
         trusted_certs: local.trusted_certs.clone(),
+        after_remove: local.after_remove,
+        swipe_left: local.swipe_left,
+        swipe_right: local.swipe_right,
         ..incoming
     }
 }
@@ -1597,6 +1601,17 @@ mod tests {
         assert_eq!(merged.theme, Theme::Dark);
         assert_eq!(merged.density, Density::Compact);
         assert_eq!(merged.vip, incoming.vip);
+        // Telefonun kaydırma ve silme sonrası seçimi bilgisayardan ezilmez.
+        let phone = Settings {
+            swipe_left: mh_core::SwipeAction::Spam,
+            swipe_right: mh_core::SwipeAction::Move,
+            after_remove: mh_core::AfterRemove::Next,
+            ..local.clone()
+        };
+        let merged = merge_settings(&phone, incoming.clone());
+        assert_eq!(merged.swipe_left, mh_core::SwipeAction::Spam);
+        assert_eq!(merged.swipe_right, mh_core::SwipeAction::Move);
+        assert_eq!(merged.after_remove, mh_core::AfterRemove::Next);
 
         // Uygulama yoluyla: depoya yazılan birleşik ve sadeleştirilmiş ayar.
         let side = Side::new();

@@ -1945,10 +1945,9 @@ mod tests {
         );
         // Bilinmeyen değer (yeni sürümün ayarı) tüm ayarları düşürmez: kaydırma
         // kapanır, okuma listeye döner; diğer alanlar korunur.
-        let s: Settings = serde_json::from_str(
-            r#"{"swipeLeft":"fly","afterRemove":"jump","screener":true}"#,
-        )
-        .unwrap();
+        let s: Settings =
+            serde_json::from_str(r#"{"swipeLeft":"fly","afterRemove":"jump","screener":true}"#)
+                .unwrap();
         assert_eq!(s.swipe_left, SwipeAction::None);
         assert_eq!(s.after_remove, AfterRemove::List);
         assert!(s.screener);

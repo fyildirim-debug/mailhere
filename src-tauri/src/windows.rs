@@ -60,7 +60,9 @@ pub fn create_main(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         .on_navigation(guard(app))
         .title("Mailhere")
         .inner_size(1280.0, 820.0)
-        .min_inner_size(900.0, 600.0)
+        // Dar pencere kipleri (ikon rayı 1120 px altı, liste → okuma yığını
+        // 860 px altı) gerçek pencerede de kullanılabilsin.
+        .min_inner_size(640.0, 560.0)
         .center()
         .decorations(false)
         .build()
