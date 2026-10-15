@@ -23,6 +23,7 @@ pub mod cmd_vacation;
 pub mod commands;
 pub mod files;
 pub mod followups;
+pub mod headless;
 pub mod logging;
 pub mod notify;
 pub mod notify_actions;
