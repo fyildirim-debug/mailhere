@@ -104,6 +104,11 @@
     });
   });
 
+  // Yığında okunan posta kalmadıysa (son posta arşivlendi) liste görünür.
+  $effect(() => {
+    if (stack && desk.reading && mail.selectedId == null && !bulk) untrack(() => showList());
+  });
+
   // Başka ekran (ayarlar, planlananlar) açılınca katman kapanır, odak kipi biter.
   $effect(() => {
     const screen = mail.screen;
@@ -261,7 +266,8 @@
     }
     if (sc === 'sidebar') {
       e.preventDefault();
-      toggleSidebar();
+      // Odak kipinde kenar çubuğu gizli; tercih görünmeden değişmesin.
+      if (!triage.on) toggleSidebar();
       return;
     }
     if (mail.screen !== 'mail') return;

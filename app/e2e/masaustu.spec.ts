@@ -96,6 +96,14 @@ test('800 px: liste → okuma yığını; posta açılınca okuma tam genişlik,
   await list(page).getByText('Cumartesi kahvaltı?').click();
   await rail(page).getByRole('button', { name: 'Arşiv' }).click();
   await expect(list(page).getByRole('heading', { name: 'Arşiv' })).toBeVisible();
+
+  // Okunan son posta arşivlenince liste (boş durum) görünür.
+  await rail(page).getByRole('button', { name: 'Yıldızlılar' }).click();
+  await list(page).getByText('Sözleşme imzaya hazır').click();
+  await expect(page.getByRole('heading', { level: 2, name: 'Sözleşme imzaya hazır' })).toBeVisible();
+  await page.keyboard.press('e');
+  await expect(list(page)).toBeVisible();
+  await expect(list(page).getByText('Sözleşme imzaya hazır')).toHaveCount(0);
 });
 
 // --------------------------------------------------------------- ayırıcılar
