@@ -444,6 +444,34 @@ pub struct MessageDetail {
     /// CANCEL); yoksa `None`.
     #[serde(default)]
     pub invite: Option<Invite>,
+    /// HTML gövdeden atılan izleyici (izleme pikseli) sayısı; uzak içeriğe
+    /// izin verilmiş olsa da bunlar hiç yüklenmez.
+    #[serde(default)]
+    pub trackers: u32,
+    /// İzleme parametreleri (`utm_*`, `fbclid` …) sökülen bağlantı sayısı.
+    #[serde(default)]
+    pub cleaned_links: u32,
+    /// Gönderenin kimliğinden kuşku duyduran işaret; yoksa `None`.
+    #[serde(default)]
+    pub sender_warning: Option<SenderWarning>,
+    /// Konu ya da metinde bulunan doğrulama kodu (boşluksuz); yoksa `None`.
+    #[serde(default)]
+    pub otp: Option<String>,
+}
+
+/// Gönderen güveni uyarısı (okuma alanında gönderen satırının altında).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum SenderWarning {
+    /// Görünen adın içinde başka bir alan adına ait e-posta adresi var
+    /// ("Banka destek@banka.com" <x@baska.example>).
+    NameHasOtherAddress,
+    /// Gönderen alan adı punycode (`xn--`) ya da bir etikette Latin ile
+    /// Kiril/Yunan harfleri karışık.
+    LookalikeDomain,
+    /// Alıcı sunucunun `Authentication-Results` başlığında DMARC başarısız
+    /// ya da DKIM ve SPF birlikte başarısız.
+    AuthFailed,
 }
 
 /// Takvim davetinin amacı (iTIP METHOD).
@@ -1250,6 +1278,9 @@ pub struct NotifyEvent {
     pub message: MessageSummary,
     pub account_name: String,
     pub account_color: String,
+    /// Postadaki doğrulama kodu ("Kodu kopyala" düğmesi); yoksa `None`.
+    #[serde(default)]
+    pub otp: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -1482,8 +1513,24 @@ mod tests {
                 method: InviteMethod::Request,
                 sequence: 2,
             }),
+            trackers: 3,
+            cleaned_links: 2,
+            sender_warning: Some(SenderWarning::NameHasOtherAddress),
+            otp: Some("482913".into()),
         };
         let v = serde_json::to_value(&d).unwrap();
+        assert_eq!(v["trackers"], 3);
+        assert_eq!(v["cleanedLinks"], 2);
+        assert_eq!(v["senderWarning"], "nameHasOtherAddress");
+        assert_eq!(v["otp"], "482913");
+        assert_eq!(
+            serde_json::to_value(SenderWarning::LookalikeDomain).unwrap(),
+            "lookalikeDomain"
+        );
+        assert_eq!(
+            serde_json::to_value(SenderWarning::AuthFailed).unwrap(),
+            "authFailed"
+        );
         assert_eq!(v["subject"], "Merhaba");
         assert_eq!(v["hasRemoteContent"], false);
         assert_eq!(v["category"], "people");
@@ -1498,12 +1545,23 @@ mod tests {
         assert_eq!(v["invite"]["organizer"]["email"], "kerem@ornek.com");
         // Alanı bilmeyen eski veri `None` okunur; sabitleme ve etiket boş.
         let mut old = v.clone();
-        for k in ["unsubscribe", "invite", "pinned", "tags"] {
+        for k in [
+            "unsubscribe",
+            "invite",
+            "pinned",
+            "tags",
+            "trackers",
+            "cleanedLinks",
+            "senderWarning",
+            "otp",
+        ] {
             old.as_object_mut().unwrap().remove(k);
         }
         let back: MessageDetail = serde_json::from_value(old).unwrap();
         assert_eq!(back.unsubscribe, None);
         assert_eq!(back.invite, None);
+        assert_eq!((back.trackers, back.cleaned_links), (0, 0));
+        assert_eq!((back.sender_warning, back.otp), (None, None));
         assert!(!back.summary.pinned);
         assert!(back.summary.tags.is_empty());
         assert_eq!(

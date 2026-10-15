@@ -611,7 +611,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       snippet: msg.bodyText.replace(/\s+/g, ' ').slice(0, 200), date: now(), unread: false, starred: false,
       hasAttachments: msg.attachments.length > 0, category: 'people', snoozedUntil: null, followUp: null, pinned: false, tags: [], cc: msg.cc, bcc: msg.bcc, replyTo: [],
       messageIdHeader: null, references: [], bodyText: msg.bodyText, bodyHtml: null, hasRemoteContent: false,
-      remoteAllowed: false, attachments: [], thread: [], unsubscribe: null, invite: null,
+      remoteAllowed: false, attachments: [], thread: [], unsubscribe: null, invite: null, trackers: 0, cleanedLinks: 0, senderWarning: null, otp: null,
     };
   }
 
@@ -632,7 +632,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
         snippet: msg.bodyText.replace(/\s+/g, ' ').slice(0, 200), date: now(), unread: false, starred: false,
         hasAttachments: msg.attachments.length > 0, category: 'people', snoozedUntil: null, followUp: null, pinned: false, tags: [], cc: msg.cc, bcc: [], replyTo: [],
         messageIdHeader: null, references: [], bodyText: msg.bodyText, bodyHtml: null, hasRemoteContent: false,
-        remoteAllowed: false, attachments: [], thread: [], unsubscribe: null, invite: null,
+        remoteAllowed: false, attachments: [], thread: [], unsubscribe: null, invite: null, trackers: 0, cleanedLinks: 0, senderWarning: null, otp: null,
       });
       // Alıcılar bilinen gönderici olur; istenmişse yanıt hatırlatması kurulur.
       for (const a of [...msg.to, ...msg.cc]) {
@@ -1225,6 +1225,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
         hasAttachments: false, category: 'people', snoozedUntil: null, cc: [], bcc: [], replyTo: [],
         messageIdHeader: null, references: [], bodyText: `${account.displayName} daveti yanıtladı: ${m.invite.summary}`, bodyHtml: null,
         hasRemoteContent: false, remoteAllowed: false, attachments: [], thread: [], unsubscribe: null, invite: null, followUp: null, pinned: false, tags: [],
+        trackers: 0, cleanedLinks: 0, senderWarning: null, otp: null,
       });
       emit(EVENTS.changed, { mailboxIds: [] });
       return null;
@@ -1238,7 +1239,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       const m = state.messages.find((x) => x.subject === 'Cumartesi kahvaltı?') ?? state.messages[0];
       if (m) {
         const a = state.accounts.find((x) => x.id === m.accountId);
-        emit(EVENTS.notify, { message: summary(m), accountName: a?.name ?? '', accountColor: a?.color ?? '#4C6FD8' });
+        emit(EVENTS.notify, { message: summary(m), accountName: a?.name ?? '', accountColor: a?.color ?? '#4C6FD8', otp: m.otp });
       }
       return null;
     },

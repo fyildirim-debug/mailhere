@@ -4,24 +4,32 @@
 //! yeni pencerede ve `noopener noreferrer` ile açılır; yalnız http, https ve
 //! mailto kabul edilir. Uzak görseller izin yoksa `data-mh-src` özniteliğine
 //! taşınır; `cid:` görseller postanın kendi parçalarından `data:` adresine
-//! çevrilir.
+//! çevrilir. İzleme pikselleri izin olsa da tümden atılır ve sayılır;
+//! bağlantılardan izleme parametreleri sökülür. Metni bir adres gibi görünüp
+//! başka bir siteye giden bağlantıya gerçek hedefin sunucu adı
+//! `data-mh-host` olarak yazılır (arayüz tıklamada onay ister).
 
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use ammonia::{Builder, UrlRelative};
 
 use crate::prescan::{canonicalize, strip_tags, text_to_html};
+use crate::privacy::{clean_url, is_tracker_image, link_text_host, same_site, url_host};
 use crate::text::tidy_lines;
 
 /// Temizlenmiş HTML.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Sanitized {
     pub html: String,
-    /// Postada uzak görsel var (izin verilmiş olsa da).
+    /// Postada izleyici olmayan uzak görsel var (izin verilmiş olsa da).
     pub has_remote: bool,
+    /// Atılan izleme pikseli sayısı (aynı adres bir kez sayılır).
+    pub trackers: u32,
+    /// İzleme parametreleri sökülen bağlantı sayısı.
+    pub cleaned_links: u32,
 }
 
 const EXTRA_TAGS: &[&str] = &["font", "center"];
@@ -276,11 +284,13 @@ pub fn sanitize_html(
         return Sanitized {
             html: text_to_html(&tidy_lines(&strip_tags(html))),
             has_remote: false,
+            trackers: 0,
+            cleaned_links: 0,
         };
     };
     let marker = format!("mh-blocked:{}:", nonce());
     let blocked: Arc<Mutex<Vec<String>>> = Arc::default();
-    let has_remote = Arc::new(AtomicBool::new(false));
+    let cleaned = Arc::new(AtomicU32::new(0));
 
     let mut b = Builder::default();
     b.add_tags(EXTRA_TAGS)
@@ -296,7 +306,7 @@ pub fn sanitize_html(
     {
         let marker = marker.clone();
         let blocked = blocked.clone();
-        let has_remote = has_remote.clone();
+        let cleaned = cleaned.clone();
         b.attribute_filter(move |element, attribute, value| {
             filter_attr(
                 element,
@@ -307,7 +317,7 @@ pub fn sanitize_html(
                     inline: &inline,
                     marker: &marker,
                     blocked: &blocked,
-                    has_remote: &has_remote,
+                    cleaned: &cleaned,
                 },
             )
         });
@@ -315,45 +325,176 @@ pub fn sanitize_html(
     let out = b.clean(&canon).to_string();
 
     let urls = std::mem::take(&mut *blocked.lock().unwrap_or_else(|e| e.into_inner()));
+    let images = finish_images(&out, &marker, &urls);
     Sanitized {
-        html: restore_blocked(out, &marker, &urls),
-        has_remote: has_remote.load(Ordering::Relaxed),
+        html: mark_deceptive_links(&images.html),
+        has_remote: images.has_remote,
+        trackers: images.trackers,
+        cleaned_links: cleaned.load(Ordering::Relaxed),
     }
 }
 
-/// Engellenen görsellerin `src="<işaret><sıra>"` özniteliklerini tek geçişte
-/// `data-mh-src="<adres>"` yapar (adres başına ayrı `replace` karesel olurdu).
-fn restore_blocked(html: String, marker: &str, urls: &[String]) -> String {
-    if urls.is_empty() {
-        return html;
-    }
-    let needle = format!("src=\"{marker}");
+/// Görsel geçişinin sonucu.
+struct Images {
+    html: String,
+    has_remote: bool,
+    trackers: u32,
+}
+
+/// Temizlenmiş çıktıdaki `<img …>` etiketlerinde tek geçişte: izleme
+/// pikselleri atılır (sayılır), engellenen görsellerin `src="<işaret><sıra>"`
+/// öznitelikleri `data-mh-src="<adres>"` olur (adres başına ayrı `replace`
+/// karesel olurdu).
+///
+/// Çıktı html5ever'dan gelir: etiketler küçük harfli, öznitelik değerleri çift
+/// tırnaklı, `"`, `<` ve `>` kaçışlıdır; metindeki `<` de kaçışlı olduğundan
+/// her `<img` gerçek bir etikettir.
+fn finish_images(html: &str, marker: &str, urls: &[String]) -> Images {
     let extra: usize = urls.iter().map(|u| u.len() + 8).sum();
     let mut out = String::with_capacity(html.len() + extra);
-    let mut rest = html.as_str();
-    while let Some(i) = rest.find(&needle) {
-        let after = &rest[i + needle.len()..];
-        let digits = after.bytes().take_while(u8::is_ascii_digit).count();
-        let url = after[..digits]
-            .parse::<usize>()
-            .ok()
+    let mut seen_trackers: HashSet<String> = HashSet::new();
+    let mut has_remote = false;
+    let mut rest = html;
+    while let Some(i) = rest.find("<img") {
+        let after = &rest[i + 4..];
+        let Some(end) = after.find('>') else {
+            break;
+        };
+        let tag = &after[..end];
+        out.push_str(&rest[..i]);
+        rest = &after[end + 1..];
+        let src = attr(tag, "src");
+        let blocked = src
+            .and_then(|v| v.strip_prefix(marker))
+            .and_then(|n| n.parse::<usize>().ok())
             .and_then(|n| urls.get(n));
-        match url {
-            Some(url) if after[digits..].starts_with('"') => {
-                out.push_str(&rest[..i]);
-                out.push_str("data-mh-src=\"");
-                out.push_str(&escape_attr(url));
-                out.push('"');
-                rest = &after[digits + 1..];
+        let remote = match blocked {
+            Some(url) => Some(url.clone()),
+            None => src.map(decode_entities).filter(|v| is_http(v)),
+        };
+        if let Some(url) = &remote {
+            let style = attr(tag, "style").map(decode_entities);
+            if is_tracker_image(
+                url,
+                attr(tag, "width"),
+                attr(tag, "height"),
+                style.as_deref(),
+            ) {
+                seen_trackers.insert(url.clone());
+                continue;
             }
-            _ => {
-                out.push_str(&rest[..i + needle.len()]);
-                rest = after;
+            has_remote = true;
+        }
+        out.push_str("<img");
+        match (blocked, src) {
+            (Some(url), Some(v)) => {
+                // Yalnız `src` değeri yerinde değişir; diğer öznitelikler kalır.
+                let old = format!(" src=\"{v}\"");
+                let new = format!(" data-mh-src=\"{}\"", escape_attr(url));
+                out.push_str(&tag.replacen(&old, &new, 1));
+            }
+            _ => out.push_str(tag),
+        }
+        out.push('>');
+    }
+    out.push_str(rest);
+    Images {
+        html: out,
+        has_remote,
+        trackers: seen_trackers.len() as u32,
+    }
+}
+
+/// Etiket metnindeki ` ad="değer"` özniteliğinin (çözülmemiş) değeri.
+fn attr<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
+    let needle = format!("{name}=\"");
+    let mut rest = tag;
+    while let Some(i) = rest.find(&needle) {
+        // `data-mh-src="…"` gibi başka bir özniteliğin sonu olmasın.
+        let boundary = rest[..i]
+            .chars()
+            .next_back()
+            .is_none_or(char::is_whitespace);
+        let after = &rest[i + needle.len()..];
+        let end = after.find('"')?;
+        if boundary {
+            return Some(&after[..end]);
+        }
+        rest = &after[end + 1..];
+    }
+    None
+}
+
+/// Bağlantı metninin incelenen en uzun kısmı (bayt).
+const LINK_TEXT_LIMIT: usize = 300;
+
+/// Metni bir adres ya da alan adı gibi görünen ama başka siteye giden
+/// bağlantılara gerçek hedefin sunucu adını `data-mh-host` olarak ekler.
+///
+/// Her `<a …>` için metin, sonraki `<a ` ya da `</a>` etiketine kadar okunur
+/// (tablo içindeki iç içe bağlantılar da ayrı ayrı denetlenir); okuma
+/// [`LINK_TEXT_LIMIT`] ile sınırlı olduğundan iş doğrusal kalır.
+fn mark_deceptive_links(html: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+    let mut rest = html;
+    while let Some(i) = rest.find("<a ") {
+        let after = &rest[i + 3..];
+        let Some(end) = after.find('>') else {
+            break;
+        };
+        let tag = &after[..end];
+        let body = &after[end + 1..];
+        out.push_str(&rest[..i]);
+        out.push_str("<a ");
+        let real = attr(tag, "href")
+            .map(decode_entities)
+            .and_then(|href| url_host(&href));
+        if let Some(real) = real {
+            if let Some(shown) = link_text_host(&link_text(body)) {
+                if !same_site(&shown, &real) {
+                    out.push_str("data-mh-host=\"");
+                    out.push_str(&escape_attr(&real));
+                    out.push_str("\" ");
+                }
             }
         }
+        out.push_str(tag);
+        out.push('>');
+        rest = body;
     }
     out.push_str(rest);
     out
+}
+
+/// Bağlantının görünen metni: sonraki `<a `/`</a>` etiketine kadar,
+/// etiketler atılmış ve göndermeler çözülmüş; en çok [`LINK_TEXT_LIMIT`]
+/// bayt incelenir.
+fn link_text(body: &str) -> String {
+    let window = &body[..floor_char(body, LINK_TEXT_LIMIT)];
+    let mut text = String::new();
+    let mut rest = window;
+    while let Some(i) = rest.find('<') {
+        text.push_str(&rest[..i]);
+        let tail = &rest[i..];
+        if tail.starts_with("</a>") || tail.starts_with("<a ") || tail.starts_with("<a>") {
+            return decode_entities(&text);
+        }
+        rest = tail.find('>').map_or("", |e| &tail[e + 1..]);
+    }
+    text.push_str(rest);
+    decode_entities(&text)
+}
+
+/// `max` bayttan küçük ya da eşit, karakter sınırına denk gelen konum.
+fn floor_char(s: &str, max: usize) -> usize {
+    if s.len() <= max {
+        return s.len();
+    }
+    let mut i = max;
+    while !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
 }
 
 /// Temizlenmiş HTML'deki uzak (`http`/`https`) görsel adresleri, belge
@@ -375,7 +516,7 @@ pub fn remote_image_urls(html: &str) -> Vec<String> {
             break;
         };
         let tag = &after[..end];
-        if let Some(url) = img_src(tag).map(decode_entities) {
+        if let Some(url) = attr(tag, "src").map(decode_entities) {
             if is_http(&url) && seen.insert(url.clone()) {
                 out.push(url);
             }
@@ -383,25 +524,6 @@ pub fn remote_image_urls(html: &str) -> Vec<String> {
         rest = &after[end + 1..];
     }
     out
-}
-
-/// `<img …>` etiketinin içindeki ` src="…"` değeri (çözülmemiş).
-fn img_src(tag: &str) -> Option<&str> {
-    let mut rest = tag;
-    while let Some(i) = rest.find("src=\"") {
-        // `data-mh-src="…"` gibi başka bir özniteliğin sonu olmasın.
-        let boundary = rest[..i]
-            .chars()
-            .next_back()
-            .is_none_or(char::is_whitespace);
-        let after = &rest[i + 5..];
-        let end = after.find('"')?;
-        if boundary {
-            return Some(&after[..end]);
-        }
-        rest = &after[end + 1..];
-    }
-    None
 }
 
 /// HTML öznitelik değerindeki karakter göndermelerini çözer (`&amp;`,
@@ -457,7 +579,7 @@ struct FilterCtx<'a> {
     inline: &'a HashMap<String, String>,
     marker: &'a str,
     blocked: &'a Mutex<Vec<String>>,
-    has_remote: &'a AtomicBool,
+    cleaned: &'a AtomicU32,
 }
 
 fn filter_attr<'u>(
@@ -475,7 +597,6 @@ fn filter_attr<'u>(
             if !is_http(v) {
                 return None;
             }
-            ctx.has_remote.store(true, Ordering::Relaxed);
             if ctx.remote_allowed {
                 return Some(Cow::Borrowed(value));
             }
@@ -484,6 +605,13 @@ fn filter_attr<'u>(
             Some(Cow::Owned(format!("{}{}", ctx.marker, list.len() - 1)))
         }
         (_, "href") if strip_prefix_ci(value.trim(), "cid:").is_some() => None,
+        ("a", "href") => match clean_url(value) {
+            Some(clean) => {
+                ctx.cleaned.fetch_add(1, Ordering::Relaxed);
+                Some(Cow::Owned(clean))
+            }
+            None => Some(Cow::Borrowed(value)),
+        },
         (_, "style") => sanitize_style(value).map(Cow::Owned),
         _ => Some(Cow::Borrowed(value)),
     }
@@ -785,6 +913,133 @@ mod tests {
         assert_eq!(decode_entities("&bilinmeyen;&amp"), "&bilinmeyen;&amp");
         assert_eq!(decode_entities("&#xZZ;&#;"), "&#xZZ;&#;");
         assert_eq!(decode_entities("yok"), "yok");
+    }
+
+    #[test]
+    fn izleme_pikselleri_atilir_ve_sayilir() {
+        let html = r#"<p>x</p><img src="https://bulten.example/kapak.jpg" width="600" alt="kapak">
+            <img src="https://iz.example/o.gif?u=1&amp;m=2" width="1" height="1" alt="">
+            <img src="https://iz.example/o.gif?u=1&amp;m=2" width="1" height="1">
+            <img src="https://iz.example/g.png" style="display:none">
+            <img src="https://u1.ct.sendgrid.net/wf/open?upn=abc" width="600" height="80">
+            <img src="cid:yok"><img src="data:image/gif;base64,R0lGOD" width="1" height="1">"#;
+        for remote in [false, true] {
+            let s = clean(html, remote);
+            assert_eq!(s.trackers, 3, "{}", s.html);
+            assert!(s.has_remote);
+            assert!(
+                !s.html.contains("iz.example") && !s.html.contains("sendgrid"),
+                "{}",
+                s.html
+            );
+            assert!(s.html.contains("kapak.jpg"));
+        }
+        // Yalnız izleyici varsa gösterilecek uzak içerik yoktur.
+        let s = clean(
+            r#"<p>x</p><img src="https://iz.example/p.gif" width="1" height="1">"#,
+            false,
+        );
+        assert_eq!((s.trackers, s.has_remote), (1, false));
+        assert!(!s.html.contains("<img"), "{}", s.html);
+    }
+
+    #[test]
+    fn engelli_gorselin_diger_oznitelikleri_kalir() {
+        let s = clean(
+            r#"<img alt="a &quot;b&quot;" src="https://iz.example/k.png?x=1&amp;y=2" width="320">"#,
+            false,
+        );
+        assert!(
+            s.html
+                .contains(r#"data-mh-src="https://iz.example/k.png?x=1&amp;y=2""#),
+            "{}",
+            s.html
+        );
+        assert!(s.html.contains(r#"alt="a &quot;b&quot;""#), "{}", s.html);
+        assert!(s.html.contains(r#"width="320""#));
+        assert!(!s.html.contains(" src="));
+    }
+
+    #[test]
+    fn baglantilardan_izleme_parametresi_sokulur() {
+        let s = clean(
+            r#"<a href="https://ornek.com/a?utm_source=e&amp;id=1">a</a>
+               <a href="https://ornek.com/b?fbclid=x">b</a>
+               <a href="https://ornek.com/c?id=2">c</a><a href="mailto:a@b.com?utm_source=x">d</a>"#,
+            false,
+        );
+        assert_eq!(s.cleaned_links, 2);
+        assert!(
+            s.html.contains(r#"href="https://ornek.com/a?id=1""#),
+            "{}",
+            s.html
+        );
+        assert!(
+            s.html.contains(r#"href="https://ornek.com/b""#),
+            "{}",
+            s.html
+        );
+        assert!(s.html.contains(r#"href="https://ornek.com/c?id=2""#));
+        assert!(s.html.contains("mailto:a@b.com?utm_source=x"));
+    }
+
+    #[test]
+    fn aldatici_baglanti_isaretlenir() {
+        let s = clean(
+            r#"<a href="https://kotu.example/giris">www.banka.com.tr</a>
+               <a href="https://banka.com.tr@kotu.example/">https://banka.com.tr/giris</a>
+               <a href="https://kampanya.banka.com.tr/x"><b>banka.com.tr</b></a>
+               <a href="https://kotu.example/">Hemen giriş yap</a>
+               <a href="mailto:a@kotu.example">banka.com.tr</a>"#,
+            false,
+        );
+        assert_eq!(
+            s.html.matches(r#"data-mh-host="kotu.example""#).count(),
+            2,
+            "{}",
+            s.html
+        );
+        assert_eq!(s.html.matches("data-mh-host").count(), 2, "{}", s.html);
+        // Postanın kendi yazdığı öznitelik geçmez.
+        let s = clean(
+            r#"<a data-mh-host="banka.com" href="https://banka.com">Giriş</a>"#,
+            false,
+        );
+        assert!(!s.html.contains("data-mh-host"), "{}", s.html);
+        // Tablo içinde iç içe bağlantı ayrı denetlenir.
+        let s = clean(
+            r#"<a href="https://banka.com"><table><tr><td><a href="https://kotu.example">banka.com</a></td></tr></table></a>"#,
+            false,
+        );
+        assert_eq!(
+            s.html.matches(r#"data-mh-host="kotu.example""#).count(),
+            1,
+            "{}",
+            s.html
+        );
+    }
+
+    #[test]
+    fn cok_sayida_izleyici_ve_baglanti_dogrusal() {
+        // ~190 bayt × 8000 ≈ 1,5 MB: HTML sınırının altında.
+        let n = 8_000;
+        let html: String = (0..n)
+            .map(|i| {
+                format!(
+                    r#"<a href="https://kotu.example/{i}?utm_source=x">banka{i}.com</a><img src="https://iz.example/{i}.gif" width="1" height="1"><a href="https://ornek.com/{i}">devam</a>"#
+                )
+            })
+            .collect();
+        let t = std::time::Instant::now();
+        let s = clean(&html, false);
+        assert!(
+            t.elapsed() < std::time::Duration::from_secs(3),
+            "{:?}",
+            t.elapsed()
+        );
+        assert_eq!(s.trackers, n);
+        assert_eq!(s.cleaned_links, n);
+        assert_eq!(s.html.matches("data-mh-host=").count(), n as usize);
     }
 
     #[test]

@@ -1238,8 +1238,8 @@ impl Store {
         let row = self.with(|c| {
             c.query_row(
                 &format!(
-                    "SELECT {SUMMARY_COLS}, m.cc_addrs, m.reply_to, m.message_id_header, m.refs, m.raw
-                     FROM messages m WHERE m.id = ?1"
+                    "SELECT {SUMMARY_COLS}, m.cc_addrs, m.reply_to, m.message_id_header, m.refs, b.role, m.raw
+                     FROM messages m LEFT JOIN mailboxes b ON b.id = m.mailbox_id WHERE m.id = ?1"
                 ),
                 [id],
                 |r| {
@@ -1250,13 +1250,14 @@ impl Store {
                         addr_list(i + 1, &r.get::<_, String>(i + 1)?)?,
                         r.get::<_, Option<String>>(i + 2)?,
                         from_json::<Vec<String>>(i + 3, &r.get::<_, String>(i + 3)?)?,
-                        r.get::<_, Option<Vec<u8>>>(i + 4)?,
+                        r.get::<_, Option<String>>(i + 4)?,
+                        r.get::<_, Option<Vec<u8>>>(i + 5)?,
                     ))
                 },
             )
             .optional()
         })?;
-        let Some((summary, cc, reply_to, message_id_header, references, raw)) = row else {
+        let Some((summary, cc, reply_to, message_id_header, references, role, raw)) = row else {
             return Err(AppError::new(
                 ErrorCode::NotFound,
                 "Posta bulunamadı; silinmiş ya da taşınmış olabilir.",
@@ -1267,6 +1268,20 @@ impl Store {
         let unsubscribe = raw.as_deref().and_then(mh_mime::unsubscribe);
         let invite = raw.as_deref().and_then(mh_mime::invite);
         let thread = self.thread(id)?;
+        // Kendi yazdığımız postada (gönderilmiş, taslak) güven işaretleri yok.
+        let own = matches!(role.as_deref(), Some("sent" | "drafts"));
+        let sender_warning = (!own)
+            .then(|| mh_mime::sender_warning(raw.as_deref(), &summary.from))
+            .flatten();
+        let otp = (!own)
+            .then(|| {
+                let text = rendered
+                    .as_ref()
+                    .and_then(|r| r.text.as_deref())
+                    .unwrap_or(&summary.snippet);
+                mh_mime::find_otp(&summary.subject, text)
+            })
+            .flatten();
         Ok(MessageDetail {
             cc,
             bcc: rendered.as_ref().map(|r| r.bcc.clone()).unwrap_or_default(),
@@ -1277,11 +1292,41 @@ impl Store {
             body_html: rendered.as_ref().and_then(|r| r.html.clone()),
             has_remote_content: rendered.as_ref().is_some_and(|r| r.has_remote_content),
             remote_allowed: allowed,
+            trackers: rendered.as_ref().map_or(0, |r| r.trackers),
+            cleaned_links: rendered.as_ref().map_or(0, |r| r.cleaned_links),
             attachments: rendered.map(|r| r.attachments).unwrap_or_default(),
             thread,
             unsubscribe,
             invite,
+            sender_warning,
+            otp,
             summary,
+        })
+    }
+
+    /// Postadaki doğrulama kodu (bildirim kartı için): gövde indirildiyse
+    /// metinden, yoksa konu ve önizlemeden.
+    pub fn otp(&self, id: MessageId) -> AppResult<Option<String>> {
+        let row = self.with(|c| {
+            c.query_row(
+                "SELECT subject, snippet, raw FROM messages WHERE id = ?1",
+                [id],
+                |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, Option<Vec<u8>>>(2)?,
+                    ))
+                },
+            )
+            .optional()
+        })?;
+        let Some((subject, snippet, raw)) = row else {
+            return Ok(None);
+        };
+        Ok(match raw {
+            Some(raw) => mh_mime::otp_of(&raw),
+            None => mh_mime::find_otp(&subject, &snippet),
         })
     }
 }
@@ -1798,6 +1843,36 @@ pub(crate) mod tests {
             .unwrap()
             .contains("src=\"https://iz.example/a.png\""));
         assert_eq!(s.detail(9999, &[]).unwrap_err().code, ErrorCode::NotFound);
+    }
+
+    #[test]
+    fn ayrintida_guven_isaretleri() {
+        let s = setup();
+        let raw = b"Authentication-Results: mx.ornek.com; dkim=fail; spf=fail smtp.mailfrom=banka.com\r\nFrom: Banka <bildirim@banka.com>\r\nTo: furkan@eposta.com\r\nSubject: Giris kodunuz\r\nMessage-ID: <g@b>\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<p>Dogrulama kodunuz: 604 218</p><a href=\"https://banka.com/a?utm_source=e\">Hesap</a><img src=\"https://iz.example/o.gif\" width=\"1\" height=\"1\">".to_vec();
+        let mut m = NewMessage::from_raw(raw.clone(), false, "a", "a:INBOX", 5).unwrap();
+        m.uid = Some(1);
+        let id = s.upsert_message(&m).unwrap().id;
+        let d = s.detail(id, &[]).unwrap();
+        assert_eq!((d.trackers, d.cleaned_links), (1, 1));
+        assert!(!d.has_remote_content);
+        assert_eq!(d.sender_warning, Some(mh_core::SenderWarning::AuthFailed));
+        assert_eq!(d.otp.as_deref(), Some("604218"));
+        assert_eq!(s.otp(id).unwrap().as_deref(), Some("604218"));
+        assert_eq!(s.otp(9999).unwrap(), None);
+
+        // Taslakta (kendi postamız) uyarı ve kod gösterilmez.
+        let mut m = NewMessage::from_raw(raw, false, "a", "a:Drafts", 6).unwrap();
+        m.uid = Some(2);
+        let id = s.upsert_message(&m).unwrap().id;
+        let d = s.detail(id, &[]).unwrap();
+        assert_eq!((d.sender_warning, d.otp), (None, None));
+        assert_eq!(d.trackers, 1);
+
+        // Gövdesi inmemiş postada kod konu ve önizlemeden aranır.
+        let mut m = msg("a", "a:INBOX", "Your verification code", 7);
+        m.snippet = "Use 731 004 to sign in.".into();
+        let id = s.upsert_message(&m).unwrap().id;
+        assert_eq!(s.otp(id).unwrap().as_deref(), Some("731004"));
     }
 
     #[test]
