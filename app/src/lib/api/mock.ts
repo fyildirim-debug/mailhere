@@ -778,7 +778,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       return null;
     },
     search: ({ q, limit }) => {
-      // Arka uçtaki işleçlerin sade karşılığı: from:, to:, konu:, has:ek, is:okunmamış, is:yıldızlı, in:, tag:.
+      // Arka uçtaki işleçlerin sade karşılığı: from:, to:, konu:, has:ek, is:okunmamış, is:yıldızlı, in:, tag:, after:, before:.
       const tests: ((m: MessageDetail) => boolean)[] = [];
       let inBox = false;
       const free = q.replace(/(\S+?):("([^"]*)"|\S+)/g, (all, op: string, _v: string, quoted: string | undefined) => {
@@ -797,6 +797,13 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
         else if (o === 'has' && ['ek', 'attachment'].includes(v)) tests.push((m) => m.hasAttachments);
         else if (o === 'is' && ['okunmamış', 'okunmamis', 'unread'].includes(v)) tests.push((m) => m.unread);
         else if (o === 'is' && ['yıldızlı', 'yildizli', 'starred'].includes(v)) tests.push((m) => m.starred);
+        else if (['after', 'sonra', 'before', 'önce', 'once'].includes(o) && /^\d{4}[-/]\d{2}[-/]\d{2}$/.test(v)) {
+          // Yerel günün başlangıcı; after: o günü de kapsar, before: o günden öncesi.
+          const [y, mo, d] = v.split(/[-/]/).map(Number);
+          const at = new Date(y, mo - 1, d).getTime();
+          if (o === 'after' || o === 'sonra') tests.push((m) => m.date >= at);
+          else tests.push((m) => m.date < at);
+        }
         else if (o === 'in') {
           inBox = true;
           tests.push((m) => {

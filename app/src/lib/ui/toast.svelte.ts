@@ -6,6 +6,8 @@ export interface Toast {
   action?: { label: string; run: () => void | Promise<void> };
   /** Milisaniye; varsayılan 5 sn. */
   duration?: number;
+  /** Kısayol ipucu (masaüstü): metnin yanında soluk "Kısayol E". */
+  hint?: { label: string; keys: string };
 }
 
 let seq = 0;
@@ -20,6 +22,37 @@ export function showToast(toast: Omit<Toast, 'id'>) {
   timer = setTimeout(() => {
     if (toasts.current?.id === t.id) toasts.current = null;
   }, toast.duration ?? 5000);
+}
+
+/** Son toast'ın kimliği (yeni bir toast çıktı mı diye bakmak için). */
+export function lastToastId(): number {
+  return seq;
+}
+
+/** Gösterilen toast'a kısayol ipucu ekler; süresi ve canlandırması değişmez. */
+export function addToastHint(id: number, hint: NonNullable<Toast['hint']>): boolean {
+  const cur = toasts.current;
+  if (!cur || cur.id !== id) return false;
+  toasts.current = { ...cur, hint };
+  return true;
+}
+
+/** Toast'ın eylemi çalıştıktan sonra `after` da çalışır (ör. geri alınan postayı yeniden göstermek). */
+export function afterToastAction(id: number, after: () => void): boolean {
+  const cur = toasts.current;
+  if (!cur || cur.id !== id || !cur.action) return false;
+  const action = cur.action;
+  toasts.current = {
+    ...cur,
+    action: {
+      ...action,
+      run: async () => {
+        await action.run();
+        after();
+      },
+    },
+  };
+  return true;
 }
 
 export function dismissToast() {
