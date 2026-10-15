@@ -10,6 +10,7 @@
   import { darkMailWanted, settings } from '../stores/settings.svelte';
   import { linkify } from '../util/format';
   import { adaptDark } from './darkmail';
+  import LinkConfirm from './LinkConfirm.svelte';
 
   interface Props {
     id: MessageId;
@@ -126,7 +127,11 @@
       const a = (e.target as Element | null)?.closest?.('a[href]');
       if (!a) return;
       e.preventDefault();
-      void openExternal(a.getAttribute('href') ?? '');
+      const url = a.getAttribute('href') ?? '';
+      // Metni başka bir adres gösteren bağlantı (arka uç işaretler): önce onay.
+      const host = a.getAttribute('data-mh-host');
+      if (host) confirmLink = { url, host };
+      else void openExternal(url);
     });
     if (remoteAllowed) rescueImages(doc);
   }
@@ -213,6 +218,21 @@
     }
   }
 
+  // ------------------------------------------------------ aldatıcı bağlantı
+
+  let confirmLink = $state<{ url: string; host: string } | null>(null);
+
+  function closeConfirm() {
+    confirmLink = null;
+    frame?.focus();
+  }
+
+  function openConfirmed() {
+    const url = confirmLink?.url;
+    closeConfirm();
+    if (url) void openExternal(url);
+  }
+
   let closed = false;
   onDestroy(() => {
     closed = true;
@@ -241,6 +261,9 @@
       onload={onLoad}
     ></iframe>
   </div>
+  {#if confirmLink}
+    <LinkConfirm url={confirmLink.url} host={confirmLink.host} onopen={openConfirmed} onclose={closeConfirm} />
+  {/if}
 {:else}
   <div class="text selectable">
     {#each paragraphs as p, i (i)}

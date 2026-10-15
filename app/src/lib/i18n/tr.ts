@@ -120,6 +120,25 @@ export const tr = {
   'read.replyElsewhere': 'Dikkat: yanıt gönderenin alan adı dışına gidiyor ({domains}).',
   'read.sendHint': 'Ctrl Enter',
   'read.editDraft': 'Taslağı düzenle',
+  // Güven ve gizlilik: izleyiciler, gönderen uyarısı, doğrulama kodu, aldatıcı bağlantı.
+  'read.trackers': '{n} izleyici engellendi',
+  'read.tracker1': '1 izleyici engellendi',
+  'read.trackersWhy': 'İzleyici, postayı ne zaman açtığını gönderene bildiren görünmez bir görseldir. Mailhere bunları hiç yüklemez; göndericiye izin versen de.',
+  'read.remoteExplain': 'Uzak görsel yüklenince gönderici postayı açtığını görebilir. İzin verirsen bu göndericinin görselleri yüklenir; izleyiciler yine yüklenmez.',
+  'read.remoteAlso': 'Uzak görseller de yüklenmedi.',
+  'read.linksCleaned': '{n} bağlantıdan izleme parametresi silindi.',
+  'read.warnName': 'Görünen addaki adres gerçek gönderen değil. Bağlantılara tıklamadan önce adresi denetle.',
+  'read.warnLookalike': 'Gönderen alan adı tanıdık bir adrese benzetilmiş olabilir. Bağlantılara tıklamadan önce adresi denetle.',
+  'read.warnAuth': 'Bu ileti gönderdiğini söylediği yerden gelmemiş olabilir. Bağlantılara tıklamadan önce adresi denetle.',
+  'read.warnShort': 'Gönderen şüpheli; tıklamadan önce adresi denetle.',
+  'read.otpLabel': 'Kod',
+  'read.otpCopy': 'Kopyala',
+  'read.otpCopyLabel': 'Doğrulama kodunu kopyala',
+  'read.otpCopied': 'Kod kopyalandı',
+  'read.otpCopyFailed': 'Kod kopyalanamadı. Kodu seçip elle kopyalayabilirsin.',
+  'read.linkTitle': 'Bağlantı başka bir siteye gidiyor',
+  'read.linkLead': 'Bağlantının metni başka bir adres gösteriyor; gerçek hedef {host}. Göndereni tanımıyorsan açma.',
+  'read.linkOpen': 'Yine de aç',
 
   // erteleme
   'snooze.title': 'Ne zaman geri gelsin?',
@@ -168,6 +187,8 @@ export const tr = {
   'notify.minutesAgo': '{n} dk önce',
   'notify.label': 'Yeni posta: {name}',
   'notify.replay': 'Bildirimi yeniden göster',
+  'notify.copyCode': 'Kodu kopyala',
+  'notify.codeCopied': 'Kod kopyalandı',
 
   // hızlı okuma
   'quick.title': 'Hızlı okuma',

@@ -7,6 +7,7 @@
   import Logo from '../../lib/ui/Logo.svelte';
   import { displayName } from '../../lib/util/format';
   import { settings } from '../../lib/stores/settings.svelte';
+  import { copyText } from '../../lib/mail/otp';
 
   interface Card extends NotifyEvent {
     key: number;
@@ -82,6 +83,17 @@
     await call('messages_move', { ids: [c.message.id], target: 'archive' });
   }
 
+  /** Kodu kopyalanan kart: düğme kısa süre "Kod kopyalandı" der. */
+  let copied = $state<number | null>(null);
+
+  async function copyCode(c: Card) {
+    if (!c.otp || !(await copyText(c.otp))) return;
+    copied = c.key;
+    setTimeout(() => {
+      if (copied === c.key) copied = null;
+    }, 2000);
+  }
+
   async function mute() {
     cards = [];
     overflow = 0;
@@ -120,9 +132,17 @@
         </div>
       </div>
       <div class="acts">
-        <button class="btn-primary small" onclick={() => open(c)}>{t('act.open')}</button>
+        {#if c.otp}
+          <!-- Doğrulama kodu postası: birincil eylem kodu kopyalamak; arşivle yerine açmak kalır. -->
+          <button class="btn-primary small" onclick={() => copyCode(c)}>{copied === c.key ? t('notify.codeCopied') : t('notify.copyCode')}</button>
+          <button class="btn-soft small" onclick={() => open(c)}>{t('act.open')}</button>
+        {:else}
+          <button class="btn-primary small" onclick={() => open(c)}>{t('act.open')}</button>
+        {/if}
         <button class="btn-soft small" onclick={() => markRead(c)}>{t('act.markRead')}</button>
-        <button class="btn-soft small" onclick={() => archive(c)}>{t('act.archive')}</button>
+        {#if !c.otp}
+          <button class="btn-soft small" onclick={() => archive(c)}>{t('act.archive')}</button>
+        {/if}
       </div>
       <span class="bar" style:--count="{settings.value.cardSeconds}s" onanimationend={() => remove(c.key)} aria-hidden="true"></span>
     </div>

@@ -1,7 +1,7 @@
 // Tarayıcı modu, testler ve ekran görüntüleri için örnek veri.
 // İçerik onaylı tasarımdaki postalarla aynıdır; gerçek kişi ya da kurum değildir.
 
-import type { Account, Address, Attachment, Category, Invite, Mailbox, MailboxRole, MessageDetail, Tag, Unsubscribe } from './types';
+import type { Account, Address, Attachment, Category, Invite, Mailbox, MailboxRole, MessageDetail, SenderWarning, Tag, Unsubscribe } from './types';
 
 export interface DemoData {
   accounts: Account[];
@@ -77,6 +77,11 @@ interface Seed {
   invite?: Invite;
   /** Etiket kimlikleri. */
   tags?: string[];
+  /** Arka ucun HTML'den attığı izleyici ve temizlediği bağlantı sayıları. */
+  trackers?: number;
+  cleanedLinks?: number;
+  senderWarning?: SenderWarning;
+  otp?: string;
 }
 
 function snippetOf(text: string): string {
@@ -273,6 +278,57 @@ export function createDemoData(now = new Date()): DemoData {
       body: 'Duyuru metnini pazartesi gönderirim. Yayın günü sabah son bir deneme yapalım.\n\nMurat',
       date: at(now, -2, 10, 45), category: 'people', thread: 'yayin',
     },
+    // Güven ve gizlilik örnekleri: arşivde ve okunmuş (gelen kutusu sayaçları ve
+    // listeleri değişmez). HTML, arka ucun temizlediği haldedir: izleme pikselleri
+    // atılmış, bağlantılardaki izleme parametreleri silinmiştir.
+    {
+      // İzleyicili bülten: uzak görseller engelli, üç izleyici atıldı, dört bağlantı temizlendi.
+      key: 'g1', account: A_HOME, role: 'archive', from: { name: 'Kent Rehberi', email: 'haber@kentrehberi.co' }, to: [ME_HOME],
+      subject: 'Hafta sonu için beş rota',
+      body:
+        'Bu hafta sonu şehirde yürüyerek keşfedebileceğin beş rota seçtik.\n\nSahil boyu — Kıyıdan feneri izleyerek 6 km.\n\nEski çarşı — Dar sokaklar, han avluları ve kahve molası.\n\nİyi yürüyüşler,\nKent Rehberi',
+      html:
+        '<div style="max-width:560px;margin:0 auto;font-family:Helvetica,Arial,sans-serif;color:#222"><img data-mh-src="https://kentrehberi.co/rota-kapak.jpg" alt="Rota kapağı" width="560" height="200" style="display:block;width:100%;height:auto;background:#e9ebf0"><h1 style="font-size:24px;margin:24px 0 8px">Hafta sonu için beş rota</h1><p>Bu hafta sonu şehirde yürüyerek keşfedebileceğin beş rota seçtik.</p><p><b>Sahil boyu</b> — Kıyıdan feneri izleyerek 6 km.</p><p><b>Eski çarşı</b> — Dar sokaklar, han avluları ve kahve molası.</p><p><a href="https://kentrehberi.co/rotalar/sahil" target="_blank" rel="noopener noreferrer">Sahil rotasını aç</a> · <a href="https://kentrehberi.co/rotalar/carsi" target="_blank" rel="noopener noreferrer">Çarşı rotasını aç</a></p><p>İyi yürüyüşler,<br>Kent Rehberi</p></div>',
+      date: at(now, -6, 9, 30), category: 'newsletters', remote: true, trackers: 3, cleanedLinks: 4,
+      unsubscribe: { url: 'https://kentrehberi.co/abonelik/birak', mailto: null, oneClick: true },
+    },
+    {
+      // Sahte gönderici: görünen adda başka adres; bağlantının metni ile gerçek hedefi farklı.
+      key: 'g2', account: A_WORK, role: 'archive',
+      from: { name: 'Ödeme Merkezi destek@odememerkezi.com.tr', email: 'bildirim@odememerkezi-hesap.example' }, to: [ME_WORK],
+      subject: 'Hesabınız 24 saat içinde askıya alınacak',
+      body:
+        'Sayın kullanıcı,\n\nHesabınızda olağandışı bir hareket algıladık. Hesabınızın kapanmaması için bilgilerinizi 24 saat içinde doğrulayın:\n\nwww.odememerkezi.com.tr\n\nÖdeme Merkezi Güvenlik',
+      html:
+        '<div style="max-width:520px;font-family:Arial,sans-serif;color:#222"><p>Sayın kullanıcı,</p><p>Hesabınızda olağandışı bir hareket algıladık. Hesabınızın kapanmaması için bilgilerinizi 24 saat içinde doğrulayın:</p><p><a data-mh-host="odememerkezi-hesap.example" href="https://odememerkezi-hesap.example/giris" target="_blank" rel="noopener noreferrer">www.odememerkezi.com.tr</a></p><p>Ödeme Merkezi Güvenlik</p></div>',
+      date: at(now, -6, 8, 10), category: 'notifications', senderWarning: 'nameHasOtherAddress',
+    },
+    {
+      // Doğrulama kodu postası.
+      key: 'g3', account: A_HOME, role: 'archive', from: { name: 'Bulut Fatura', email: 'guvenlik@bulutfatura.com.tr' }, to: [ME_HOME],
+      subject: 'Giriş doğrulama kodun',
+      body:
+        'Merhaba,\n\nBulut Fatura hesabına giriş için doğrulama kodun:\n\n482 913\n\nKod 10 dakika geçerli. Bu girişi sen yapmadıysan parolanı değiştir.\n\nBulut Fatura',
+      date: at(now, -7, 22, 41), category: 'notifications', otp: '482913',
+    },
+    {
+      // Uzak görseli olmayan, iki izleyicisi atılmış özet: şerit yok, başlık altında tek satır.
+      key: 'g4', account: A_WORK, role: 'archive', from: { name: 'Proje Takvimi', email: 'ozet@projetakvimi.app' }, to: [ME_WORK],
+      subject: 'Haftalık özet: üç görev tamamlandı',
+      body:
+        'Bu hafta üç görev tamamlandı, iki görev gecikmede.\n\nTamamlanan: arama süzgeçleri, klasör ağacı, hesap ayarları.\nGeciken: sürüm notları, ekran görüntüleri.\n\nProje Takvimi',
+      html:
+        '<div style="max-width:560px;font-family:Helvetica,Arial,sans-serif;color:#222"><h2 style="font-size:19px;margin:0 0 12px">Haftalık özet</h2><p>Bu hafta <b>üç görev</b> tamamlandı, <b>iki görev</b> gecikmede.</p><p>Tamamlanan: arama süzgeçleri, klasör ağacı, hesap ayarları.<br>Geciken: sürüm notları, ekran görüntüleri.</p><p><a href="https://projetakvimi.app/pano" target="_blank" rel="noopener noreferrer">Panoyu aç</a></p></div>',
+      date: at(now, -7, 9, 0), category: 'notifications', trackers: 2, cleanedLinks: 1,
+    },
+    {
+      // Alıcı sunucuda kimlik doğrulaması başarısız (DKIM ve SPF).
+      key: 'g5', account: A_HOME, role: 'archive', from: { name: 'Derin Kargo', email: 'bilgi@derinkargo.com.tr' }, to: [ME_HOME],
+      subject: 'Gönderiniz gümrükte bekliyor',
+      body:
+        'Merhaba,\n\nGönderinizin teslim edilebilmesi için gümrük ücreti ödenmelidir. Ödeme yapılmazsa gönderi iade edilecektir.\n\nDerin Kargo',
+      date: at(now, -8, 13, 25), category: 'notifications', senderWarning: 'authFailed',
+    },
   ];
 
   const messages: MessageDetail[] = seeds.map((s, i) => {
@@ -309,6 +365,10 @@ export function createDemoData(now = new Date()): DemoData {
       thread: [],
       unsubscribe: s.unsubscribe ?? null,
       invite: s.invite ?? null,
+      trackers: s.trackers ?? 0,
+      cleanedLinks: s.cleanedLinks ?? 0,
+      senderWarning: s.senderWarning ?? null,
+      otp: s.otp ?? null,
     };
   });
 

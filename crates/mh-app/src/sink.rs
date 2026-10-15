@@ -91,12 +91,15 @@ impl EventSink for TauriSink {
                 .decide(&settings, &message, now, minutes, fullscreen)
                 == Decision::Card
             {
+                // Doğrulama kodu kartta "Kodu kopyala" olarak sunulur.
+                let otp = state.store.otp(message.id).unwrap_or_default();
                 state.platform.notify(
                     &self.app,
                     NotifyEvent {
                         message,
                         account_name: account.name.clone(),
                         account_color: account.color.clone(),
+                        otp,
                     },
                     &settings,
                 );

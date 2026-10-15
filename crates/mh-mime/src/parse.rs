@@ -45,6 +45,10 @@ pub struct Rendered {
     pub text: Option<String>,
     pub html: Option<String>,
     pub has_remote_content: bool,
+    /// HTML gövdeden atılan izleme pikseli sayısı.
+    pub trackers: u32,
+    /// İzleme parametreleri sökülen bağlantı sayısı.
+    pub cleaned_links: u32,
     pub attachments: Vec<Attachment>,
     /// Başlıkta saklanan gizli alıcılar (yalnız taslaklarda bulunur).
     pub bcc: Vec<Address>,
@@ -313,10 +317,25 @@ pub fn render(raw: &[u8], remote_allowed: bool) -> Option<Rendered> {
     Some(Rendered {
         text,
         has_remote_content: sanitized.as_ref().is_some_and(|s| s.has_remote),
+        trackers: sanitized.as_ref().map_or(0, |s| s.trackers),
+        cleaned_links: sanitized.as_ref().map_or(0, |s| s.cleaned_links),
         html: sanitized.map(|s| s.html),
         attachments,
         bcc: convert_addresses(msg.bcc()),
     })
+}
+
+/// Postadaki doğrulama kodu (bildirim kartı için): konu ve düz metin
+/// gövdeden (yoksa HTML'den çevrilen metinden) aranır.
+pub fn otp_of(raw: &[u8]) -> Option<String> {
+    let msg = parser().parse(raw)?;
+    let (text, html) = bodies(&msg);
+    let plain = text
+        .as_deref()
+        .map(tidy_lines)
+        .or_else(|| html.as_deref().map(html_to_text))
+        .unwrap_or_default();
+    crate::otp::find_otp(&clean_line(msg.subject().unwrap_or("")), &plain)
 }
 
 /// `index` sıradaki eki çıkarır.
@@ -628,5 +647,35 @@ x\r\n\
         assert!(!html.contains("<style") && !html.contains("<!DOCTYPE"));
         assert!(r.has_remote_content);
         assert!(!r.text.unwrap().contains("<!DOCTYPE"));
+        assert_eq!(otp_of(HTML_AS_TEXT.as_bytes()).as_deref(), Some("482913"));
+        assert_eq!(otp_of(ALTERNATIVE.as_bytes()), None);
+    }
+
+    #[test]
+    fn izleyici_ve_baglanti_sayilari() {
+        let raw = "From: Bulten <b@bulten.example>\r\nSubject: Sayi 3\r\nContent-Type: text/html; charset=utf-8\r\n\r\n\
+<p><a href=\"https://bulten.example/yazi?utm_source=e&amp;id=3\">Oku</a></p>\
+<img src=\"https://bulten.example/kapak.jpg\" width=\"600\">\
+<img src=\"https://iz.bulten.example/o.gif\" width=\"1\" height=\"1\">\
+<img src=\"https://us5.list-manage.com/track/open.php?u=1\">";
+        let r = render(raw.as_bytes(), false).unwrap();
+        assert_eq!((r.trackers, r.cleaned_links), (2, 1));
+        assert!(r.has_remote_content);
+        let html = r.html.unwrap();
+        assert!(
+            html.contains("href=\"https://bulten.example/yazi?id=3\""),
+            "{html}"
+        );
+        assert!(
+            !html.contains("o.gif") && !html.contains("list-manage"),
+            "{html}"
+        );
+        // İzin verilmiş göndericide de izleyici yüklenmez.
+        let r = render(raw.as_bytes(), true).unwrap();
+        assert_eq!(r.trackers, 2);
+        assert!(!r.html.unwrap().contains("o.gif"));
+        // Boyutu yazılmamış olağan görsel izleyici sayılmaz.
+        let r = render(ALTERNATIVE.as_bytes(), false).unwrap();
+        assert_eq!((r.trackers, r.cleaned_links), (0, 0));
     }
 }

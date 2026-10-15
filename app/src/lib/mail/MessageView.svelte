@@ -14,6 +14,7 @@
   import { openCompose } from './open';
   import InviteCard from './InviteCard.svelte';
   import MailBody from './MailBody.svelte';
+  import { copyText, groupCode } from './otp';
 
   interface Props {
     detail: MessageDetail;
@@ -80,6 +81,40 @@
   function compose(mode: 'reply' | 'forward') {
     openCompose({ mode, messageId: d.id });
   }
+
+  // ------------------------------------------------------- güven ve gizlilik
+
+  const warning = $derived.by(() => {
+    switch (d.senderWarning) {
+      case 'nameHasOtherAddress':
+        return t('read.warnName');
+      case 'lookalikeDomain':
+        return t('read.warnLookalike');
+      case 'authFailed':
+        return t('read.warnAuth');
+      default:
+        return null;
+    }
+  });
+  const remoteStrip = $derived(d.hasRemoteContent && !d.remoteAllowed);
+  const trackersText = $derived(d.trackers === 1 ? t('read.tracker1') : t('read.trackers', { n: d.trackers }));
+  /** Şeridin ya da izleyici satırının açıklaması açık mı? İleti değişince kapanır. */
+  let why = $state(false);
+  $effect(() => {
+    void d.id;
+    why = false;
+  });
+
+  /** Açıklama metni; bağlantı temizlendiyse sayısı eklenir. */
+  function explain(text: string): string {
+    return d.cleanedLinks > 0 ? `${text} ${t('read.linksCleaned', { n: d.cleanedLinks })}` : text;
+  }
+
+  async function copyOtp() {
+    if (!d.otp) return;
+    const ok = await copyText(d.otp);
+    showToast({ text: ok ? t('read.otpCopied') : t('read.otpCopyFailed') });
+  }
 </script>
 
 <div class="sender">
@@ -115,6 +150,33 @@
   <ContactCard address={d.from} accountId={d.accountId} at={card} onclose={closeCard} />
 {/if}
 
+{#if warning}
+  <!-- Dar alanda (telefon, dar okuma bölmesi) kısa metin; kap sorgusu karar verir. -->
+  <div class="trust">
+    <p class="trust-row">
+      <Icon name="alert" size={16} />
+      <span class="trust-long">{warning}</span><span class="trust-short">{t('read.warnShort')}</span>
+    </p>
+  </div>
+{/if}
+
+{#if d.otp}
+  <div class="otp">
+    <span class="otp-label">{t('read.otpLabel')}</span>
+    <span class="otp-code num selectable">{groupCode(d.otp)}</span>
+    <button class="btn-soft small otp-copy" aria-label={t('read.otpCopyLabel')} onclick={copyOtp}><Icon name="copy" size={16} />{t('read.otpCopy')}</button>
+  </div>
+{/if}
+
+{#if d.trackers > 0 && !remoteStrip}
+  <button class="trackers" aria-expanded={why} onclick={() => (why = !why)}>
+    <Icon name="shield" size={16} /><span class="trunc">{trackersText}</span>
+  </button>
+  {#if why}
+    <p class="why">{explain(t('read.trackersWhy'))}</p>
+  {/if}
+{/if}
+
 {#if d.invite}
   <InviteCard detail={d} />
 {/if}
@@ -127,14 +189,22 @@
   </div>
 {/if}
 
-{#if d.hasRemoteContent && !d.remoteAllowed}
+{#if remoteStrip}
   <div class="remote">
     <Icon name="shield" />
-    <span class="remote-text"
-      ><span class="remote-long">{t('read.remoteBlocked')} {t('read.remoteWhy')}</span><span class="remote-short">{t('read.remoteShort')}</span></span
+    <!-- Metin açıklamayı açar; dar ekranda kısa metin (sayı ya da "Görseller engellendi."). -->
+    <button class="remote-toggle" aria-expanded={why} onclick={() => (why = !why)}
+      ><span class="remote-text"
+        ><span class="remote-long"
+          >{#if d.trackers > 0}<span class="count">{`${trackersText}.`}</span>{` ${t('read.remoteAlso')}`}{:else}{`${t('read.remoteBlocked')} ${t('read.remoteWhy')}`}{/if}</span
+        ><span class="remote-short">{d.trackers > 0 ? trackersText : t('read.remoteShort')}</span></span
+      ></button
     >
     <button class="link small" onclick={allow}>{t('read.remoteAllow')}</button>
   </div>
+  {#if why}
+    <p class="why">{explain(d.trackers > 0 ? t('read.trackersWhy') : t('read.remoteExplain'))}</p>
+  {/if}
 {/if}
 
 <div class="body">
@@ -251,9 +321,145 @@
     color: var(--accent-text);
   }
 
+  /* Şerit metni açıklamayı açan düğmedir; tüm satır yüksekliğini kaplar. */
+  .remote-toggle {
+    flex: 1;
+    min-width: 0;
+    align-self: stretch;
+    display: flex;
+    align-items: center;
+    padding: 0;
+    border: 0;
+    border-radius: var(--r-sm);
+    background: transparent;
+    color: inherit;
+    text-align: left;
+  }
+
   .remote-text {
     flex: 1;
+    min-width: 0;
     font-size: var(--fs-meta);
+    color: var(--ink-2);
+  }
+
+  .remote-toggle:hover .remote-long {
+    text-decoration: underline;
+    text-decoration-color: var(--line-strong);
+    text-underline-offset: 3px;
+  }
+
+  .count {
+    font-weight: 600;
+    color: var(--ink);
+  }
+
+  /* Açıklama: şeridin ya da izleyici satırının altında, düz metin. */
+  .why {
+    margin-top: 6px;
+    max-width: 68ch;
+    font-size: var(--fs-meta);
+    line-height: 1.5;
+    color: var(--ink-2);
+  }
+
+  /* Gönderen uyarısı: amber simge, tek satır; renkli kenar ya da kart yok. */
+  .trust {
+    container-type: inline-size;
+    margin-top: 10px;
+  }
+
+  .trust-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: var(--fs-meta);
+    line-height: 20px;
+    color: var(--ink-2);
+    white-space: nowrap;
+  }
+
+  .trust-row :global(.icon) {
+    color: var(--amber);
+  }
+
+  .trust-long,
+  .trust-short {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .trust-short {
+    display: none;
+  }
+
+  @container (max-width: 600px) {
+    .trust-long {
+      display: none;
+    }
+
+    .trust-short {
+      display: inline;
+    }
+  }
+
+  /* Doğrulama kodu: etiket, kod (15 px 600, sabit genişlikli rakam), kopyala. */
+  .otp {
+    margin-top: 12px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 4px 4px 4px 12px;
+    border-radius: var(--r-row);
+    background: var(--surface);
+    border: 1px solid var(--line);
+  }
+
+  .otp-label {
+    font-size: var(--fs-meta);
+    color: var(--ink-3);
+  }
+
+  .otp-code {
+    flex: 1;
+    min-width: 0;
+    font-size: var(--fs-body);
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--ink);
+    white-space: nowrap;
+  }
+
+  .otp-copy {
+    flex: none;
+    /* Telefonda dokunma hedefi 44 px (mobil ölçü jetonu yalnız orada tanımlı). */
+    min-height: var(--m-touch, 32px);
+  }
+
+  /* İzleyici satırı (şerit yokken): 12 px, ikincil renk, dokununca açıklama. */
+  .trackers {
+    margin-top: 8px;
+    max-width: 100%;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: var(--m-touch, 24px);
+    padding: 0 6px 0 2px;
+    margin-left: -2px;
+    border: 0;
+    border-radius: var(--r-sm);
+    background: transparent;
+    color: var(--ink-3);
+    font-size: var(--fs-meta);
+    text-align: left;
+    transition:
+      background var(--t-fast),
+      color var(--t-fast);
+  }
+
+  .trackers:hover {
+    background: var(--hover);
     color: var(--ink-2);
   }
 

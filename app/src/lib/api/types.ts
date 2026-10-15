@@ -218,7 +218,21 @@ export interface MessageDetail extends MessageSummary {
   unsubscribe: Unsubscribe | null;
   /** Postadaki takvim daveti (text/calendar, METHOD:REQUEST ya da CANCEL). */
   invite: Invite | null;
+  /** HTML gövdeden atılan izleyici (izleme pikseli) sayısı; izin olsa da yüklenmez. */
+  trackers: number;
+  /** İzleme parametreleri (utm_*, fbclid …) sökülen bağlantı sayısı. */
+  cleanedLinks: number;
+  /** Gönderenin kimliğinden kuşku duyduran işaret. */
+  senderWarning: SenderWarning | null;
+  /** Konu ya da metinde bulunan doğrulama kodu (boşluksuz). */
+  otp: string | null;
 }
+
+/**
+ * Gönderen güveni uyarısı: görünen adda başka bir adres, benzetilmiş alan adı
+ * (punycode ya da karışık alfabe), alıcı sunucuda kimlik doğrulama başarısız.
+ */
+export type SenderWarning = 'nameHasOtherAddress' | 'lookalikeDomain' | 'authFailed';
 
 /** Takvim davetinin amacı (iTIP METHOD). */
 export type InviteMethod = 'request' | 'cancel';
@@ -676,6 +690,8 @@ export interface NotifyEvent {
   message: MessageSummary;
   accountName: string;
   accountColor: string;
+  /** Postadaki doğrulama kodu ("Kodu kopyala"). */
+  otp: string | null;
 }
 
 /** Ana pencere bu postayı açmalı (karttan ya da hızlı okumadan). */
