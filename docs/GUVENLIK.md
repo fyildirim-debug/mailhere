@@ -72,20 +72,22 @@ Son denetim: 2026-10-13 (beş alanda kod denetimi; bulgular doğrulanıp düzelt
 
 ## Android
 
-Taslak. Android kabuğu ayrı depoda (`mailheremobile`) derlenir; ortak çekirdek (`crates/*`, `crates/mh-app`) aynıdır. Henüz uygulanmamış maddeler **(planlanan)** diye işaretlidir; uygulandıkça işaret kalkar.
+Android kabuğu ayrı depoda (`mailheremobile`) derlenir; ortak çekirdek (`crates/*`, `crates/mh-app`) aynıdır. Cihazda henüz doğrulanmamış maddeler **(doğrulanacak)** diye işaretlidir.
 
 - Çekirdek ayrımı: masaüstüne özgü parçalar (anahtar zinciri, tepsi, bildirim kartı penceresi, güncelleyici, tek örnek) kabuk crate'indedir; `crates/mh-app` bunları bağlamaz. Platforma göre değişen işler `Platform` trait'inden geçer, ortak kod pencere ya da dosya sistemine doğrudan dokunmaz.
 - Komut listesi tek kaynaktan gelir (`shared_commands!`, `SHARED_COMMANDS`, `commands.txt`); mobil kabuk masaüstü komutlarını (`open_quick`, `notify_*`, `demo_notify`, `update_*`) bağlamaz. Her kabuğun `capabilities/*.json` dosyası yalnız kendi komutlarına izin verir.
 - Pencere yalnız uygulamanın kendi adreslerinde kalır; geliştirme sunucusu adresine yalnız geliştirme derlemesinde ve yapılandırmadaki `devUrl` ana makinesi için izin verilir.
 - Veri yolları uygulamanın özel klasörleri (`app_local_data_dir`, `app_cache_dir`); veritabanı yine SQLCipher ile şifreli, dosya izinleri aynı (0700 / 0600).
-- **(planlanan)** Parola, OAuth yenileme jetonu ve veritabanı anahtarı `AndroidKeyStore` ile korunan kasada: donanım destekli AES-256-GCM anahtarı, 12 baytlık rastgele IV, anahtar adı AAD; şifreli değerler `mailhere-kasa.xml` tercih dosyasında. Kasaya yalnız Rust tarafı (`SecretStore` köprüsü) erişir.
-- **(planlanan)** `android:allowBackup="false"` ve `dataExtractionRules` ile tüm uygulama verisi (veritabanı, kasa, önbellek) bulut yedeklemesi ve cihazlar arası aktarımın dışında tutulur.
-- **(planlanan)** Ekler: seçilen dosyalar (`content://`) uygulamanın önbelleğine kopyalanır ve yalnız o kopyalar postaya eklenir; açma `FileProvider` ile yalnız o dosya için verilen geçici okuma iznidir; kaydetme sistemin dosya seçicisi (SAF) ile kullanıcının seçtiği konuma yazılır. Uygulama başka uygulamaların dosyalarını yol vererek okuyamaz.
-- **(planlanan)** Bildirim: Android 13+ izin istenir; kanal `yeni-posta`; bildirim metni gönderen ve konudan ibarettir, gövde ve ek adı taşınmaz.
-- **(planlanan)** OAuth dönüşü cihazda `127.0.0.1` döngü adresi üzerinden; tarayıcı özel sekmesi kapanınca dinleyici kapanır. Cihazda doğrulanacak.
-- **(planlanan)** QR tarayıcı kendi etkinliğimiz (CameraX + zxing core, Apache-2.0); ML Kit ya da başka bulut hizmeti yok. Kamera izni yalnız tarama ekranında istenir.
-- **(planlanan)** Ağ: TLS kökleri `webpki-roots` (sistem deposu değil); sertifika onayı masaüstüyle aynı akış. Ağ değişince eşitleme yeniden denenir.
-- **(planlanan)** Sürüm imzası: APK/AAB CI'da `apksigner` ile doğrulanır; imza anahtarı yalnız sürüm işinin gizli değerlerindedir.
+- Parola, OAuth yenileme jetonu ve veritabanı anahtarı `AndroidKeyStore` ile korunan kasada: donanım destekli AES-256-GCM anahtarı, 12 baytlık rastgele IV, anahtar adı AAD; şifreli değerler `mailhere-kasa.xml` tercih dosyasında. Kasaya yalnız Rust tarafı (`SecretStore` köprüsü) erişir.
+- `android:allowBackup="false"` ve `dataExtractionRules` ile tüm uygulama verisi (veritabanı, kasa, önbellek) bulut yedeklemesi ve cihazlar arası aktarımın dışında tutulur.
+- Ekler: seçilen dosyalar (`content://`) uygulamanın önbelleğine kopyalanır ve yalnız o kopyalar postaya eklenir; açma `FileProvider` ile yalnız o dosya için verilen geçici okuma iznidir; kaydetme sistemin dosya seçicisi (SAF) ile kullanıcının seçtiği konuma yazılır. Uygulama başka uygulamaların dosyalarını yol vererek okuyamaz.
+- Bildirim: Android 13+ izin ilk hesapta bir kez istenir; kanal `yeni-posta`; bildirim gönderen, konu ve önizlemenin ilk satırından (en çok 160 karakter) ibarettir, gövde ve ek adı taşınmaz. Kilit ekranında (`VISIBILITY_PRIVATE`) yalnız hesap adı ve "Yeni posta" görünür. Elek'e düşen postalar bildirim üretmez.
+- Bildirim eylemleri (Okundu, Arşivle, Yanıtla) dışa kapalı bir alıcıdan (`exported=false`) Rust çekirdeğine gider; uygulama ekranı açılmaz. Süreç kapalıyken basılan eylem, yanıt metni dahil, kasada şifreli `bildirim-bekleyen` kaydında (en çok 50 eylem) bekler ve uygulama açılınca uygulanır.
+- İsteğe bağlı "Anlık bildirim" ön plan hizmeti (`specialUse`, `exported=false`, görev kapanınca durur) yalnız süreci canlı tutar; ağ ya da veri yolu eklemez. Pil optimizasyonu muafiyeti yalnız kullanıcı Ayarlar › Bildirimler'de istediğinde sorulur.
+- **(doğrulanacak)** OAuth dönüşü cihazda `127.0.0.1` döngü adresi üzerinden; tarayıcı özel sekmesi kapanınca dinleyici kapanır. Cihazda doğrulanacak.
+- QR tarayıcı kendi etkinliğimiz (CameraX + zxing core, Apache-2.0); ML Kit ya da başka bulut hizmeti yok. Kamera izni yalnız tarama ekranında istenir.
+- **(doğrulanacak)** Ağ: TLS kökleri `webpki-roots` (sistem deposu değil); sertifika onayı masaüstüyle aynı akış. Ağ değişince eşitleme yeniden denenir.
+- Sürüm imzası: APK/AAB CI'da `apksigner` ile doğrulanır; imza anahtarı yalnız sürüm işinin gizli değerlerindedir.
 
 ## Cihazlar arası aktarım
 
