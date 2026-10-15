@@ -607,16 +607,6 @@
     min-width: 0;
   }
 
-  /* Tek iletili konuşmada "1 ileti" başlığı yinelemedir; daraltma düğmesi de
-     olmadığından gönderen satırı sağ kenara kadar uzanır. */
-  .article :global(.conv-head.alone) {
-    display: none;
-  }
-
-  .article :global(.conv-head.alone + .msgs .sender) {
-    padding-right: 0;
-  }
-
   .article :global(.conv) {
     margin-top: 4px;
   }

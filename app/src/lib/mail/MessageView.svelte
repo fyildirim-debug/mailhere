@@ -125,7 +125,7 @@
       <span class="meta trunc"><span class="when-inline num">{`${when(d.date)} · `}</span>{t('read.to', { list: recipients })}</span>
     </span>
   </button>
-  <span class="meta num">{when(d.date)}</span>
+  <span class="meta num when-side">{when(d.date)}</span>
   {#if actions}
     <button class="btn-icon small msg-act" aria-label={t('act.reply')} title={t('act.reply')} onclick={() => compose('reply')}><Icon name="reply" size={16} /></button>
     <button class="btn-icon small msg-act" aria-label={t('act.forward')} title={t('act.forward')} onclick={() => compose('forward')}><Icon name="forward" size={16} /></button>
@@ -276,8 +276,8 @@
     margin-left: 8px;
   }
 
-  /* Dar okuma ekranı tarihi alıcı satırının başında, şeritte kısa metni
-     gösterir (MobileReader). */
+  /* Dar okuma alanı (telefon, dar masaüstü bölmesi) tarihi alıcı satırının
+     başında, şeritte kısa metni gösterir (MobileReader, Reader). */
   .when-inline,
   .remote-short {
     display: none;
@@ -468,7 +468,7 @@
   }
 
   .body {
-    margin-top: 22px;
+    margin-top: 16px;
   }
 
   .atts {

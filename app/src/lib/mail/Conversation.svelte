@@ -136,14 +136,15 @@
   {:else if loading && !items.length}
     <p class="state meta">{t('conv.loading')}</p>
   {:else}
-    <div class="conv-head" class:alone={items.length === 1}>
-      <span class="meta num">{t('conv.count', { n: items.length })}</span>
-      <span class="grow"></span>
-      {#if items.length > 1}
+    <!-- Tek iletili konuşmada "1 ileti" başlığı yinelemedir; yer kaplamasın. -->
+    {#if items.length > 1}
+      <div class="conv-head">
+        <span class="meta num">{t('conv.count', { n: items.length })}</span>
+        <span class="grow"></span>
         <button class="btn-ghost" onclick={toggleAll}>{allOpen ? t('conv.collapseAll') : t('conv.expandAll')}</button>
-      {/if}
-    </div>
-    <ol class="msgs" aria-label={t('conv.list')}>
+      </div>
+    {/if}
+    <ol class="msgs" class:alone={items.length === 1} aria-label={t('conv.list')}>
       {#each items as m (m.id)}
         <li class="msg" class:open={open.has(m.id)} class:current={m.id === selected.id}>
           {#if open.has(m.id)}
@@ -153,7 +154,8 @@
                   <Icon name="chevronUp" size={16} />
                 </button>
               {/if}
-              <MessageView detail={m} actions onupdate={update} />
+              <!-- Seçili iletinin yanıtla / ilet düğmeleri araç çubuğunda (mobilde alt şeritte). -->
+              <MessageView detail={m} actions={m.id !== selected.id} onupdate={update} />
             </div>
           {:else}
             <button class="prior" aria-expanded="false" aria-label={t('conv.expand', { name: label(m) })} onclick={() => toggle(m)}>
@@ -221,9 +223,14 @@
     right: 0;
   }
 
-  /* Açık iletide yıldız düğmesi daraltma düğmesine yer açar. */
-  .opened :global(.sender) {
+  /* Açık iletide yıldız düğmesi daraltma düğmesine yer açar (yalnız çok iletide). */
+  .msgs:not(.alone) .opened :global(.sender) {
     padding-right: 32px;
+  }
+
+  /* Tek ileti: başlık satırı yok, gönderen konunun hemen altında. */
+  .alone .opened {
+    padding-top: 6px;
   }
 
   .prior {

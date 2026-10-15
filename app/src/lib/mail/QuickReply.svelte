@@ -4,6 +4,9 @@
   // alt şeridinden genişleyen yanıt alanında (`compact`) aynı mantık; gönderim
   // `sendQuickReply` ile giden kutusuna gider ve geri alınırsa metin geri gelir.
   //
+  // Masaüstünde kutu boşken ve odakta değilken tek satırdır: hazır yanıtlar,
+  // alıcılar ve "Gönder" odakla açılır; okuma alanı postaya kalır.
+  //
   // Mobil (`compact`): alan yalnız "Yanıtla"ya dokununca açılır. Başta alıcı
   // satırı, "tam ekran yaz" ve kapat; altında hazır yanıtlar (kutu boşken) ve
   // yuvarlak gönder düğmeli kutu. Metin üst bileşende tutulur (`text`):
@@ -40,7 +43,16 @@
   const replyList = $derived(quickReplyTargets(d, account).map((a) => a.email).join(', '));
   const replyForeign = $derived(foreignReplyDomains(d));
   const chips = $derived(quickReplies(settings.value));
-  const showChips = $derived(chips.length > 0 && !reply);
+  /** Odak kutunun içinde (yazı, çip, gönder). */
+  let active = $state(false);
+  /** Masaüstünde boş ve odaksız kutu kapalı (tek satır); mobil alan zaten açılınca görünür. */
+  const open = $derived(compact || active || reply.length > 0);
+  const showChips = $derived(open && chips.length > 0 && !reply);
+
+  function onFocusOut(e: FocusEvent) {
+    const next = e.relatedTarget as Node | null;
+    if (!next || !(e.currentTarget as HTMLElement).contains(next)) active = false;
+  }
 
   /** Hızlı yanıt değişkenleri: yanıtlanan kişi ve hesabın gönderen adı. */
   function useChip(text: string) {
@@ -79,7 +91,7 @@
   }
 </script>
 
-<div class="quick" class:compact>
+<div class="quick" class:compact class:closed={!open} onfocusin={() => (active = true)} onfocusout={onFocusOut}>
   {#if compact}
     <div class="head">
       <span class="meta trunc targets" title={replyList}>{t('read.replyTo', { list: replyList })}</span>
@@ -95,7 +107,7 @@
       {/if}
     </div>
   {/if}
-  {#if replyForeign.length}
+  {#if open && replyForeign.length}
     <p class="reply-warn" role="note">{t('read.replyElsewhere', { domains: replyForeign.join(', ') })}</p>
   {/if}
   {#if showChips}
@@ -111,7 +123,7 @@
       <textarea
         bind:this={replyBox}
         bind:value={reply}
-        rows={compact ? 1 : 2}
+        rows={compact || !open ? 1 : 2}
         placeholder={t('read.replyPlaceholder')}
         aria-label={t('read.replyPlaceholder')}
         onkeydown={onKey}
@@ -122,7 +134,7 @@
         </button>
       {/if}
     </div>
-    {#if !compact}
+    {#if !compact && open}
       <div class="reply-bar">
         <span class="meta trunc" title={replyList}>{t('read.replyTo', { list: replyList })}</span>
         <span class="grow"></span>
@@ -210,6 +222,12 @@
     background: transparent;
     line-height: 1.5;
     field-sizing: content;
+  }
+
+  /* Kapalı kutu: tek satır, yer tutucu dikeyde ortada. */
+  .closed textarea {
+    min-height: 42px;
+    padding: 10px 14px;
   }
 
   .reply-bar {

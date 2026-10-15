@@ -438,41 +438,9 @@
     margin-right: 6px;
   }
 
-  /* Dar okuma alanında (ray ve yığın kipleri) yanıt düğmeleri yalnız ikon. */
+  /* Okuma alanı genişliği kap sorgusuyla ölçülür (dar düzen dosyanın sonunda). */
   .reader {
     container: reader / inline-size;
-  }
-
-  @container reader (max-width: 680px) {
-    .toolbar .lbl {
-      display: none;
-    }
-
-    .toolbar .btn-soft,
-    .toolbar .btn-primary {
-      width: 34px;
-      padding: 0;
-    }
-
-    .toolbar .btn-soft {
-      margin-left: 2px;
-      border-color: transparent;
-      background: transparent;
-      color: var(--ink-2);
-    }
-
-    .toolbar .btn-soft:hover {
-      background: var(--hover);
-      color: var(--ink);
-    }
-
-    .article {
-      padding: 24px 24px 20px;
-    }
-
-    .reply-wrap {
-      padding: 10px 24px 16px;
-    }
   }
 
   /* Odak kipinde sıradaki posta yalnız saydamlıkla gelir (120 ms). */
@@ -503,7 +471,7 @@
   .article {
     max-width: 760px;
     margin: 0 auto;
-    padding: 30px 40px 24px;
+    padding: 22px 40px 24px;
     animation: fade-up var(--t-state) ease-out;
   }
 
@@ -563,12 +531,12 @@
   }
 
   .single {
-    margin-top: 22px;
+    margin-top: 16px;
   }
 
   .reply-wrap {
     flex: none;
-    padding: 12px 40px 20px;
+    padding: 10px 40px 16px;
   }
 
   .empty {
@@ -586,5 +554,59 @@
   .empty-title {
     color: var(--ink);
     font-weight: 600;
+  }
+
+  /* Dar okuma alanı (ray ve yığın kipleri): yanıt düğmeleri yalnız ikon. Kap
+     sorgusu temel kurallardan sonra gelir: aynı özgüllükte sonraki kazanır. */
+  @container reader (max-width: 680px) {
+    .toolbar .lbl {
+      display: none;
+    }
+
+    .toolbar .btn-soft,
+    .toolbar .btn-primary {
+      width: 34px;
+      padding: 0;
+    }
+
+    .toolbar .btn-soft {
+      margin-left: 2px;
+      border-color: transparent;
+      background: transparent;
+      color: var(--ink-2);
+    }
+
+    .toolbar .btn-soft:hover {
+      background: var(--hover);
+      color: var(--ink);
+    }
+
+    /* Dar bölmede postanın üstü sıkı: konu 19 px, tarih alıcı satırında
+       (ad kesilmesin), kenar boşlukları 24 px. */
+    .article {
+      padding: 16px 24px 20px;
+    }
+
+    h2 {
+      font-size: var(--fs-section);
+      line-height: 1.3;
+      letter-spacing: -0.01em;
+    }
+
+    .article :global(.sender .when-inline) {
+      display: inline;
+    }
+
+    .article :global(.sender .when-side) {
+      display: none;
+    }
+
+    .single {
+      margin-top: 12px;
+    }
+
+    .reply-wrap {
+      padding: 8px 24px 12px;
+    }
   }
 </style>

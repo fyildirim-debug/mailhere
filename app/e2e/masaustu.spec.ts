@@ -49,6 +49,53 @@ test('1000 px: kenar çubuğu 56 px raya iner, Ctrl+B tam kenar çubuğunu katma
   await expect(list(page).getByRole('heading', { name: 'Gelen Kutusu' })).toBeVisible();
 });
 
+test('dar okuma bölmesi: postanın üstü sıkı, hızlı yanıt odaklanınca açılır', async ({ page }) => {
+  await page.setViewportSize({ width: 1000, height: 760 });
+  await page.keyboard.press('Control+k');
+  await page.keyboard.type('Arşive git');
+  await palette(page).getByRole('option', { name: /^Arşive git/ }).first().click();
+  await list(page).getByText('Haftalık özet: üç görev tamamlandı').click();
+  const reader = page.getByRole('main');
+  const subject = reader.getByRole('heading', { level: 2, name: 'Haftalık özet: üç görev tamamlandı' });
+  await expect(subject).toBeVisible();
+
+  // Konu 19 px; tek iletide "1 ileti" satırı ve araç çubuğundakini yineleyen
+  // yanıtla / ilet düğmeleri yok; tarih alıcı satırında, ad kesilmeden.
+  await expect(subject).toHaveCSS('font-size', '19px');
+  await expect(reader.getByText('1 ileti', { exact: true })).toHaveCount(0);
+  const sender = reader.locator('.sender');
+  for (const name of ['Yanıtla', 'İlet']) await expect(sender.getByRole('button', { name, exact: true })).toHaveCount(0);
+  await expect(sender.getByRole('button', { name: 'Yıldızla' })).toBeVisible();
+  await expect(sender.locator('.who > .meta')).toHaveText(/^\d{1,2} \S+ \d{4} \d{2}:\d{2} · kime: sen$/);
+  const name = sender.locator('.name');
+  expect(await name.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+
+  // Hızlı yanıt boşken tek satır: hazır yanıtlar ve gönder çubuğu yok.
+  const send = reader.getByRole('button', { name: 'Gönder', exact: true });
+  const box = page.getByRole('textbox', { name: 'Hızlı yanıt yaz…' });
+  const chips = page.getByRole('group', { name: 'Hızlı yanıtlar' });
+  await expect(chips).toHaveCount(0);
+  await expect(send).toHaveCount(0);
+  expect((await box.boundingBox())!.height).toBeLessThanOrEqual(44);
+
+  // Posta çerçevesi üstten 270 px'ten önce başlar; altında en az 400 px gövde görünür.
+  const frame = (await page.locator('iframe[title="Posta içeriği"]').boundingBox())!;
+  expect(frame.y).toBeLessThan(270);
+  expect((await box.boundingBox())!.y - frame.y).toBeGreaterThan(400);
+
+  // Odakla açılır; çip kutuyu doldurur, odak dışarı çıkınca metin varken açık kalır.
+  await box.click();
+  await expect(chips).toBeVisible();
+  await expect(send).toBeDisabled();
+  await chips.getByRole('button', { name: 'Tamam, uygun.' }).click();
+  await expect(box).toHaveValue('Tamam, uygun.');
+  await subject.click();
+  await expect(send).toBeEnabled();
+  await box.fill('');
+  await subject.click();
+  await expect(send).toHaveCount(0);
+});
+
 test('geniş pencerede Ctrl+B kenar çubuğunu raya indirir; tercih kalıcıdır', async ({ page }) => {
   await expect(side(page)).toBeVisible();
   await page.keyboard.press('Control+b');

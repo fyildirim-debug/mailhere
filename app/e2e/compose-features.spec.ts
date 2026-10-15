@@ -59,6 +59,8 @@ test('hızlı yanıt değişkenleri hızlı okumada ve okuma panelinde doldurulu
 
   await page.goto('/#/main');
   await list(page).getByText('Sözleşme imzaya hazır').click();
+  // Hazır yanıtlar kutu odaklanınca açılır.
+  await page.getByRole('textbox', { name: 'Hızlı yanıt yaz…' }).click();
   await page.getByRole('group', { name: 'Hızlı yanıtlar' }).getByRole('button', { name: 'Teşekkürler {ad}!' }).click();
   await expect(page.getByRole('textbox', { name: 'Hızlı yanıt yaz…' })).toHaveValue('Teşekkürler Elif!');
 });
