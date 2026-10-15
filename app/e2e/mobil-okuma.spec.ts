@@ -36,8 +36,11 @@ test('satır okuma ekranını açar: konu, alt çubuk, hızlı yanıt; arşivle 
   }
   const barBox = await bar(page).boundingBox();
   expect(barBox?.height).toBe(56);
-  // Hızlı yanıt çipleri değişkeni doldurur; Yanıtla kutuya odaklanır.
-  await page.getByRole('group', { name: 'Hızlı yanıtlar' }).getByRole('button', { name: 'Teşekkürler!' }).click();
+  // Hazır yanıtlar kutu odaktayken görünür (postaya yer kalır); çip değişkeni doldurur.
+  const chips = page.getByRole('group', { name: 'Hızlı yanıtlar' });
+  await expect(chips).toHaveCount(0);
+  await page.getByRole('textbox', { name: 'Hızlı yanıt yaz…' }).click();
+  await chips.getByRole('button', { name: 'Teşekkürler!' }).click();
   await expect(page.getByRole('textbox', { name: 'Hızlı yanıt yaz…' })).toHaveValue('Teşekkürler!');
   await expect(page.getByText('Kime: ayse.demir@eposta.com')).toBeVisible();
   // Yatay taşma yok.
@@ -60,8 +63,8 @@ test('yıldız ekranda kalır; okunmadı say listeye döner ve sayıyı artırı
   await expect(star).toHaveAttribute('aria-pressed', 'true');
   await star.click();
   await expect(appbar(page).getByRole('button', { name: 'Yıldızla' })).toHaveAttribute('aria-pressed', 'false');
-  // İletideki yıldız da aynı duruma düşer.
-  await expect(page.getByRole('list', { name: 'Konuşmadaki iletiler' }).getByRole('button', { name: 'Yıldızla' })).toBeVisible();
+  // Açık iletinin yıldızı yalnız üst çubukta; gönderen satırında yinelenmez.
+  await expect(page.getByRole('list', { name: 'Konuşmadaki iletiler' }).getByRole('button', { name: /^Yıldız/ })).toHaveCount(0);
   await expect(page.getByRole('heading', { level: 2, name: 'Sözleşme imzaya hazır' })).toBeVisible();
 
   await appbar(page).getByRole('button', { name: 'Okunmadı say' }).click();
@@ -205,35 +208,48 @@ test('koyu temada bülten koyuya eşlenir; “Özgün renkler” 44 px hedefle k
   expect(overflow).toBe(false);
 });
 
-test('okuma başlığı: tarih ve ileti eylemleri tek sırada; engellenen görsel kırık simge olarak çizilmez', async ({ page }) => {
-  // Dar telefon (360 px): eskiden yıldız düğmesi üçüncü satıra düşüyordu.
+test('okuma başlığı sıkı: posta ekranın üst yarısında başlar; tarih kesilmez, eylemler yinelenmez', async ({ page }) => {
+  // Dar telefon (360 px), koyu tema, uzak görselli ve abonelik bağlantılı bülten.
   await page.setViewportSize({ width: 360, height: 780 });
   await page.getByRole('button', { name: 'Menü', exact: true }).click();
   await page.getByRole('dialog', { name: 'Kutular ve hesaplar' }).getByRole('button', { name: 'Temayı değiştir' }).click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   await page.keyboard.press('Escape');
   await row(page, 'Renk, ışık ve odak').click();
-  const sender = page.locator('.sender').filter({ has: page.getByRole('button', { name: 'Özgün renkler' }) });
-  // Koyu uyarlama düğmesi de görünür: yanıtla, ilet, özgün renkler, yıldız aynı sırada.
-  const names = ['Yanıtla', 'İlet', 'Özgün renkler', 'Yıldızla'];
-  const mids: number[] = [];
-  for (const name of names) {
-    const box = await sender.getByRole('button', { name, exact: true }).boundingBox();
-    expect(box, `${name} görünür olmalı`).not.toBeNull();
-    mids.push(box!.y + box!.height / 2);
-  }
-  expect(Math.max(...mids) - Math.min(...mids), `orta noktalar: ${mids.join(', ')}`).toBeLessThan(2);
-  // Tarih kesilmeden alıcı satırının başında.
-  const to = sender.locator('.who > .meta');
-  await expect(to).toHaveText(/^\S+ \d{2}:\d{2} · kime: /);
-  await expect(to.locator('.when-inline')).toBeVisible();
-  await expect(sender.locator(':scope > .meta')).toBeHidden();
+  const colors = page.getByRole('button', { name: 'Özgün renkler' });
+  await expect(colors).toBeVisible();
+  const sender = page.locator('.sender').filter({ has: colors });
 
-  // Şerit kısa: açıklama cümlesi dar ekranda gizli, eylem 44 px hedef.
-  await expect(page.getByText('Uzak görseller ve izleme pikselleri engellendi.')).toBeVisible();
-  await expect(page.getByText('Gönderici postayı açtığını göremez.')).toBeHidden();
+  // Tek iletili konuşmada "1 ileti" yok; yanıtla, ilet, yıldız ve abonelikten
+  // çık gönderen satırında değil çubuklarda ve "Diğer eylemler"de.
+  await expect(page.getByText('1 ileti', { exact: true })).toBeHidden();
+  for (const name of ['Yanıtla', 'İlet', 'Yıldızla']) {
+    await expect(sender.getByRole('button', { name, exact: true })).toHaveCount(0);
+  }
+  await expect(page.getByText('Bu bir toplu gönderim.')).toBeHidden();
+  await openMore(page);
+  await expect(sheet(page, 'Diğer eylemler').getByRole('menuitem', { name: 'Abonelikten çık' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(sheet(page, 'Diğer eylemler')).toBeHidden();
+
+  // Gönderen tek satır: "Özgün renkler" adla aynı sırada; tarih alıcı satırında, kesilmeden.
+  const who = await sender.locator('.who-btn').boundingBox();
+  const btn = await colors.boundingBox();
+  expect(Math.abs(btn!.y + btn!.height / 2 - (who!.y + who!.height / 2))).toBeLessThan(3);
+  // Tek iletide sağ kenara yaslı (kenar boşluğu 16 px).
+  expect(Math.round(360 - (btn!.x + btn!.width))).toBeLessThanOrEqual(16);
+  await expect(sender.locator('.who > .meta')).toHaveText(/^\S+ \d{2}:\d{2} · kime: /);
+
+  // Uzak görsel şeridi tek satır, kısa metin; eylem 44 px hedef.
+  const remote = page.locator('.remote');
+  await expect(remote.getByText('Görseller engellendi.')).toBeVisible();
+  expect((await remote.boundingBox())!.height).toBeLessThanOrEqual(46);
   const allow = await page.getByRole('button', { name: 'Bu göndericiye izin ver' }).boundingBox();
   expect(Math.round(allow!.height)).toBeGreaterThanOrEqual(44);
+
+  // Posta çerçevesi ekranın üst yarısında başlar (eskiden 450 px'in altındaydı).
+  const frameBox = await page.locator('iframe[title="Posta içeriği"]').boundingBox();
+  expect(frameBox!.y).toBeLessThan(300);
 
   // Engellenmiş görsel yerini korur ama çizilmez (kırık simge, çerçeve, alt metin yok).
   const frame = page.frameLocator('iframe[title="Posta içeriği"]');
@@ -241,6 +257,20 @@ test('okuma başlığı: tarih ve ileti eylemleri tek sırada; engellenen görse
   expect(await blocked.evaluate((el) => getComputedStyle(el).opacity)).toBe('0');
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
   expect(overflow).toBe(false);
+});
+
+test('konuşmada eski ileti açılınca kendi eylemleri ikinci sırada, ad sütununa hizalı', async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 780 });
+  await row(page, 'Re: Yayın planı').click();
+  await page.getByRole('button', { name: /iletisini aç$/ }).first().click();
+  const older = page.locator('.msg:not(.current) .sender').first();
+  const mids: number[] = [];
+  for (const name of ['Yanıtla', 'İlet', 'Yıldızla']) {
+    const box = await older.getByRole('button', { name, exact: true }).boundingBox();
+    expect(box, `${name} görünür olmalı`).not.toBeNull();
+    mids.push(box!.y + box!.height / 2);
+  }
+  expect(Math.max(...mids) - Math.min(...mids)).toBeLessThan(2);
 });
 
 test('izinli uzak görsel çerçevede yüklenemezse arka uçtan indirilir', async ({ page }) => {

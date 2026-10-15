@@ -106,6 +106,7 @@ export const tr = {
   'read.thread': '{n} ileti',
   'read.remoteBlocked': 'Uzak görseller ve izleme pikselleri engellendi.',
   'read.remoteWhy': 'Gönderici postayı açtığını göremez.',
+  'read.remoteShort': 'Görseller engellendi.',
   'read.remoteAllow': 'Bu göndericiye izin ver',
   'read.originalColors': 'Özgün renkler',
   'read.frame': 'Posta içeriği',

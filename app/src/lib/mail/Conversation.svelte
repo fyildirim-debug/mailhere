@@ -136,7 +136,7 @@
   {:else if loading && !items.length}
     <p class="state meta">{t('conv.loading')}</p>
   {:else}
-    <div class="conv-head">
+    <div class="conv-head" class:alone={items.length === 1}>
       <span class="meta num">{t('conv.count', { n: items.length })}</span>
       <span class="grow"></span>
       {#if items.length > 1}

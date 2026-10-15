@@ -352,8 +352,8 @@
           <Conversation selected={d} />
         {/key}
       {:else}
-        <div class="meta thread-meta">{t('read.thread', { n: d.thread.length + 1 })} · {d.from.email}</div>
         {#if d.thread.length}
+          <div class="meta thread-meta">{t('read.thread', { n: d.thread.length + 1 })}</div>
           <div class="thread">
             {#each d.thread as p (p.id)}
               <button class="prior" onclick={() => nav.replace({ name: 'read', id: p.id })}>
@@ -457,7 +457,7 @@
   }
 
   .article {
-    padding: 20px var(--m-gutter) 28px;
+    padding: 14px var(--m-gutter) 28px;
     transition: transform var(--t-state) var(--ease);
   }
 
@@ -544,7 +544,7 @@
   }
 
   .single {
-    margin-top: 18px;
+    margin-top: 10px;
   }
 
   /* Konuşma ve ileti alt öğeleri dar ekrana: ekler tam genişlik, dokunma hedefleri 44. */
@@ -553,9 +553,7 @@
     min-height: var(--m-touch);
   }
 
-  /* Gönderen satırı iki sıra: üstte ad, altında "tarih · kime"; altta ileti
-     eylemleri metin sütununun hizasında. Tarih eylemlerle yarışmaz, kesilmez;
-     koyu uyarlama düğmesi de gelince yıldız ayrı satıra düşmez. */
+  /* Gönderen satırı: üstte ad, altında "tarih · kime" (tarih kesilmez). */
   .article :global(.sender) {
     flex-wrap: wrap;
     column-gap: 0;
@@ -564,7 +562,6 @@
 
   .article :global(.sender .who-btn) {
     flex: 1 1 100%;
-    margin-bottom: 2px;
   }
 
   .article :global(.sender > .meta) {
@@ -575,25 +572,67 @@
     display: inline;
   }
 
-  /* İlk eylem simgesi ad sütununa hizalanır: metin 52 px'te, simge düğme
-     kutusunda 12 px içeride (40 px kutuda 16, 44 px kutuda 20 px simge). */
-  .article :global(.sender > .meta + .btn-icon) {
+  /* Konuşmadaki eski bir ileti açılınca kendi eylemleri ikinci sırada, ad
+     sütununa hizalı: metin 52 px'te, simge düğme kutusunda 12 px içeride. */
+  .article :global(.msg:not(.current) .sender > .meta + .btn-icon) {
     margin-left: 40px;
   }
 
-  /* Şeritler dar ekranda kısa: açıklama cümlesi düşer, boşluklar daralır. */
+  /* Açık ileti (alt çubuğun ve üst çubuğun işlediği): yanıtla, ilet ve yıldız
+     çubuklarda, abonelikten çık "Diğer eylemler"de. Gönderen tek satır, yalnız
+     "Özgün renkler" adın yanında kalır; posta ekranın üstünden başlar. */
+  .article :global(:is(.msg.current, .single) .sender .msg-act),
+  .article :global(:is(.msg.current, .single) .unsub) {
+    display: none;
+  }
+
+  .article :global(:is(.msg.current, .single) .sender .who-btn) {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  /* Tek iletili konuşmada "1 ileti" başlığı yinelemedir; daraltma düğmesi de
+     olmadığından gönderen satırı sağ kenara kadar uzanır. */
+  .article :global(.conv-head.alone) {
+    display: none;
+  }
+
+  .article :global(.conv-head.alone + .msgs .sender) {
+    padding-right: 0;
+  }
+
+  .article :global(.conv) {
+    margin-top: 4px;
+  }
+
+  .article :global(.msg .opened) {
+    padding: 12px 0 20px;
+  }
+
+  /* Şeritler tek satır: kısa metin, gerekirse kısalır; eylem 44 px hedef. */
   .article :global(.unsub),
   .article :global(.remote) {
-    margin-top: 12px;
-    padding: 2px 4px 2px 12px;
+    margin-top: 10px;
+    padding: 0 4px 0 12px;
   }
 
   .article :global(.unsub + .remote) {
     margin-top: 6px;
   }
 
-  .article :global(.remote-why) {
+  .article :global(.remote-long) {
     display: none;
+  }
+
+  .article :global(.remote-short) {
+    display: inline;
+  }
+
+  .article :global(.remote-text) {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .article :global(.unsub .link),
@@ -604,11 +643,7 @@
   }
 
   .article :global(.body) {
-    margin-top: 12px;
-  }
-
-  .article :global(.conv) {
-    margin-top: 12px;
+    margin-top: 10px;
   }
 
   .reply-wrap {

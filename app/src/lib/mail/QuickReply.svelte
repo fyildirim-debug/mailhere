@@ -31,6 +31,8 @@
   const chips = $derived(quickReplies(settings.value));
   /** Mobilde alıcı satırı yalnız kutu etkinken; masaüstünde hep. */
   const showTargets = $derived(!compact || focused || reply.length > 0);
+  /** Mobilde hazır yanıtlar da yalnız kutu odaktayken: postaya yer kalır. */
+  const showChips = $derived(chips.length > 0 && !reply && (!compact || focused));
 
   /** Hızlı yanıt değişkenleri: yanıtlanan kişi ve hesabın gönderen adı. */
   function useChip(text: string) {
@@ -67,10 +69,11 @@
   {#if replyForeign.length && showTargets}
     <p class="reply-warn" role="note">{t('read.replyElsewhere', { domains: replyForeign.join(', ') })}</p>
   {/if}
-  {#if chips.length && !reply}
+  {#if showChips}
     <div class="chips" role="group" aria-label={t('qr.title')}>
       {#each chips as c (c)}
-        <button class="chip" onclick={() => useChip(c)}>{c}</button>
+        <!-- Basış kutudan odağı almaz: çip kaybolmadan tıklama yerine ulaşır. -->
+        <button class="chip" onmousedown={(e) => e.preventDefault()} onclick={() => useChip(c)}>{c}</button>
       {/each}
     </div>
   {/if}

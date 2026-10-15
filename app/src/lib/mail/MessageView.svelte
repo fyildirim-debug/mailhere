@@ -92,12 +92,12 @@
   </button>
   <span class="meta num">{when(d.date)}</span>
   {#if actions}
-    <button class="btn-icon small" aria-label={t('act.reply')} title={t('act.reply')} onclick={() => compose('reply')}><Icon name="reply" size={16} /></button>
-    <button class="btn-icon small" aria-label={t('act.forward')} title={t('act.forward')} onclick={() => compose('forward')}><Icon name="forward" size={16} /></button>
+    <button class="btn-icon small msg-act" aria-label={t('act.reply')} title={t('act.reply')} onclick={() => compose('reply')}><Icon name="reply" size={16} /></button>
+    <button class="btn-icon small msg-act" aria-label={t('act.forward')} title={t('act.forward')} onclick={() => compose('forward')}><Icon name="forward" size={16} /></button>
   {/if}
   {#if canToggleColors}
     <button
-      class="btn-icon"
+      class="btn-icon colors-btn"
       class:on={original}
       aria-pressed={original}
       aria-label={t('read.originalColors')}
@@ -107,7 +107,7 @@
       <Icon name="contrast" />
     </button>
   {/if}
-  <button class="btn-icon" aria-label={d.starred ? t('act.unstar') : t('act.star')} title="{t('act.star')} · S" onclick={star}>
+  <button class="btn-icon msg-act" aria-label={d.starred ? t('act.unstar') : t('act.star')} title="{t('act.star')} · S" onclick={star}>
     <span class:star={d.starred}><Icon name="star" filled={d.starred} /></span>
   </button>
 </div>
@@ -130,7 +130,9 @@
 {#if d.hasRemoteContent && !d.remoteAllowed}
   <div class="remote">
     <Icon name="shield" />
-    <span class="remote-text">{t('read.remoteBlocked')} <span class="remote-why">{t('read.remoteWhy')}</span></span>
+    <span class="remote-text"
+      ><span class="remote-long">{t('read.remoteBlocked')} {t('read.remoteWhy')}</span><span class="remote-short">{t('read.remoteShort')}</span></span
+    >
     <button class="link small" onclick={allow}>{t('read.remoteAllow')}</button>
   </div>
 {/if}
@@ -204,8 +206,10 @@
     margin-left: 8px;
   }
 
-  /* Dar okuma ekranı tarihi alıcı satırının başında gösterir (MobileReader). */
-  .when-inline {
+  /* Dar okuma ekranı tarihi alıcı satırının başında, şeritte kısa metni
+     gösterir (MobileReader). */
+  .when-inline,
+  .remote-short {
     display: none;
   }
 
