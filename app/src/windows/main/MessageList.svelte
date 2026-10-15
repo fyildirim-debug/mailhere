@@ -12,6 +12,22 @@
   import { settings, updateSettings } from '../../lib/stores/settings.svelte';
   import { tagById } from '../../lib/stores/tags.svelte';
   import MessageRow from './MessageRow.svelte';
+  import SearchChips from './SearchChips.svelte';
+  import { desk } from './layout.svelte';
+  import { startTriage } from './triage.svelte';
+
+  interface Props {
+    /** Sütun genişliği (px); verilmezse kalan alanı doldurur (yığın kipi). */
+    width?: number | null;
+  }
+
+  let { width = null }: Props = $props();
+
+  /** Arama sorgusunu komut paletinde düzenlemeye açar. */
+  function editSearch() {
+    desk.paletteSeed = mail.search;
+    mail.paletteOpen = true;
+  }
 
   const GROUP_H = 34;
   const OVERSCAN = 480;
@@ -109,54 +125,70 @@
   }
 </script>
 
-<section class="list" aria-label={t('list.label')}>
+<section class="list" class:fill={width == null} style:width={width == null ? undefined : `${width}px`} aria-label={t('list.label')}>
   <div class="head">
     <div class="title-row">
-      <h1 class="trunc">{title}</h1>
-      <span class="meta num">{unread ? t('list.unread', { n: unread }) : t('list.allRead')}</span>
-      <button
-        class="btn-icon mark pull"
-        class:busy={syncing()}
-        aria-label={t('list.pull')}
-        aria-busy={syncing()}
-        title={t('list.pullHint')}
-        onclick={() => pullMail()}
-      >
-        <Icon name="refresh" />
-      </button>
       {#if mail.search != null}
+        <!-- Arama başlığına basınca sorgu komut paletinde düzenlenir. -->
+        <h1 class="trunc"><button class="title-btn trunc" title="{t('list.editSearch')} · /" onclick={editSearch}>{title}</button></h1>
+      {:else}
+        <h1 class="trunc">{title}</h1>
+        <span class="meta num">{unread ? t('list.unread', { n: unread }) : t('list.allRead')}</span>
+      {/if}
+      <div class="tools">
+        <button
+          class="btn-icon pull"
+          class:busy={syncing()}
+          aria-label={t('list.pull')}
+          aria-busy={syncing()}
+          title={t('list.pullHint')}
+          onclick={() => pullMail()}
+        >
+          <Icon name="refresh" />
+        </button>
+        {#if mail.search != null}
+          <button
+            class="btn-icon"
+            aria-label={t('saved.save')}
+            title={t('saved.save')}
+            aria-haspopup="dialog"
+            onclick={(e) => {
+              const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+              savePrompt = { x: r.right - 300, y: r.bottom + 4 };
+            }}
+          >
+            <Icon name="bookmark" />
+          </button>
+          <button class="btn-icon" aria-label={t('list.clearSearch')} title={t('list.clearSearch')} onclick={() => setView(mail.view, mail.accountId)}>
+            <Icon name="x" />
+          </button>
+        {:else}
+          <button
+            class="btn-icon"
+            class:on={mail.only != null}
+            aria-label={t('list.filterBy')}
+            title={t('list.filterBy')}
+            aria-haspopup="menu"
+            onclick={openFilter}
+          >
+            <Icon name="filter" />
+          </button>
+        {/if}
+        <button class="btn-icon" aria-label={t('act.markAllRead')} title={t('act.markAllRead')} disabled={!unread} onclick={() => markAllRead()}>
+          <Icon name="checkAll" />
+        </button>
         <button
           class="btn-icon"
-          aria-label={t('saved.save')}
-          title={t('saved.save')}
-          aria-haspopup="dialog"
-          onclick={(e) => {
-            const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-            savePrompt = { x: r.right - 300, y: r.bottom + 4 };
-          }}
+          aria-label={t('triage.start')}
+          title="{t('triage.start')} · {t('triage.startHint')} · Shift O"
+          disabled={!rows.length}
+          onclick={() => startTriage()}
         >
-          <Icon name="bookmark" />
+          <Icon name="focus" />
         </button>
-        <button class="btn-icon" aria-label={t('list.clearSearch')} title={t('list.clearSearch')} onclick={() => setView(mail.view, mail.accountId)}>
-          <Icon name="x" />
-        </button>
-      {/if}
-      {#if mail.search == null}
-        <button
-          class="btn-icon"
-          class:on={mail.only != null}
-          aria-label={t('list.filterBy')}
-          title={t('list.filterBy')}
-          aria-haspopup="menu"
-          onclick={openFilter}
-        >
-          <Icon name="filter" />
-        </button>
-      {/if}
-      <button class="btn-icon" aria-label={t('act.markAllRead')} title={t('act.markAllRead')} disabled={!unread} onclick={() => markAllRead()}>
-        <Icon name="checkAll" />
-      </button>
+      </div>
     </div>
+    {#if mail.search != null}<SearchChips />{/if}
     {#if mail.only && mail.search == null}
       <div class="pill-row">
         <span class="pill">
@@ -211,6 +243,7 @@
 {/if}
 
 <style>
+  /* Kenar çizgileri ana penceredeki sütun ayırıcılarından gelir. */
   .list {
     flex: none;
     width: 404px;
@@ -218,8 +251,11 @@
     display: flex;
     flex-direction: column;
     background: var(--surface);
-    border-left: 1px solid var(--line);
-    border-right: 1px solid var(--line);
+  }
+
+  .list.fill {
+    flex: 1;
+    width: auto;
   }
 
   .head {
@@ -247,9 +283,29 @@
     flex: none;
   }
 
-  .mark {
-    margin-left: auto;
+  .tools {
+    flex: none;
+    display: flex;
+    margin: 0 -8px 0 auto;
     align-self: center;
+  }
+
+  .title-btn {
+    max-width: 100%;
+    padding: 0;
+    border: 0;
+    border-radius: var(--r-sm);
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    letter-spacing: inherit;
+    text-align: left;
+  }
+
+  .title-btn:hover {
+    text-decoration: underline;
+    text-decoration-color: var(--line-strong);
+    text-underline-offset: 4px;
   }
 
   .pill-row {
@@ -286,7 +342,7 @@
     background: color-mix(in srgb, var(--accent) 18%, transparent);
   }
 
-  .mark:disabled {
+  .tools .btn-icon:disabled {
     opacity: 0.4;
     background: transparent;
   }

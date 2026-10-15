@@ -1,10 +1,11 @@
 <script lang="ts">
   import { openExternal } from '../../../lib/api';
-  import { t, type MessageKey } from '../../../lib/i18n/index.svelte';
+  import { t } from '../../../lib/i18n/index.svelte';
   import Icon from '../../../lib/ui/Icon.svelte';
   import { isMobileShell } from '../../../lib/shell';
   import { settings, updateSettings } from '../../../lib/stores/settings.svelte';
   import { checkUpdate, installUpdate, update } from '../../../lib/stores/update.svelte';
+  import { KEY_GROUPS } from '../../../lib/util/keys';
 
   const s = $derived(settings.value);
   const version = __APP_VERSION__;
@@ -13,23 +14,6 @@
   const mobile = isMobileShell;
   const RELEASES_URL = 'https://github.com/fyildirim-debug/mailheremobile/releases';
 
-  const keys: [string, MessageKey][] = [
-    ['C', 'keys.compose'],
-    ['R', 'keys.reply'],
-    ['A', 'keys.replyAll'],
-    ['F', 'keys.forward'],
-    ['E', 'keys.archive'],
-    ['#', 'keys.delete'],
-    ['H', 'keys.snooze'],
-    ['S', 'keys.star'],
-    ['U', 'keys.unread'],
-    ['J / K', 'keys.move'],
-    ['Enter', 'keys.open'],
-    ['Ctrl K', 'keys.palette'],
-    ['Ctrl Z', 'keys.undo'],
-    ['Ctrl ,', 'keys.settings'],
-    ['F5', 'keys.sync'],
-  ];
 </script>
 
 {#if mobile}
@@ -75,12 +59,16 @@
 </div>
 
 <h3 class="set-h">{t('keys.title')}</h3>
-<dl class="keys">
-  {#each keys as [k, label] (k)}
-    <dt><span class="kbd">{k}</span></dt>
-    <dd>{t(label)}</dd>
-  {/each}
-</dl>
+<p class="set-lead">{t('keys.dialogHint')}</p>
+{#each KEY_GROUPS as g (g.title)}
+  <h4 class="keys-h">{t(g.title)}</h4>
+  <dl class="keys">
+    {#each g.rows as r (r.label)}
+      <dt><span class="kbd">{r.keys}</span></dt>
+      <dd>{t(r.label)}</dd>
+    {/each}
+  </dl>
+{/each}
 {/if}
 
 <style>
@@ -115,9 +103,16 @@
     color: var(--ok);
   }
 
+  .keys-h {
+    margin: 18px 0 0;
+    font-size: var(--fs-meta);
+    font-weight: 600;
+    color: var(--ink-3);
+  }
+
   .keys {
     display: grid;
-    grid-template-columns: 96px minmax(0, 1fr) 96px minmax(0, 1fr);
+    grid-template-columns: 112px minmax(0, 1fr) 112px minmax(0, 1fr);
     gap: 10px 16px;
     margin: 12px 0 0;
     align-items: center;
@@ -130,7 +125,7 @@
 
   @media (max-width: 900px) {
     .keys {
-      grid-template-columns: 96px minmax(0, 1fr);
+      grid-template-columns: 112px minmax(0, 1fr);
     }
   }
 </style>

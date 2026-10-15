@@ -22,6 +22,7 @@ import {
   type View,
 } from '../api';
 import { t, when } from '../i18n/index.svelte';
+import { accountScope } from '../mail/query';
 import { showToast } from '../ui/toast.svelte';
 import { baseSubject, displayName, replyTargets } from '../util/format';
 import { settings } from './settings.svelte';
@@ -173,8 +174,11 @@ export async function refreshList(keepSelection = true) {
   mail.loading = true;
   try {
     if (mail.search != null) {
-      const items = await call('search', { q: mail.search, limit: 300 });
+      // `hesap:` işleci arayüzde çözülür: sorgudan çıkar, sonuçlar hesaba göre süzülür.
+      const scope = accountScope(mail.search, mail.accounts);
+      const found = scope.query ? await call('search', { q: scope.query, limit: 300 }) : [];
       if (token !== listToken) return;
+      const items = scope.accountIds ? found.filter((m) => scope.accountIds!.includes(m.accountId)) : found;
       mail.items = items;
       mail.nextCursor = null;
       pruneChecked();
