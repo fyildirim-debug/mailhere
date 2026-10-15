@@ -19,7 +19,7 @@ Yeni posta geldiğinde koca bir pencere açılmaz: ekranın köşesinde küçük
 - **Akıllı süzgeç** — gelen kutusu Kişiler, Bildirimler ve Bültenler diye kendiliğinden ayrılır.
 - **Klavye önce** — `J/K` gezin, `E` arşivle, `H` ertele, `R` yanıtla, `Ctrl K` her şeyi bul.
 - **Geri alınabilir her şey** — arşivleme, silme, erteleme ve gönderme birkaç saniye geri alınabilir.
-- **Anında posta** — IMAP IDLE ve JMAP anlık bildirim; sessizce kopan bağlantı (modem, NAT) fark edilip yeniden kurulur, uykudan dönünce bağlantılar yenilenir. "Postaları al" (F5) her şeyi hemen eşitler.
+- **Anında posta** — IMAP IDLE ve JMAP anlık bildirim; sessizce kopan bağlantı (modem, NAT) fark edilip yeniden kurulur, uykudan dönünce bağlantılar yenilenir. Gelen kutusu IDLE'ye ek olarak 2 dakikada bir, tüm klasörler 5 dakikada bir ve pencereye dönülünce eşitlenir. "Postaları al" (F5) her şeyi hemen eşitler.
 - **Her hesap** — IMAP/SMTP (ayarlar kendiliğinden bulunur), Gmail ve Outlook / Microsoft 365 için tarayıcıyla giriş (OAuth 2, XOAUTH2), Stalwart gibi JMAP sunucuları (anlık bildirim dahil).
 - **Klasörler** — hesap başına klasör ağacı (alt klasörler, okunmamış sayısı); istemediğin klasörü gizlersin, gizli klasör eşitlenmez. Gönderilenler, Taslaklar, Arşiv, Çöp ve İstenmeyen klasörleri elle seçilebilir.
 - **Kurallar** — gelen postayı göndereninden, konusundan, metninden ya da türünden tanıyıp klasöre taşır, arşivler, siler, okundu sayar, yıldızlar, bildirimsiz bırakır ya da başka bir adrese iletir (döngü korumalı). Göndericiyi tek tıkla engellersin.
