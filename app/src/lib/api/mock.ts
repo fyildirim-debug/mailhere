@@ -6,6 +6,7 @@ import {
   defaultSettings,
   type AuthKind,
   type MessageId,
+  type OutboxItem,
   type OutgoingMessage,
   EVENTS,
   type Account,
@@ -622,6 +623,18 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     };
   }
 
+  /** Giden kutusuna koyar ("gönderimi geri al" süresi ya da zamanlanmış an). */
+  function queueSend(msg: OutgoingMessage): OutboxItem {
+    if (!msg.to.length) fail('invalid', 'En az bir alıcı ekle.');
+    const id = `out-${nextId++}`;
+    const sendAt = msg.sendAt ?? now() + state.settings.undoSendSeconds * 1000;
+    if (msg.draftId != null) state.messages = state.messages.filter((m) => m.id !== msg.draftId);
+    const item: ScheduledItem = { id, accountId: msg.accountId, sendAt, to: msg.to, subject: msg.subject, error: null };
+    scheduled.set(id, { item, msg, timer: setTimeout(() => deliver(id), Math.max(0, sendAt - now())) });
+    if (msg.sendAt) emit(EVENTS.changed, { mailboxIds: [] });
+    return { id, sendAt };
+  }
+
   function deliver(id: string) {
     const entry = scheduled.get(id);
     if (!entry) return;
@@ -857,16 +870,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       if (!a) fail('notFound', 'Ek bulunamadı.');
       return `/tmp/mailhere/${a.name}`;
     },
-    send: ({ msg }) => {
-      if (!msg.to.length) fail('invalid', 'En az bir alıcı ekle.');
-      const id = `out-${nextId++}`;
-      const sendAt = msg.sendAt ?? now() + state.settings.undoSendSeconds * 1000;
-      if (msg.draftId != null) state.messages = state.messages.filter((m) => m.id !== msg.draftId);
-      const item: ScheduledItem = { id, accountId: msg.accountId, sendAt, to: msg.to, subject: msg.subject, error: null };
-      scheduled.set(id, { item, msg, timer: setTimeout(() => deliver(id), Math.max(0, sendAt - now())) });
-      if (msg.sendAt) emit(EVENTS.changed, { mailboxIds: [] });
-      return { id, sendAt };
-    },
+    send: ({ msg }) => queueSend(msg),
     send_cancel: ({ id }) => {
       const entry = scheduled.get(id);
       if (!entry) return false;
@@ -924,6 +928,50 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     notify_hide: () => null,
     notify_pending: () => [],
     notify_snooze: () => null,
+    notify_action: ({ id, action }) => {
+      const m = find(id);
+      switch (action) {
+        case 'markRead':
+          m.unread = false;
+          break;
+        case 'archive':
+        case 'trash':
+          m.mailboxId = boxFor(m.accountId, action);
+          m.snoozedUntil = null;
+          break;
+        case 'spam': {
+          const junk = state.mailboxes.find((b) => b.accountId === m.accountId && b.role === 'junk');
+          if (!junk) fail('notFound', 'Bu hesapta İstenmeyen klasörü yok. Postayı uygulamada aç ve bir klasöre taşı.');
+          m.mailboxId = junk.id;
+          m.snoozedUntil = null;
+          break;
+        }
+        default:
+          fail('invalid', 'Bu düğme bildirimden çalıştırılamaz; postayı uygulamada aç.');
+      }
+      emit(EVENTS.changed, { mailboxIds: [] });
+      return null;
+    },
+    notify_reply: ({ id, text }) => {
+      const body = text.trim();
+      if (!body) fail('invalid', 'Yanıt boş. Bir şey yaz ya da postayı uygulamada aç.');
+      const m = find(id);
+      const subject = m.subject.replace(/^(\s*(re|ynt|fwd?|ilt)\s*:\s*)+/i, '');
+      const item = queueSend({
+        accountId: m.accountId,
+        to: m.replyTo.length ? m.replyTo : [m.from],
+        cc: [],
+        bcc: [],
+        subject: `Re: ${subject}`,
+        bodyText: body,
+        inReplyTo: id,
+        attachments: [],
+        sendAt: null,
+      });
+      m.unread = false;
+      emit(EVENTS.changed, { mailboxIds: [] });
+      return item;
+    },
     jmap_discover: ({ email }) => {
       const domain = email.split('@')[1]?.trim();
       if (!domain || !domain.includes('.')) fail('discovery', 'Bu adres için JMAP sunucusu bulunamadı.');

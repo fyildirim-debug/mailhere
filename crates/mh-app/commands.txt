@@ -26,6 +26,8 @@ sync_reconnect
 open_main
 open_compose
 notify_snooze
+notify_action
+notify_reply
 jmap_discover
 account_add_jmap
 account_update

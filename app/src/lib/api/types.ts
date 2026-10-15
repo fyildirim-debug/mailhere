@@ -493,6 +493,15 @@ export type AfterRemove = 'list' | 'next' | 'previous';
  */
 export type SwipeAction = 'archive' | 'trash' | 'spam' | 'move' | 'snooze' | 'toggleRead' | 'pin' | 'none';
 
+/**
+ * Bildirim düğmesi (masaüstü köşe kartı ve Android bildirimi): `reply` satır
+ * içi yanıt, `spam` hesabın İstenmeyen (`junk`) kutusuna taşır.
+ */
+export type NotifyAction = 'reply' | 'markRead' | 'archive' | 'trash' | 'spam';
+
+/** Bildirimde en çok bu kadar düğme (Android en çok üç gösterir). */
+export const NOTIFY_ACTIONS_MAX = 3;
+
 /** Android titreşimi: eşik geçişi, onay (uzun basış) ya da ret. */
 export type HapticKind = 'tick' | 'confirm' | 'reject';
 
@@ -528,6 +537,8 @@ export interface Settings {
   swipeLeft: SwipeAction;
   /** Mobil liste: sağa kaydırma (varsayılan yarına ertele). */
   swipeRight: SwipeAction;
+  /** Bildirim düğmeleri (köşe kartı ve Android bildirimi), en çok üç, sıra korunur. */
+  notifyActions: NotifyAction[];
 }
 
 /** Kayıtlı arama: ad ve arama sorgusu (işleçler dahil). */
@@ -691,6 +702,7 @@ export const defaultSettings: Settings = {
   afterRemove: 'list',
   swipeLeft: 'archive',
   swipeRight: 'snooze',
+  notifyActions: ['reply', 'trash', 'spam'],
 };
 
 // ------------------------------------------------------------------- olaylar
@@ -812,6 +824,10 @@ export interface Commands {
   /** Bildirim penceresi açılırken kuyrukta bekleyen kartlar (açılış yarışında kaybolmasınlar). */
   notify_pending: [Record<string, never>, NotifyEvent[]];
   notify_snooze: [{ minutes: number }, null];
+  /** Bildirim düğmesi (yanıt hariç): okundu, arşivle, sil, istenmeyen. */
+  notify_action: [{ id: MessageId; action: NotifyAction }, null];
+  /** Bildirimden satır içi yanıt: giden kutusuna girer, okundu sayar; `send_cancel` ile geri alınır. */
+  notify_reply: [{ id: MessageId; text: string }, OutboxItem];
   demo_notify: [Record<string, never>, null];
 
   // JMAP (Stalwart vb.)

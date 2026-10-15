@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "notify",
-  "description": "Bildirim kartı: yalnız kart, okundu/arşiv ve pencere açma komutları.",
+  "description": "Bildirim kartı: yalnız kart, bildirim düğmeleri (okundu, arşiv, sil, istenmeyen, yanıt ve geri alma) ve pencere açma komutları.",
   "windows": [
     "notify"
   ],
@@ -17,6 +17,9 @@
     "allow-open-quick",
     "allow-messages-flag",
     "allow-messages-move",
+    "allow-notify-action",
+    "allow-notify-reply",
+    "allow-send-cancel",
     "allow-demo-notify"
   ]
 }

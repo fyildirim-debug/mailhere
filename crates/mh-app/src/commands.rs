@@ -514,6 +514,7 @@ pub fn normalize_settings(mut s: Settings) -> Settings {
     s.quick_replies = s.quick_replies.map(clean_quick_replies);
     s.templates = crate::signatures::normalize_templates(s.templates);
     s.saved_searches = crate::cmd_list::normalize_saved_searches(s.saved_searches);
+    s.notify_actions = mh_core::normalize_notify_actions(s.notify_actions);
     s
 }
 

@@ -25,6 +25,7 @@ pub mod files;
 pub mod followups;
 pub mod logging;
 pub mod notify;
+pub mod notify_actions;
 pub mod platform;
 pub mod routes;
 pub mod rules;
@@ -88,6 +89,8 @@ define_shared_commands! { $
     commands::open_main,
     commands::open_compose,
     commands::notify_snooze,
+    notify_actions::notify_action,
+    notify_actions::notify_reply,
     cmd_jmap::jmap_discover,
     cmd_jmap::account_add_jmap,
     cmd_account::account_update,

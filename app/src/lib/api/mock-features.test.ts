@@ -122,3 +122,30 @@ describe('uzak görsel indirme (remote_images)', () => {
     await expect(b.call('remote_images', { id: 9999, urls: [cover] })).rejects.toMatchObject({ code: 'notFound' });
   });
 });
+
+describe('bildirim düğmeleri', () => {
+  it('okundu, sil, istenmeyen ve satır içi yanıt; İstenmeyen kutusu yoksa açıklayıcı hata', async () => {
+    const b = createMockBackend({ now: NOW });
+    expect((await b.call('settings_get')).notifyActions).toEqual(['reply', 'trash', 'spam']);
+    const [first, second, third] = (await b.call('messages_list', { query: inbox })).items;
+    const roleOf = (id: number) => b.state.mailboxes.find((x) => x.id === b.state.messages.find((m) => m.id === id)!.mailboxId)!.role;
+
+    await b.call('notify_action', { id: first.id, action: 'markRead' });
+    expect((await b.call('message_get', { id: first.id })).unread).toBe(false);
+    await b.call('notify_action', { id: second.id, action: 'trash' });
+    expect(roleOf(second.id)).toBe('trash');
+
+    const junk = b.state.mailboxes.find((x) => x.accountId === third.accountId && x.role === 'junk');
+    if (junk) {
+      await b.call('notify_action', { id: third.id, action: 'spam' });
+      expect(roleOf(third.id)).toBe('junk');
+    }
+    b.state.mailboxes = b.state.mailboxes.filter((x) => !(x.accountId === first.accountId && x.role === 'junk'));
+    await expect(b.call('notify_action', { id: first.id, action: 'spam' })).rejects.toMatchObject({ code: 'notFound' });
+
+    await expect(b.call('notify_reply', { id: first.id, text: '   ' })).rejects.toMatchObject({ code: 'invalid' });
+    const item = await b.call('notify_reply', { id: first.id, text: 'Tamam' });
+    expect(item.sendAt).toBeGreaterThan(NOW.getTime());
+    expect(await b.call('send_cancel', { id: item.id })).toBe(true);
+  });
+});

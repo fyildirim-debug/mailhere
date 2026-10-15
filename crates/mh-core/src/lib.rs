@@ -972,6 +972,44 @@ pub enum SwipeAction {
     None,
 }
 
+/// Bildirimdeki eylem düğmeleri (masaüstü köşe kartı ve Android bildirimi).
+/// Kullanıcı en çok [`NOTIFY_ACTIONS_MAX`] tanesini seçer; sıra korunur.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum NotifyAction {
+    /// Satır içi yanıt (kartta yanıt kutusu, Android'de RemoteInput).
+    Reply,
+    MarkRead,
+    Archive,
+    Trash,
+    /// Hesabın İstenmeyen (`junk`) kutusuna taşır.
+    Spam,
+    /// Bilinmeyen değer (yeni sürümden gelen ayar); listeden atılır.
+    #[serde(other)]
+    Unknown,
+}
+
+/// Bildirimde en çok bu kadar eylem düğmesi (Android en çok üç gösterir).
+pub const NOTIFY_ACTIONS_MAX: usize = 3;
+
+/// Varsayılan bildirim düğmeleri: Yanıtla, Sil, İstenmeyen.
+pub fn default_notify_actions() -> Vec<NotifyAction> {
+    vec![NotifyAction::Reply, NotifyAction::Trash, NotifyAction::Spam]
+}
+
+/// Bildirim düğmelerini sadeleştirir: bilinmeyenler ve yinelenenler atılır
+/// (ilk gelen kalır, sıra korunur), en çok [`NOTIFY_ACTIONS_MAX`] öğe. Boş
+/// liste geçerlidir (düğmesiz bildirim).
+pub fn normalize_notify_actions(list: Vec<NotifyAction>) -> Vec<NotifyAction> {
+    let mut out: Vec<NotifyAction> = Vec::with_capacity(NOTIFY_ACTIONS_MAX);
+    for a in list {
+        if a != NotifyAction::Unknown && !out.contains(&a) && out.len() < NOTIFY_ACTIONS_MAX {
+            out.push(a);
+        }
+    }
+    out
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
@@ -1016,6 +1054,8 @@ pub struct Settings {
     pub swipe_left: SwipeAction,
     /// Mobil liste: sağa kaydırma (varsayılan yarına ertele).
     pub swipe_right: SwipeAction,
+    /// Bildirim düğmeleri (köşe kartı ve Android bildirimi), en çok üç.
+    pub notify_actions: Vec<NotifyAction>,
 }
 
 /// Kayıtlı arama: ad ve arama sorgusu (işleçler dahil).
@@ -1288,6 +1328,7 @@ impl Default for Settings {
             after_remove: AfterRemove::List,
             swipe_left: SwipeAction::Archive,
             swipe_right: SwipeAction::Snooze,
+            notify_actions: default_notify_actions(),
         }
     }
 }
@@ -1901,6 +1942,40 @@ mod tests {
         assert!(!Settings::default().screener);
         let s: Settings = serde_json::from_str(r#"{"screener":true}"#).unwrap();
         assert!(s.screener);
+    }
+
+    #[test]
+    fn bildirim_dugmeleri() {
+        // Eski kayıtta alan yok: Yanıtla, Sil, İstenmeyen.
+        let s: Settings = serde_json::from_str(r#"{"screener":true}"#).unwrap();
+        assert_eq!(s.notify_actions, default_notify_actions());
+        let v = serde_json::to_value(Settings::default()).unwrap();
+        assert_eq!(
+            v["notifyActions"],
+            serde_json::json!(["reply", "trash", "spam"])
+        );
+        // Bilinmeyen değer ayarı düşürmez; sadeleştirmede atılır.
+        let s: Settings = serde_json::from_str(
+            r#"{"notifyActions":["markRead","snoozeHour","archive"],"screener":true}"#,
+        )
+        .unwrap();
+        assert!(s.screener);
+        assert_eq!(
+            normalize_notify_actions(s.notify_actions),
+            vec![NotifyAction::MarkRead, NotifyAction::Archive]
+        );
+        // Yinelenen atılır, sıra korunur, en çok üç; boş liste geçerli.
+        assert_eq!(
+            normalize_notify_actions(vec![
+                NotifyAction::Spam,
+                NotifyAction::Reply,
+                NotifyAction::Spam,
+                NotifyAction::Trash,
+                NotifyAction::Archive,
+            ]),
+            vec![NotifyAction::Spam, NotifyAction::Reply, NotifyAction::Trash]
+        );
+        assert!(normalize_notify_actions(vec![]).is_empty());
     }
 
     #[test]
