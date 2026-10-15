@@ -908,6 +908,42 @@ pub enum Density {
     Compact,
 }
 
+/// Okuma ekranında posta arşivlenince ya da silinince ne açılır (mobil).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum AfterRemove {
+    /// Listede bir alttaki (daha eski) posta açılır.
+    Next,
+    /// Listede bir üstteki (daha yeni) posta açılır.
+    Previous,
+    /// Listeye dönülür (varsayılan; bilinmeyen değer de buraya düşer).
+    #[default]
+    #[serde(other)]
+    List,
+}
+
+/// Liste satırını yana kaydırınca yapılan iş (mobil, yön başına).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum SwipeAction {
+    Archive,
+    Trash,
+    /// Hesabın İstenmeyen (`junk`) kutusuna taşır; kutu yoksa satır yerinde kalır.
+    Spam,
+    /// Klasör seçici açılır; seçilen klasöre taşır.
+    Move,
+    Snooze,
+    /// Okundu / okunmadı arasında çevirir.
+    ToggleRead,
+    /// Sabitler ya da sabitlemeyi kaldırır.
+    Pin,
+    /// Bu yönde kaydırma kapalı. Bilinmeyen değer (yeni sürümden gelen
+    /// ayar) de buraya düşer: tüm ayarlar varsayılana dönmez, istenmeyen
+    /// bir eylem de çalışmaz.
+    #[serde(other)]
+    None,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
@@ -946,6 +982,12 @@ pub struct Settings {
     /// Kenar çubuğundan tek tıkla çalıştırılan aramalar (en çok
     /// `SAVED_SEARCHES_MAX`).
     pub saved_searches: Vec<SavedSearch>,
+    /// Mobil okuma: arşivleyip silince açılacak yer.
+    pub after_remove: AfterRemove,
+    /// Mobil liste: sola kaydırma (varsayılan arşivle).
+    pub swipe_left: SwipeAction,
+    /// Mobil liste: sağa kaydırma (varsayılan yarına ertele).
+    pub swipe_right: SwipeAction,
 }
 
 /// Kayıtlı arama: ad ve arama sorgusu (işleçler dahil).
@@ -1215,6 +1257,9 @@ impl Default for Settings {
             conversation_view: true,
             screener: false,
             saved_searches: Vec::new(),
+            after_remove: AfterRemove::List,
+            swipe_left: SwipeAction::Archive,
+            swipe_right: SwipeAction::Snooze,
         }
     }
 }
@@ -1797,6 +1842,57 @@ mod tests {
         );
         assert!(!Settings::default().screener);
         let s: Settings = serde_json::from_str(r#"{"screener":true}"#).unwrap();
+        assert!(s.screener);
+    }
+
+    #[test]
+    fn mobil_kaydirma_ve_okuma_ayarlari() {
+        // Eski kayıtta alan yok: bugünkü davranış (listeye dön, sola arşivle, sağa ertele).
+        let s: Settings = serde_json::from_str(r#"{"screener":true}"#).unwrap();
+        assert_eq!(s.after_remove, AfterRemove::List);
+        assert_eq!(
+            (s.swipe_left, s.swipe_right),
+            (SwipeAction::Archive, SwipeAction::Snooze)
+        );
+        let v = serde_json::to_value(Settings::default()).unwrap();
+        assert_eq!(
+            (&v["afterRemove"], &v["swipeLeft"], &v["swipeRight"]),
+            (
+                &serde_json::json!("list"),
+                &serde_json::json!("archive"),
+                &serde_json::json!("snooze")
+            )
+        );
+        let s: Settings = serde_json::from_str(
+            r#"{"afterRemove":"previous","swipeLeft":"toggleRead","swipeRight":"none"}"#,
+        )
+        .unwrap();
+        assert_eq!(s.after_remove, AfterRemove::Previous);
+        assert_eq!(
+            (s.swipe_left, s.swipe_right),
+            (SwipeAction::ToggleRead, SwipeAction::None)
+        );
+        for (a, name) in [
+            (SwipeAction::Trash, "trash"),
+            (SwipeAction::Spam, "spam"),
+            (SwipeAction::Move, "move"),
+            (SwipeAction::Pin, "pin"),
+            (SwipeAction::Snooze, "snooze"),
+        ] {
+            assert_eq!(serde_json::to_value(a).unwrap(), serde_json::json!(name));
+        }
+        assert_eq!(
+            serde_json::to_value(AfterRemove::Next).unwrap(),
+            serde_json::json!("next")
+        );
+        // Bilinmeyen değer (yeni sürümün ayarı) tüm ayarları düşürmez: kaydırma
+        // kapanır, okuma listeye döner; diğer alanlar korunur.
+        let s: Settings = serde_json::from_str(
+            r#"{"swipeLeft":"fly","afterRemove":"jump","screener":true}"#,
+        )
+        .unwrap();
+        assert_eq!(s.swipe_left, SwipeAction::None);
+        assert_eq!(s.after_remove, AfterRemove::List);
         assert!(s.screener);
     }
 

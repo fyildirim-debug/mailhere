@@ -15,6 +15,17 @@ describe('sahte arka uç sözleşmeyi izler', () => {
     expect(counts.inboxUnread).toBe(3);
   });
 
+  it('mobil kaydırma/okuma ayarları varsayılanla gelir ve yazılır; titreşim istekleri kaydedilir', async () => {
+    const b = createMockBackend({ now: NOW });
+    const s = await b.call('settings_get');
+    expect([s.afterRemove, s.swipeLeft, s.swipeRight]).toEqual(['list', 'archive', 'snooze']);
+    const next = await b.call('settings_set', { settings: { ...s, afterRemove: 'next', swipeLeft: 'trash', swipeRight: 'none' } });
+    expect([next.afterRemove, next.swipeLeft, next.swipeRight]).toEqual(['next', 'trash', 'none']);
+    expect(await b.call('haptic', { kind: 'tick' })).toBeNull();
+    await b.call('haptic', { kind: 'confirm' });
+    expect(b.state.haptics).toEqual(['tick', 'confirm']);
+  });
+
   it('kategori ve hesap süzgeci', async () => {
     const b = createMockBackend({ now: NOW });
     const news = await b.call('messages_list', { query: { ...inbox, category: 'newsletters' } });

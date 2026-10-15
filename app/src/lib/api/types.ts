@@ -470,6 +470,18 @@ export type NotifyMode = 'people' | 'all' | 'vip' | 'off';
 export type CardPosition = 'bottomRight' | 'topRight' | 'bottomLeft' | 'topLeft';
 export type Density = 'comfortable' | 'compact';
 
+/** Mobil okuma: arşivleyip silince açılacak yer (listeye dön, bir alttaki ya da bir üstteki posta). */
+export type AfterRemove = 'list' | 'next' | 'previous';
+
+/**
+ * Mobil liste: satırı yana kaydırınca yapılan iş; `spam` hesabın İstenmeyen
+ * (`junk`) kutusuna taşır, `move` klasör seçiciyi açar, `none` o yönü kapatır.
+ */
+export type SwipeAction = 'archive' | 'trash' | 'spam' | 'move' | 'snooze' | 'toggleRead' | 'pin' | 'none';
+
+/** Android titreşimi: eşik geçişi, onay (uzun basış) ya da ret. */
+export type HapticKind = 'tick' | 'confirm' | 'reject';
+
 export interface Settings {
   theme: Theme;
   language: Language;
@@ -496,6 +508,12 @@ export interface Settings {
   screener: boolean;
   /** Kenar çubuğundan tek tıkla çalıştırılan aramalar (en çok SAVED_SEARCHES_MAX). */
   savedSearches: SavedSearch[];
+  /** Mobil okuma: arşivleyip silince açılacak yer. */
+  afterRemove: AfterRemove;
+  /** Mobil liste: sola kaydırma (varsayılan arşivle). */
+  swipeLeft: SwipeAction;
+  /** Mobil liste: sağa kaydırma (varsayılan yarına ertele). */
+  swipeRight: SwipeAction;
 }
 
 /** Kayıtlı arama: ad ve arama sorgusu (işleçler dahil). */
@@ -656,6 +674,9 @@ export const defaultSettings: Settings = {
   conversationView: true,
   screener: false,
   savedSearches: [],
+  afterRemove: 'list',
+  swipeLeft: 'archive',
+  swipeRight: 'snooze',
 };
 
 // ------------------------------------------------------------------- olaylar
@@ -903,6 +924,8 @@ export interface Commands {
   notification_settings: [Record<string, never>, null];
   /** Android: durum ve gezinme çubuğu simgelerini uygulamanın temasına uydurur. */
   system_bars: [{ dark: boolean }, null];
+  /** Android: kısa titreşim (kaydırma eşiği, uzun basış onayı, ret); sistemin dokunma geri bildirimi ayarına uyar. */
+  haptic: [{ kind: HapticKind }, null];
 }
 
 export type CommandName = keyof Commands;

@@ -16,6 +16,7 @@ import {
   type Counts,
   type EventPayloads,
   type FollowUp,
+  type HapticKind,
   type Mailbox,
   type MailboxRole,
   type MessageDetail,
@@ -77,6 +78,8 @@ export interface MockBackend {
     /** Bilinen göndericiler: "hesap|adres". */
     known: string[];
     tags: Tag[];
+    /** Mobil kabuğun istediği titreşimler (yalnız kayıt; sahte arka uçta titreşim yok). */
+    haptics: HapticKind[];
   };
 }
 
@@ -370,6 +373,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     screened: [] as MessageId[],
     known: [] as string[],
     tags: opts.empty ? [] : data.tags,
+    haptics: [] as HapticKind[],
   };
   const scheduled = new Map<string, { item: ScheduledItem; msg: OutgoingMessage; timer: ReturnType<typeof setTimeout> }>();
   const vacations = new Map<string, Vacation>();
@@ -619,6 +623,12 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     const entry = scheduled.get(id);
     if (!entry) return;
     clearTimeout(entry.timer);
+    // Tarayıcı çevrimdışıyken gönderim giden kutusunda bekler; bağlantı gelince gider
+    // (gerçek arka uçta SMTP hatası alır ve yeniden dener).
+    if (typeof navigator !== 'undefined' && navigator.onLine === false && typeof window !== 'undefined') {
+      window.addEventListener('online', () => deliver(id), { once: true });
+      return;
+    }
     scheduled.delete(id);
     const { msg } = entry;
     const account = state.accounts.find((a) => a.id === msg.accountId);
@@ -1425,6 +1435,11 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     notification_status: () => notifyPerm,
     notification_settings: () => null,
     system_bars: () => null,
+    // Titreşim yok; testler istenen türleri sırasıyla görür.
+    haptic: ({ kind }) => {
+      state.haptics.push(kind);
+      return null;
+    },
   };
 
   return {
