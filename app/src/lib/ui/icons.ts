@@ -92,6 +92,8 @@ export const icons = {
   keyboard: '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M10.3 10h.01M13.7 10h.01M17 10h.01M7 13.6h.01M17 13.6h.01M10 14h4"/>',
   /** Uyarı üçgeni (gönderen güveni). */
   alert: '<path d="M10.4 4.6 3.3 17.2A1.8 1.8 0 0 0 4.9 20h14.2a1.8 1.8 0 0 0 1.6-2.8L13.6 4.6a1.8 1.8 0 0 0-3.2 0z"/><path d="M12 9.5v4.2"/><circle cx="12" cy="16.6" r=".9" fill="currentColor"/>',
+  /** Tam ekrana aç: çaprazlara açılan iki ok (mobil yanıt alanı → yazma ekranı). */
+  expand: '<path d="M14 4.5h5.5V10"/><path d="M19.5 4.5L13.5 10.5"/><path d="M10 19.5H4.5V14"/><path d="M4.5 19.5l6-6"/>',
 } as const;
 
 export type IconName = keyof typeof icons;

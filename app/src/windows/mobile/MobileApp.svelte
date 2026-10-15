@@ -3,6 +3,11 @@
   // üstüne itilen ekranlar (okuma, yazma, arama, ayarlar). Açılış akışı
   // masaüstüyle aynı (initMail); hesap yoksa mevcut hesap ekleme bileşeni gelir.
   //
+  // Listede başparmak bölgesi: arama ve yeni posta sağ altta yan yana (üst
+  // çubukta arama yok); liste aşağı kaydırılırken yeni posta yalnız ikona
+  // iner. Çekmece yalnız menü düğmesiyle açılır: sol kenar Android'in geri
+  // hareketine aittir.
+  //
   // Ayarlar (MobileSettings) ve planlananlar (ScheduledView `embedded`) yığına
   // itilen ekranlardır. Alt sayfalar (menüler) ve yazma ekranı açılışta gezinme
   // yığınına bağlanır: Sheet katmanı `nav.open('sheet')`, yazma istekleri
@@ -35,6 +40,7 @@
   import MobileSearch from './MobileSearch.svelte';
   import MobileSettings from './MobileSettings.svelte';
   import { nav, type MobileScreen } from './nav.svelte';
+  import { connection } from './offline.svelte';
 
   // Hesap ekleme sürerken (ilk hesap dahil) uygulamanın geri kalanı açılmaz.
   const setup = $derived(!mail.accounts.length || mail.screen === 'onboarding');
@@ -49,6 +55,9 @@
   const subtitle = $derived(unread ? t('list.unread', { n: unread }) : t('list.allRead'));
   /** Listenin büyük başlığı kaydırılıp gitti mi: uygulama çubuğu başlığı o zaman gösterir. */
   let listScrolled = $state(false);
+  /** Liste aşağı kaydırılıyor: yüzen düğme yalnız ikon. */
+  let fabSmall = $state(false);
+  const allChecked = $derived(selecting && mail.checked.length >= rowsOf(mail.items, mail.search == null).length);
 
   onMount(() => {
     void initMail();
@@ -78,6 +87,8 @@
     });
     // Arka plandan dönüşte ve ağ değişince ölü bağlantılar yenilenir.
     const offWake = watchWake({ background: true });
+    // Liste başlığının altındaki çevrimdışı satırı.
+    const offConnection = connection.watch();
     return () => {
       window.removeEventListener('popstate', onPop);
       bindSheetLayer(null);
@@ -85,6 +96,7 @@
       offOpen();
       offNav();
       offWake();
+      offConnection();
     };
   });
 
@@ -189,28 +201,6 @@
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
     more = { x: r.right - 260, y: r.bottom + 4 };
   }
-
-  // ------------------------------------------------ kenardan kaydırarak çekmece
-
-  let edgeStart: { x: number; y: number } | null = null;
-
-  function edgeDown(e: PointerEvent) {
-    edgeStart = { x: e.clientX, y: e.clientY };
-  }
-
-  function edgeMove(e: PointerEvent) {
-    if (!edgeStart) return;
-    const dx = e.clientX - edgeStart.x;
-    const dy = Math.abs(e.clientY - edgeStart.y);
-    if (dx > 28 && dy < dx) {
-      edgeStart = null;
-      nav.open('drawer');
-    } else if (dy > 20) edgeStart = null;
-  }
-
-  function edgeUp() {
-    edgeStart = null;
-  }
 </script>
 
 <div class="m-shell">
@@ -224,8 +214,9 @@
       {#if selecting}
         <AppBar leading="close" select title={t('mob.selected', { n: mail.checked.length })} onleading={clearChecked}>
           {#snippet actions()}
-            <button class="btn-icon" aria-label={t('bulk.selectAll')} title={t('bulk.selectAll')} onclick={checkAll}>
-              <Icon name="checkAll" size={22} />
+            <!-- Görünür adlı düğme: tek tek dokunmadan hepsini seçmenin yolu. -->
+            <button class="select-all" disabled={allChecked} onclick={checkAll}>
+              <Icon name="checkAll" size={20} />{t('mob.selectAll')}
             </button>
           {/snippet}
         </AppBar>
@@ -237,9 +228,6 @@
                 <Icon name="x" size={22} />
               </button>
             {/if}
-            <button class="btn-icon" aria-label={t('mob.search')} title={t('mob.search')} onclick={openSearch}>
-              <Icon name="search" size={22} />
-            </button>
             <button class="btn-icon" class:on={mail.only != null} aria-label={t('act.more')} title={t('act.more')} aria-haspopup="menu" onclick={openMore}>
               <Icon name="more" size={22} />
             </button>
@@ -247,18 +235,29 @@
         </AppBar>
       {/if}
 
-      <MobileList {title} {subtitle} onopen={openRow} onscrolled={(v) => (listScrolled = v)} />
+      <MobileList {title} {subtitle} onopen={openRow} onscrolled={(v) => (listScrolled = v)} ondown={(v) => (fabSmall = v)} />
 
       {#if selecting}
         <MobileBulkBar />
       {:else}
-        <button class="btn-primary m-fab" aria-label={t('act.compose')} title={t('act.compose')} onclick={() => openCompose({ name: 'compose', mode: 'new', id: null, to: [], from: null })}>
-          <Icon name="pen" size={22} />
-          <span>{t('act.compose')}</span>
-        </button>
+        <!-- Başparmak bölgesi: arama ve yeni posta altta yan yana. Aşağı kaydırırken
+             yeni posta yalnız ikona iner (200 ms), yukarı kaydırınca adı geri gelir. -->
+        <div class="thumb">
+          <button class="m-search-fab" aria-label={t('mob.search')} title={t('mob.search')} onclick={openSearch}>
+            <Icon name="search" size={22} />
+          </button>
+          <button
+            class="btn-primary m-fab"
+            class:small={fabSmall}
+            aria-label={t('act.compose')}
+            title={t('act.compose')}
+            onclick={() => openCompose({ name: 'compose', mode: 'new', id: null, to: [], from: null })}
+          >
+            <Icon name="pen" size={22} />
+            <span class="m-fab-label">{t('act.compose')}</span>
+          </button>
+        </div>
       {/if}
-      <!-- Sol kenardan sağa kaydırma çekmeceyi açar. -->
-      <div class="edge" aria-hidden="true" onpointerdown={edgeDown} onpointermove={edgeMove} onpointerup={edgeUp} onpointercancel={edgeUp}></div>
     </div>
 
     {#if screen.name === 'read'}
@@ -273,7 +272,7 @@
       <!-- Her yazma isteği yeni ekran: yerine geçen istek eskisini söker (taslağa yazar). -->
       {#key screen}
         <div class="m-screen pushed">
-          <MobileCompose mode={screen.mode} id={screen.id} to={screen.to} from={screen.from} />
+          <MobileCompose mode={screen.mode} id={screen.id} to={screen.to} from={screen.from} body={screen.body} />
         </div>
       {/key}
     {:else if screen.name === 'settings'}
@@ -322,14 +321,27 @@
     container: onboarding / inline-size;
   }
 
-  .edge {
-    position: absolute;
-    top: calc(var(--m-appbar) + var(--sat));
-    bottom: 0;
-    left: 0;
-    width: 20px;
-    z-index: 4;
-    touch-action: pan-y;
+  /* Seçim kipinde "Tümünü seç": vurgu zeminde vurgu metni, 44 px hedef. */
+  .select-all {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: var(--m-touch);
+    margin-right: 4px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: var(--r-btn);
+    background: transparent;
+    color: inherit;
+    font-weight: 600;
+  }
+
+  .select-all:active {
+    background: color-mix(in srgb, var(--accent-ink) 14%, transparent);
+  }
+
+  .select-all:disabled {
+    opacity: 0.6;
   }
 
   .m-sched {

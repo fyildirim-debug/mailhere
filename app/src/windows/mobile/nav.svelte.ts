@@ -1,11 +1,16 @@
 // Mobil gezinme yığını: liste → okuma / yazma / ayarlar / planlananlar / arama.
-// Çekmece ve alt sayfa gibi katmanlar yığının üstünde tek bir "katman" olarak durur.
+// Çekmece, alt sayfa ve okuma ekranında yerinde açılan yanıt alanı yığının
+// üstünde "katman" olarak durur.
 //
 // Tarayıcı geçmişiyle bire bir: her itme ve her katman açılışı bir
 // `history.pushState` girdisidir; girdinin durumu `{ mh: derinlik }` taşır.
 // Geri tuşu (`popstate`) hedef derinliği getirir, yığın ona indirgenir: önce
-// açık katman kapanır, sonra ekranlar çıkar. Kökte (derinlik 0) geri tuşu
-// bizim değildir; Android'de uygulama kapanır.
+// açık katmanlar (üstten), sonra ekranlar çıkar. Kökte (derinlik 0) geri
+// tuşu bizim değildir; Android'de uygulama kapanır.
+//
+// Katmanlar: çekmece ve alt sayfa birbirinin yerine geçer (tek girdi). Yanıt
+// alanı ekranın parçasıdır: üstüne alt sayfa açılabilir (kişi kartı, menü);
+// geri tuşu önce alt sayfayı, sonra yanıt alanını kapatır.
 
 import type { Address, ComposeMode, MessageId } from '../../lib/api';
 import type { SettingsSection } from '../../lib/stores/mail.svelte';
@@ -13,15 +18,22 @@ import type { SettingsSection } from '../../lib/stores/mail.svelte';
 export type MobileScreen =
   | { name: 'list' }
   | { name: 'read'; id: MessageId }
-  /** Yazma: `to` ve `from` yalnız yeni postada (kişi kartından, `mh:navigate` rotasından) dolu gelir. */
-  | { name: 'compose'; mode: ComposeMode; id: MessageId | null; to: Address[]; from: string | null }
+  /**
+   * Yazma: `to` ve `from` yalnız yeni postada (kişi kartından, `mh:navigate`
+   * rotasından) dolu gelir; `body` okuma ekranının yanıt alanından "tam ekran
+   * yaz" ile taşınan metindir.
+   */
+  | { name: 'compose'; mode: ComposeMode; id: MessageId | null; to: Address[]; from: string | null; body?: string }
   /** Ayarlar: `section` boşsa bölüm listesi; her bölüm ayrı ekran olarak itilir. */
   | { name: 'settings'; section: SettingsSection | null }
   /** Planlanmış gönderimler (giden kutusu); çekmeceden açılır. */
   | { name: 'scheduled' }
   | { name: 'search' };
 
-export type Layer = 'drawer' | 'sheet';
+export type Layer = 'drawer' | 'sheet' | 'reply';
+
+/** Ekranın parçası olan katmanlar: üstlerine açılan katman yerlerine geçmez. */
+const INLINE: readonly Layer[] = ['reply'];
 
 /** `window.history`nin kullanılan kısmı; testlerde sahtesi verilir. */
 export interface HistoryLike {
@@ -41,11 +53,11 @@ function depthOf(data: unknown): number {
 }
 
 export function createNav(history: HistoryLike) {
-  const state = $state({ stack: [{ name: 'list' }] as MobileScreen[], layer: null as Layer | null });
+  const state = $state({ stack: [{ name: 'list' }] as MobileScreen[], layers: [] as Layer[] });
 
-  /** Bizim olan geçmiş girdisi sayısı: ekranlar (kök hariç) + açık katman. */
+  /** Bizim olan geçmiş girdisi sayısı: ekranlar (kök hariç) + açık katmanlar. */
   function depth(): number {
-    return state.stack.length - 1 + (state.layer ? 1 : 0);
+    return state.stack.length - 1 + state.layers.length;
   }
 
   function mark() {
@@ -54,10 +66,20 @@ export function createNav(history: HistoryLike) {
 
   mark();
 
-  /** Yığını hedef derinliğe indirir: önce katman, sonra ekranlar. */
+  function top(): Layer | null {
+    return state.layers.length ? state.layers[state.layers.length - 1] : null;
+  }
+
+  function close() {
+    if (!state.layers.length) return;
+    state.layers.pop();
+    history.back();
+  }
+
+  /** Yığını hedef derinliğe indirir: önce katmanlar, sonra ekranlar. */
   function reconcile(target: number) {
     while (depth() > target) {
-      if (state.layer) state.layer = null;
+      if (state.layers.length) state.layers.pop();
       else state.stack.pop();
     }
     // İleri tuşu: çıkan ekran geri yüklenmez, girdi yeniden işaretlenir.
@@ -68,20 +90,30 @@ export function createNav(history: HistoryLike) {
     get stack() {
       return state.stack;
     },
-    get layer() {
-      return state.layer;
+    /** En üstteki katman (yoksa null). */
+    get layer(): Layer | null {
+      return top();
+    },
+    /** Katman açık mı (üstünde başka katman olsa da). */
+    has(layer: Layer): boolean {
+      return state.layers.includes(layer);
     },
     get current(): MobileScreen {
       return state.stack[state.stack.length - 1];
     },
     depth,
 
-    /** Yeni ekran iter; açık katman kapanır ve geçmiş girdisini ekrana devreder. */
+    /**
+     * Yeni ekran iter; açık katmanlar kapanır ve en alttakinin geçmiş girdisini
+     * ekrana devreder (fazlası tek adımda geri alınır).
+     */
     push(screen: MobileScreen) {
-      if (state.layer) {
-        state.layer = null;
+      const open = state.layers.length;
+      if (open) {
+        state.layers = [];
         state.stack.push(screen);
-        mark();
+        if (open > 1) history.go(-(open - 1));
+        else mark();
         return;
       }
       state.stack.push(screen);
@@ -93,22 +125,27 @@ export function createNav(history: HistoryLike) {
       state.stack[state.stack.length - 1] = screen;
     },
 
-    /** Çekmece ya da alt sayfa açar (tek katman; başka katman açıksa yerine geçer). */
+    /**
+     * Katman açar. Çekmece ya da alt sayfa açıkken başka biri açılırsa yerine
+     * geçer (tek girdi); yanıt alanının üstüne yeni girdiyle eklenir.
+     */
     open(layer: Layer) {
-      if (state.layer === layer) return;
-      if (state.layer) {
-        state.layer = layer;
+      const now = top();
+      if (now === layer) return;
+      if (now && !INLINE.includes(now)) {
+        state.layers[state.layers.length - 1] = layer;
         return;
       }
-      state.layer = layer;
+      state.layers.push(layer);
       history.pushState({ mh: depth() } satisfies Mark, '');
     },
 
-    /** Katmanı kapatır; geçmiş girdisi geri alınır. */
-    close() {
-      if (!state.layer) return;
-      state.layer = null;
-      history.back();
+    /** En üstteki katmanı kapatır; geçmiş girdisi geri alınır. */
+    close,
+
+    /** Yalnız en üstteki bu katmansa kapatır (ör. yanıt alanının kapat düğmesi). */
+    closeLayer(layer: Layer) {
+      if (top() === layer) close();
     },
 
     /**
@@ -122,15 +159,15 @@ export function createNav(history: HistoryLike) {
     },
 
     /**
-     * Üstteki ekrandan çıkar; açık katman (alt sayfa) varsa onunla birlikte,
-     * tek geçmiş adımında. Bir alt sayfadan seçilen eylem ekranı kapatırken
-     * (arşivle, taşı) iki ayrı `back` yerine bu kullanılır: katman hemen
-     * kapanır, iki girdi birden geri alınır. Kökte false.
+     * Üstteki ekrandan çıkar; açık katmanlar (alt sayfa, yanıt alanı) varsa
+     * onlarla birlikte, tek geçmiş adımında. Bir alt sayfadan seçilen eylem
+     * ekranı kapatırken (arşivle, taşı) ayrı ayrı `back` yerine bu kullanılır:
+     * katmanlar hemen kapanır, girdiler birden geri alınır. Kökte false.
      */
     pop(): boolean {
       if (state.stack.length <= 1) return false;
-      const steps = 1 + (state.layer ? 1 : 0);
-      state.layer = null;
+      const steps = 1 + state.layers.length;
+      state.layers = [];
       history.go(-steps);
       return true;
     },
@@ -157,7 +194,7 @@ export function createNav(history: HistoryLike) {
     reset() {
       const d = depth();
       state.stack = [{ name: 'list' }];
-      state.layer = null;
+      state.layers = [];
       if (d > 0) history.go(-d);
       else mark();
     },

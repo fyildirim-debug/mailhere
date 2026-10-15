@@ -8,12 +8,16 @@
   // "Taslaklara kaydedildi" der. Gönderim giden kutusuna girince ekran hemen
   // kapanır; toast'taki "Geri al" gönderimi durdurur, içeriği taslak olarak
   // kaydeder ve düzenlemeye yeniden açar (masaüstü pencerede kalıp geri sayar).
+  //
+  // Gönder'e uzun basış (450 ms) "sonra gönder" alt sayfasını açar; aynı
+  // seçenekler alttaki "Sonra gönder" düğmesinde de durur.
   import { call, toAppError, type Address, type ComposeMode, type MessageId, type OutgoingMessage } from '../../lib/api';
   import { t } from '../../lib/i18n/index.svelte';
   import Icon from '../../lib/ui/Icon.svelte';
   import { showToast } from '../../lib/ui/toast.svelte';
   import ComposeWindow from '../compose/ComposeWindow.svelte';
   import AppBar from './AppBar.svelte';
+  import { haptic } from './haptic';
   import { nav } from './nav.svelte';
 
   interface Props {
@@ -22,9 +26,11 @@
     /** Yeni postada önceden doldurulan alıcılar (kişi kartı, `mh:navigate`). */
     to: Address[];
     from: string | null;
+    /** Okuma ekranının yanıt alanından taşınan metin. */
+    body?: string;
   }
 
-  let { mode, id, to, from }: Props = $props();
+  let { mode, id, to, from, body = '' }: Props = $props();
 
   let win = $state<ComposeWindow>();
 
@@ -34,6 +40,38 @@
 
   function close() {
     nav.back();
+  }
+
+  // ------------------------------------------- Gönder'e uzun basış: sonra gönder
+
+  const LONG_PRESS = 450;
+  let pressTimer: ReturnType<typeof setTimeout> | null = null;
+  let pressed = false;
+
+  function pressStart(e: PointerEvent) {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    pressed = false;
+    pressEnd();
+    pressTimer = setTimeout(() => {
+      pressTimer = null;
+      pressed = true;
+      haptic('confirm');
+      win?.openLater();
+    }, LONG_PRESS);
+  }
+
+  function pressEnd() {
+    if (pressTimer) clearTimeout(pressTimer);
+    pressTimer = null;
+  }
+
+  function sendClick() {
+    // Uzun basıştan sonra gelen tık göndermez.
+    if (pressed) {
+      pressed = false;
+      return;
+    }
+    void win?.send();
   }
 
   /** Gönderim kuyruğa girdi: ekran kapanır, geri alma toast'ı listede görünür. */
@@ -64,19 +102,27 @@
 
 <AppBar leading="close" leadingLabel={t('mob.compose.close')} {title} onleading={close}>
   {#snippet actions()}
-    <button class="btn-primary send" onclick={() => void win?.send()}>
+    <button
+      class="btn-primary send"
+      onclick={sendClick}
+      onpointerdown={pressStart}
+      onpointerup={pressEnd}
+      onpointerleave={pressEnd}
+      onpointercancel={pressEnd}
+      oncontextmenu={(e) => e.preventDefault()}
+    >
       <Icon name="send" size={18} />{t('act.send')}
     </button>
   {/snippet}
 </AppBar>
 
 <div class="body">
-  <ComposeWindow bind:this={win} embedded {mode} messageId={id} initialTo={to} initialFrom={from} onclose={close} onsent={sent} />
+  <ComposeWindow bind:this={win} embedded {mode} messageId={id} initialTo={to} initialFrom={from} initialBody={body} onclose={close} onsent={sent} />
 </div>
 
 <style>
   .send {
-    height: 40px;
+    min-height: 40px;
     margin-right: 6px;
     padding: 0 16px 0 14px;
     gap: 8px;

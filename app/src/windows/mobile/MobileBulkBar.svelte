@@ -102,7 +102,7 @@
     flex: none;
     display: flex;
     align-items: stretch;
-    height: calc(var(--m-bar) + var(--sab));
+    min-height: calc(var(--m-bar) + var(--sab));
     padding: 0 calc(4px + var(--sar)) var(--sab) calc(4px + var(--sal));
     background: var(--raised);
     border-top: 1px solid var(--line);

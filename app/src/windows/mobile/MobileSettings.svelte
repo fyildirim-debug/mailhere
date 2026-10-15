@@ -20,6 +20,7 @@
   import RulesSection from '../main/settings/RulesSection.svelte';
   import TagsSection from '../main/settings/TagsSection.svelte';
   import AppBar from './AppBar.svelte';
+  import MobileGestures from './MobileGestures.svelte';
 
   interface Props {
     section: SettingsSection | null;
@@ -120,6 +121,7 @@
         {#if account}<AccountPage id={accountId} />{/if}
       {:else if section === 'general'}
         <GeneralSection />
+        <MobileGestures />
       {:else if section === 'notifications'}
         <NotifySection />
       {:else if section === 'compose'}

@@ -1,12 +1,14 @@
 <script lang="ts">
-  // Mobil okuma ekranı: uygulama çubuğu (geri; yıldız, okunmadı, diğer
-  // eylemler), konu 19 px, konuşma ya da tek ileti (MessageView), üstte hızlı
-  // yanıt, altta 56 px eylem çubuğu. Menüler alt sayfada açılır (Menu / Sheet).
+  // Mobil okuma ekranı: uygulama çubuğu (geri; yıldız, okunmadı), konu 19 px,
+  // konuşma ya da tek ileti (MessageView), altta tek şerit (ReaderStrip:
+  // Yanıtla → yerinde yanıt alanı, Arşivle, Sil, Diğer eylemler). Menüler alt
+  // sayfada açılır (Menu / Sheet).
   //
-  // Listeye dönüş: postayı listeden çıkaran eylemler (arşivle, sil, taşı,
-  // ertele, elek kararı) ve "okunmadı say" ekranı kapatır; masaüstü sıradaki
-  // postaya geçerken telefonda liste ana yerdir ve geri alma toast'u orada
-  // görünür. Yıldız, sabitleme, etiket ve hatırlatma ekranda kalır.
+  // Postayı listeden çıkaran eylemlerden (arşivle, sil, taşı, ertele, elek
+  // kararı) sonra ayara göre (`afterRemove`) listeye dönülür ya da listedeki
+  // bir alttaki / bir üstteki posta aynı ekranda açılır; geri alma toast'u
+  // her iki durumda da görünür. "Okunmadı say" hep listeye döner. Yıldız,
+  // sabitleme, etiket ve hatırlatma ekranda kalır.
   //
   // Komşu postaya geçiş: içerik üzerinde yatay kaydırma (yalnız transform)
   // listedeki önceki / sonraki satırı aynı ekranda açar (nav.replace).
@@ -20,10 +22,8 @@
   import Conversation from '../../lib/mail/Conversation.svelte';
   import FollowUpMenu from '../../lib/mail/FollowUpMenu.svelte';
   import MessageView from '../../lib/mail/MessageView.svelte';
-  import QuickReply from '../../lib/mail/QuickReply.svelte';
   import ReaderNotes from '../../lib/mail/ReaderNotes.svelte';
   import SnoozeMenu from '../../lib/mail/SnoozeMenu.svelte';
-  import { flatten, folderLabel, folderTree } from '../../lib/mail/folders';
   import { orderRows } from '../../lib/mail/listing';
   import { openCompose } from '../../lib/mail/open';
   import { displayName } from '../../lib/util/format';
@@ -47,7 +47,9 @@
   import { bulkMove, senderMessages, setTag, togglePin } from '../../lib/stores/bulk.svelte';
   import { tagStore } from '../../lib/stores/tags.svelte';
   import AppBar from './AppBar.svelte';
+  import { moveItems } from './folders';
   import { nav } from './nav.svelte';
+  import ReaderStrip from './ReaderStrip.svelte';
 
   interface Props {
     id: MessageId;
@@ -75,10 +77,33 @@
   const senderScope = $derived(mail.search == null && (mail.view.kind === 'inbox' || mail.view.kind === 'mailbox' || mail.view.kind === 'tag'));
   const error = $derived(!d && !mail.detailLoading ? mail.detailError : null);
 
-  let quick = $state<QuickReply>();
   let menu = $state<{ title?: string; items: MenuItem[] } | null>(null);
   let snoozeOpen = $state(false);
   let followOpen = $state(false);
+  /** Ekrandan çıkılıyor: listenin seçimi değişse de bu ekran onu izlemez. */
+  let leaving = false;
+
+  // Başka postaya geçilince (komşuya kaydırma, arşivden sonra sıradaki,
+  // bildirimden açılış) açık yanıt alanı kapanır: yazılan önceki postanındı.
+  let shownId = untrack(() => id);
+  $effect(() => {
+    const now = id;
+    untrack(() => {
+      if (now === shownId) return;
+      shownId = now;
+      nav.closeLayer('reply');
+    });
+  });
+
+  // Seçim dışarıdan değişince (geri alınan arşiv postayı geri seçer, kişi
+  // kartından başka posta açılır) ekran o postaya geçer; yoksa boş kalırdı.
+  $effect(() => {
+    const sel = mail.selectedId;
+    untrack(() => {
+      if (sel == null || sel === id || leaving || nav.current.name !== 'read') return;
+      nav.replace({ name: 'read', id: sel });
+    });
+  });
 
   /** Bu postanın satırı (konuşmanın tüm iletileri); liste eylemleriyle aynı kapsam. */
   function ids(): MessageId[] {
@@ -86,29 +111,44 @@
   }
 
   function leave() {
+    leaving = true;
     nav.pop();
+  }
+
+  /**
+   * Posta listeden çıktı: ayara göre listeye dönülür ya da listede bir alttaki
+   * / bir üstteki posta aynı ekranda açılır. Komşu eylemden önceki sıradan
+   * alınır (`before`); yoksa listeye dönülür.
+   */
+  function removed(before: { prev: Row | null; next: Row | null }) {
+    const mode = settings.value.afterRemove;
+    const target = mode === 'next' ? before.next : mode === 'previous' ? before.prev : null;
+    if (!target) {
+      leave();
+      return;
+    }
+    goTo(target, mode === 'next' ? 'left' : 'right');
+    // Liste çıkarırken sıradakini okundu saymadan seçer; burada açılan posta okunur.
+    void select(target.id);
   }
 
   // ------------------------------------------------------------------ eylemler
 
   function archive() {
+    const before = neighbors;
     void moveTo(ids(), 'archive');
-    leave();
+    removed(before);
   }
 
   function trash() {
+    const before = neighbors;
     void moveTo(ids(), 'trash');
-    leave();
+    removed(before);
   }
 
   function markUnread() {
     void setUnread([id], true);
     leave();
-  }
-
-  function reply() {
-    if (isDraft) editDraft();
-    else quick?.focus();
   }
 
   function editDraft() {
@@ -117,6 +157,11 @@
 
   function compose(mode: 'replyAll' | 'forward') {
     openCompose({ mode, messageId: id });
+  }
+
+  /** Yanıt alanındaki metin tam ekran yazmaya taşınır (yanıt kipinde, alıntılı). */
+  function fullReply(body: string) {
+    nav.push({ name: 'compose', mode: 'reply', id, to: [], from: null, body });
   }
 
   async function saveEml() {
@@ -130,19 +175,13 @@
 
   function moveMenu() {
     if (!d) return;
-    const here = d.mailboxId;
-    const nodes = flatten(folderTree(mail.mailboxes, d.accountId, true)).filter((n) => n.mailbox.id !== here && n.mailbox.role !== 'drafts');
     menu = {
       title: t('read.moveTo'),
-      items: nodes.map((n) => ({
-        key: n.mailbox.id,
-        label: `${'  '.repeat(n.depth)}${folderLabel(n.mailbox)}`,
-        icon: 'folder' as const,
-        onclick: () => {
-          void moveToFolder(ids(), n.mailbox, folderLabel(n.mailbox));
-          leave();
-        },
-      })),
+      items: moveItems(d.accountId, d.mailboxId, (box, label) => {
+        const before = neighbors;
+        void moveToFolder(ids(), box, label);
+        removed(before);
+      }),
     };
   }
 
@@ -204,6 +243,13 @@
     const sender = msg.from.email;
     menu = {
       items: [
+        // Şeritte yer almayan yanıt biçimleri başta (taslakta yanıt yok).
+        ...(isDraft
+          ? []
+          : [
+              { label: t('act.replyAllLong'), icon: 'replyAll' as const, onclick: () => compose('replyAll') },
+              { label: t('act.forward'), icon: 'forward' as const, onclick: () => compose('forward') },
+            ]),
         { label: t('read.moveTo'), icon: 'folder', onclick: moveMenu },
         { label: t('tag.menu'), icon: 'tag', onclick: tagMenu },
         { label: msg.pinned ? t('pin.unpin') : t('pin.pin'), icon: 'pin', onclick: () => void togglePin(ids()) },
@@ -316,9 +362,6 @@
       <button class="btn-icon" aria-label={t('act.markUnread')} title={t('act.markUnread')} onclick={markUnread}>
         <Icon name="mail" size={22} />
       </button>
-      <button class="btn-icon" aria-label={t('read.more')} title={t('read.more')} aria-haspopup="menu" onclick={moreMenu}>
-        <Icon name="more" size={22} />
-      </button>
     {/if}
   {/snippet}
 </AppBar>
@@ -381,38 +424,10 @@
   {/if}
 </div>
 
-{#if d && !isDraft}
-  <div class="reply-wrap">
-    <QuickReply bind:this={quick} detail={d} compact />
-  </div>
-{/if}
-
-<div class="bar" role="toolbar" aria-label={t('mob.read.actions')}>
-  {#if isDraft}
-    <button class="act" disabled={!d} onclick={editDraft}>
-      <Icon name="pen" size={22} /><span>{t('mob.read.editDraft')}</span>
-    </button>
-    <button class="act" disabled={!d} onclick={trash}>
-      <Icon name="trash" size={22} /><span>{t('act.delete')}</span>
-    </button>
-  {:else}
-    <button class="act" disabled={!d} onclick={reply}>
-      <Icon name="reply" size={22} /><span>{t('act.reply')}</span>
-    </button>
-    <button class="act" disabled={!d} title={t('act.replyAllLong')} onclick={() => compose('replyAll')}>
-      <Icon name="replyAll" size={22} /><span>{t('act.replyAll')}</span>
-    </button>
-    <button class="act" disabled={!d} onclick={() => compose('forward')}>
-      <Icon name="forward" size={22} /><span>{t('act.forward')}</span>
-    </button>
-    <button class="act" disabled={!d} onclick={archive}>
-      <Icon name="archive" size={22} /><span>{t('act.archive')}</span>
-    </button>
-    <button class="act" disabled={!d} onclick={trash}>
-      <Icon name="trash" size={22} /><span>{t('act.delete')}</span>
-    </button>
-  {/if}
-</div>
+<!-- Her posta kendi şeridini kurar: yazılan yanıt başka postaya taşınmaz. -->
+{#key id}
+  <ReaderStrip detail={d} draft={isDraft} onarchive={archive} ontrash={trash} onmore={moreMenu} oneditdraft={editDraft} onfull={fullReply} />
+{/key}
 
 {#if menu}<Menu title={menu.title} label={menu.title ?? t('read.more')} items={menu.items} onclose={() => (menu = null)} />{/if}
 {#if snoozeOpen}
@@ -420,8 +435,9 @@
     onclose={() => (snoozeOpen = false)}
     onpick={(at) => {
       snoozeOpen = false;
+      const before = neighbors;
       void snooze(ids(), at);
-      leave();
+      removed(before);
     }}
   />
 {/if}
@@ -644,58 +660,6 @@
 
   .article :global(.body) {
     margin-top: 10px;
-  }
-
-  .reply-wrap {
-    flex: none;
-    padding: 8px 12px 10px;
-    background: var(--paper);
-    border-top: 1px solid var(--line);
-  }
-
-  /* Alt sayfa (Sheet) listesi ve kişi kartı okuma ekranında menü olarak açılır. */
-
-  .bar {
-    position: relative;
-    z-index: 6;
-    flex: none;
-    display: flex;
-    align-items: stretch;
-    height: calc(var(--m-bar) + var(--sab));
-    padding: 0 calc(4px + var(--sar)) var(--sab) calc(4px + var(--sal));
-    background: var(--raised);
-    border-top: 1px solid var(--line);
-  }
-
-  .act {
-    flex: 1;
-    min-width: var(--m-touch);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 2px;
-    padding: 4px 0;
-    border: 0;
-    border-radius: var(--r-icon);
-    background: transparent;
-    color: var(--ink-2);
-    font-size: var(--fs-meta);
-    font-weight: 500;
-    white-space: nowrap;
-    transition:
-      background var(--t-fast),
-      color var(--t-fast);
-  }
-
-  .act:active {
-    background: var(--hover);
-    color: var(--ink);
-  }
-
-  .act:disabled {
-    opacity: 0.45;
-    background: transparent;
   }
 
   @media (prefers-reduced-motion: reduce) {

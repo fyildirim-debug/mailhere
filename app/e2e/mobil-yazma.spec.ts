@@ -9,7 +9,8 @@ declare global {
 
 // Mobil yazma ekranı (Pixel 7, `?kabuk=mobil`): yüzen düğme → yaz → gönder →
 // geri alma toast'ı (taslak olarak yeniden açılır), yanıt ön dolgusu, iletme
-// ekleri ve ek ekleme düğmesi, geri tuşunda taslak, Android `mh:navigate` rotası.
+// ekleri ve ek ekleme düğmesi, geri tuşunda taslak, Android `mh:navigate` rotası,
+// son yazışılan kişi çipleri, Gönder'e uzun basışla "sonra gönder".
 
 const list = (page: Page) => page.getByRole('region', { name: 'Posta listesi' });
 const row = (page: Page, text: string) => list(page).getByText(text, { exact: true });
@@ -17,6 +18,12 @@ const bar = (page: Page) => page.getByRole('toolbar', { name: 'Posta eylemleri' 
 const toast = (page: Page, text: string | RegExp) => page.getByRole('status').filter({ hasText: text });
 const body = (page: Page) => page.getByRole('textbox', { name: 'Posta metni' });
 const heading = (page: Page, name: string) => page.getByRole('heading', { level: 1, name, exact: true });
+
+/** Okuma şeridinin "Diğer eylemler" alt sayfasından bir eylem seçer (tümüne yanıtla, ilet). */
+async function moreAction(page: Page, name: string) {
+  await bar(page).getByRole('button', { name: 'Diğer eylemler' }).click();
+  await page.getByRole('dialog', { name: 'Diğer eylemler' }).getByRole('menuitem', { name, exact: true }).click();
+}
 
 test.beforeEach(async ({ page }) => {
   await page.goto('#/main');
@@ -56,7 +63,7 @@ test('yeni posta: yaz, gönder, listeye dön; geri al taslak olarak yeniden aça
 
 test('tümüne yanıt alıcıları ve alıntıyı doldurur; değişiklik yoksa kapatınca taslak oluşmaz', async ({ page }) => {
   await row(page, 'Re: Q4 bütçe taslağı').click();
-  await bar(page).getByRole('button', { name: 'Tümüne' }).click();
+  await moreAction(page, 'Tümünü yanıtla');
   await expect(heading(page, 'Yanıt')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Kerem Aydın alıcısını kaldır' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Ayşe Demir alıcısını kaldır' })).toBeVisible();
@@ -72,7 +79,7 @@ test('tümüne yanıt alıcıları ve alıntıyı doldurur; değişiklik yoksa k
 
 test('iletme özgün ekleri taşır; ek ekleme düğmesi çalışır', async ({ page }) => {
   await row(page, 'Re: Q4 bütçe taslağı').click();
-  await bar(page).getByRole('button', { name: 'İlet' }).click();
+  await moreAction(page, 'İlet');
   await expect(heading(page, 'İlet')).toBeVisible();
   await expect(page.locator('#compose-subject')).toHaveValue('Fwd: Q4 bütçe taslağı');
   await expect(page.getByText('Butce_Q4_taslak.xlsx')).toBeVisible();
@@ -131,4 +138,52 @@ test('mh:navigate olayı (Android open_compose) yazma rotasını açar', async (
   await expect(page.locator('#compose-subject')).toHaveValue('Fwd: Q4 bütçe taslağı');
   await page.goBack();
   await expect(heading(page, 'Gelen Kutusu')).toBeVisible();
+});
+
+test('Kime boş ve odaktayken son yazışılan kişiler çip olarak gelir; dokununca alıcı olur', async ({ page }) => {
+  await page.getByRole('button', { name: 'Yeni posta' }).click();
+  await expect(heading(page, 'Yeni posta')).toBeVisible();
+  const to = page.locator('#compose-to');
+  await expect(to).toBeFocused();
+  const recent = page.getByRole('group', { name: 'Son yazıştıkların' });
+  await expect(recent).toBeVisible();
+  // En çok 5 kişi; önce gönderilmiş postaların alıcıları, hesapların kendi adresleri yok.
+  const chips = recent.getByRole('button');
+  // Tanıtım verisinde dört kişi var (gönderilenlerin alıcıları önce); en çok beş gösterilir.
+  await expect(chips).toHaveCount(4);
+  await expect(chips.first()).toHaveText(/Kerem Aydın|Murat/);
+  await expect(recent.getByRole('button', { name: 'Furkan' })).toHaveCount(0);
+  for (const chip of await chips.all()) expect(Math.round((await chip.boundingBox())!.height)).toBeGreaterThanOrEqual(40);
+
+  const first = (await chips.first().locator('.trunc').textContent())!.trim();
+  await chips.first().click();
+  await expect(page.getByRole('button', { name: `${first} alıcısını kaldır` })).toBeVisible();
+  await expect(recent).toHaveCount(0);
+  await expect(to).toBeFocused();
+  // Alıcı kaldırılınca öneriler geri gelir; yazmaya başlayınca kalkar.
+  await page.getByRole('button', { name: `${first} alıcısını kaldır` }).click();
+  await to.focus();
+  await expect(recent).toBeVisible();
+  await to.fill('el');
+  await expect(recent).toHaveCount(0);
+  // Konuya geçince (odak gidince) öneriler görünmez.
+  await to.fill('');
+  await page.locator('#compose-subject').click();
+  await expect(recent).toHaveCount(0);
+});
+
+test('Gönder’e uzun basış “sonra gönder” alt sayfasını açar, göndermez', async ({ page }) => {
+  await page.getByRole('button', { name: 'Yeni posta' }).click();
+  const send = page.getByRole('button', { name: 'Gönder', exact: true });
+  await send.click({ delay: 650 });
+  const sheet = page.getByRole('dialog', { name: 'Sonra gönder' });
+  await expect(sheet).toBeVisible();
+  // Uzun basış gönderim denemesi yapmaz (alıcı yok uyarısı çıkmaz) ve onay titreşimi ister.
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  expect(await page.evaluate(() => window.__mh.state.haptics)).toContain('confirm');
+  await sheet.getByRole('menuitem', { name: /Yarın sabah/ }).click();
+  await expect(page.getByText(/^Zamanlandı · /)).toBeVisible();
+  // Kısa dokunuş göndermeyi dener.
+  await send.click();
+  await expect(page.getByRole('alert')).toContainText('En az bir alıcı');
 });

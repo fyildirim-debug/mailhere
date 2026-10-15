@@ -345,7 +345,7 @@
 
   .wide {
     width: 100%;
-    height: 48px;
+    min-height: 48px;
     margin-top: 8px;
   }
 
@@ -384,7 +384,7 @@
   .row .btn-soft {
     flex: 1;
     min-width: 0;
-    height: 44px;
+    min-height: 44px;
   }
 
   .wait {

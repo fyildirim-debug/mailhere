@@ -3,8 +3,9 @@
   // bilgi mimarisi. Hesap kapsamı (yalnız çok hesapta), kapsama göre daralan
   // görünümler, her hesabın istenmeyen + özel klasörleri, etiketler, kayıtlı
   // aramalar; altta eşitleme durumu, Şimdi eşitle, tema ve Ayarlar.
-  // Dokunmayla ve kenardan kaydırmayla açılır; karartma örtüsü, Esc ya da
-  // sola kaydırma kapatır. Açıkken odak içeride döner (odak tuzağı).
+  // Menü düğmesiyle açılır (kenardan kaydırma sistemin geri hareketine
+  // bırakılır); karartma örtüsü, Esc ya da sola kaydırma kapatır. Açıkken odak
+  // içeride döner (odak tuzağı).
   import type { Account, Mailbox, Tag } from '../../lib/api';
   import { call } from '../../lib/api';
   import { t } from '../../lib/i18n/index.svelte';
@@ -530,7 +531,7 @@
     align-items: center;
     gap: 14px;
     width: 100%;
-    height: var(--m-nav-row);
+    min-height: var(--m-nav-row);
     padding: 0 10px 0 12px;
     border: 0;
     border-radius: var(--r-row);
@@ -602,7 +603,7 @@
   /* -------------------------------------------------------------- kapsam */
 
   .acc {
-    height: 56px;
+    min-height: 56px;
   }
 
   .dot {
@@ -667,7 +668,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    height: 40px;
+    min-height: 40px;
     padding: 0 8px;
     border: 0;
     border-radius: var(--r-icon);
