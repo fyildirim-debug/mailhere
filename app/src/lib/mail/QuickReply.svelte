@@ -1,8 +1,13 @@
 <script lang="ts">
   // Hızlı yanıt: çipler (ayarlardaki hazır metinler, değişkenleri doldurulmuş)
-  // ve kısa yanıt kutusu. Okuma alanında (masaüstü) ve mobil okuma ekranında
-  // (`compact`) aynı mantık; gönderim `sendQuickReply` ile giden kutusuna
-  // gider ve geri alınırsa metin geri gelir.
+  // ve kısa yanıt kutusu. Okuma alanında (masaüstü) ve mobil okuma ekranının
+  // alt şeridinden genişleyen yanıt alanında (`compact`) aynı mantık; gönderim
+  // `sendQuickReply` ile giden kutusuna gider ve geri alınırsa metin geri gelir.
+  //
+  // Mobil (`compact`): alan yalnız "Yanıtla"ya dokununca açılır. Başta alıcı
+  // satırı, "tam ekran yaz" ve kapat; altında hazır yanıtlar (kutu boşken) ve
+  // yuvarlak gönder düğmeli kutu. Metin üst bileşende tutulur (`text`):
+  // alan kapanınca kaybolmaz, tam ekran yazmaya taşınır.
   import type { MessageDetail } from '../api';
   import { locale, t } from '../i18n/index.svelte';
   import Icon from '../ui/Icon.svelte';
@@ -13,15 +18,21 @@
 
   interface Props {
     detail: MessageDetail;
-    /** Mobil: tek satırlık kutu + yuvarlak gönder düğmesi; alıcı satırı yalnız yazarken. */
+    /** Mobil yanıt alanı: başlık satırı (alıcılar, tam ekran, kapat), çipler, tek satırlık kutu + yuvarlak gönder. */
     compact?: boolean;
+    /** Yazılan metin; bağlanırsa üst bileşende yaşar. */
+    text?: string;
+    /** Mobil: yanıt alanını kapat. */
+    onclose?: () => void;
+    /** Mobil: metni tam ekran yazmaya taşı. */
+    onfull?: () => void;
+    /** Gönderim giden kutusuna girdi (mobilde alan kapanır). */
+    onsent?: () => void;
   }
 
-  let { detail: d, compact = false }: Props = $props();
+  let { detail: d, compact = false, text: reply = $bindable(''), onclose, onfull, onsent }: Props = $props();
 
-  let reply = $state('');
   let sending = $state(false);
-  let focused = $state(false);
   let replyBox = $state<HTMLTextAreaElement>();
 
   const account = $derived(mail.accounts.find((a) => a.id === d.accountId));
@@ -29,10 +40,7 @@
   const replyList = $derived(quickReplyTargets(d, account).map((a) => a.email).join(', '));
   const replyForeign = $derived(foreignReplyDomains(d));
   const chips = $derived(quickReplies(settings.value));
-  /** Mobilde alıcı satırı yalnız kutu etkinken; masaüstünde hep. */
-  const showTargets = $derived(!compact || focused || reply.length > 0);
-  /** Mobilde hazır yanıtlar da yalnız kutu odaktayken: postaya yer kalır. */
-  const showChips = $derived(chips.length > 0 && !reply && (!compact || focused));
+  const showChips = $derived(chips.length > 0 && !reply);
 
   /** Hızlı yanıt değişkenleri: yanıtlanan kişi ve hesabın gönderen adı. */
   function useChip(text: string) {
@@ -53,7 +61,10 @@
     sending = true;
     const text = reply;
     const ok = await sendQuickReply(d, text, (back) => (reply = back));
-    if (ok) reply = '';
+    if (ok) {
+      reply = '';
+      onsent?.();
+    }
     sending = false;
   }
 
@@ -61,26 +72,41 @@
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       e.preventDefault();
       void send();
+    } else if (compact && e.key === 'Escape' && onclose) {
+      e.preventDefault();
+      onclose();
     }
   }
 </script>
 
 <div class="quick" class:compact>
-  {#if replyForeign.length && showTargets}
+  {#if compact}
+    <div class="head">
+      <span class="meta trunc targets" title={replyList}>{t('read.replyTo', { list: replyList })}</span>
+      {#if onfull}
+        <button type="button" class="btn-icon" aria-label={t('mob.reply.full')} title={t('mob.reply.full')} onclick={onfull}>
+          <Icon name="expand" size={20} />
+        </button>
+      {/if}
+      {#if onclose}
+        <button type="button" class="btn-icon" aria-label={t('mob.reply.close')} title={t('mob.reply.close')} onclick={onclose}>
+          <Icon name="x" size={20} />
+        </button>
+      {/if}
+    </div>
+  {/if}
+  {#if replyForeign.length}
     <p class="reply-warn" role="note">{t('read.replyElsewhere', { domains: replyForeign.join(', ') })}</p>
   {/if}
   {#if showChips}
     <div class="chips" role="group" aria-label={t('qr.title')}>
       {#each chips as c (c)}
         <!-- Basış kutudan odağı almaz: çip kaybolmadan tıklama yerine ulaşır. -->
-        <button class="chip" onmousedown={(e) => e.preventDefault()} onclick={() => useChip(c)}>{c}</button>
+        <button type="button" class="chip" onmousedown={(e) => e.preventDefault()} onclick={() => useChip(c)}>{c}</button>
       {/each}
     </div>
   {/if}
   <div class="replybox">
-    {#if compact && showTargets}
-      <span class="meta trunc targets" title={replyList}>{t('read.replyTo', { list: replyList })}</span>
-    {/if}
     <div class="line">
       <textarea
         bind:this={replyBox}
@@ -89,8 +115,6 @@
         placeholder={t('read.replyPlaceholder')}
         aria-label={t('read.replyPlaceholder')}
         onkeydown={onKey}
-        onfocus={() => (focused = true)}
-        onblur={() => (focused = false)}
       ></textarea>
       {#if compact}
         <button class="btn-primary send-round" aria-label={t('act.send')} title={t('act.send')} disabled={!reply.trim() || sending} onclick={send}>
@@ -125,7 +149,7 @@
 
   .chip {
     flex: none;
-    height: 28px;
+    min-height: 28px;
     padding: 0 12px;
     border-radius: 999px;
     border: 1px solid var(--line-strong);
@@ -201,24 +225,38 @@
 
   /* ------------------------------------------------------------ mobil (compact) */
 
+  /* Başlık: alıcılar (kesilir), tam ekran ve kapat (44 px hedef, sağa yaslı). */
+  .head {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    min-height: var(--m-touch, 44px);
+    margin: 0 -6px 4px 0;
+  }
+
+  .head .targets {
+    flex: 1;
+    min-width: 0;
+    padding-left: 2px;
+  }
+
+  .compact .reply-warn {
+    margin: -2px 2px 8px;
+  }
+
   .compact .chips {
     margin: 0 0 8px;
     padding: 0 2px;
   }
 
   .compact .chip {
-    height: 32px;
+    min-height: 32px;
     padding: 0 14px;
   }
 
   .compact .replybox {
     max-width: none;
     margin: 0;
-  }
-
-  .compact .targets {
-    display: block;
-    padding: 8px 14px 0;
   }
 
   .compact textarea {

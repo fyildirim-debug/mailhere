@@ -36,6 +36,11 @@
     /** Yeni postanın gönderen hesabı (kişi kartının postasının hesabı). */
     initialFrom?: string | null;
     /**
+     * Metnin başına yazılacak hazır metin (mobil yanıt alanından "tam ekran
+     * yaz"): değişiklik sayılır, taslağa kaydedilir; imleç sonunda durur.
+     */
+    initialBody?: string;
+    /**
      * Başka bir ekranın içinde (mobil kabuk): pencere başlığı ve düğmeleri yok,
      * gönder düğmesi kapsayıcıda (`send()`), "sonra gönder" alt sayfada, kapanış
      * pencereyi değil `onclose`u çağırır; sökülürken bekleyen değişiklik taslağa yazılır.
@@ -46,7 +51,7 @@
     onsent?: (info: { id: string; sendAt: number; msg: OutgoingMessage }) => void;
   }
 
-  let { mode, messageId, initialTo = [], initialFrom = null, embedded = false, onclose, onsent }: Props = $props();
+  let { mode, messageId, initialTo = [], initialFrom = null, initialBody = '', embedded = false, onclose, onsent }: Props = $props();
 
   let accounts = $state<Account[]>([]);
   let fromId = $state<string>('');
@@ -69,6 +74,9 @@
   let drafts = $state<Record<'to' | 'cc' | 'bcc', string>>({ to: '', cc: '', bcc: '' });
   let suggest = $state<{ field: 'to' | 'cc' | 'bcc'; items: Address[]; active: number } | null>(null);
   let suggestTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Gömülü (mobil): son yazışılan kişiler; Kime boşken ve odaktayken çip olarak. */
+  let recentPeople = $state<Address[]>([]);
+  let toFocused = $state(false);
 
   // Taslak: sunucudaki Taslaklar kutusuna kendiliğinden kaydedilir.
   let draftId = $state<MessageId | null>(null);
@@ -85,6 +93,7 @@
 
   const from = $derived(accounts.find((a) => a.id === fromId));
   const locked = $derived(queued != null);
+  const showRecent = $derived(embedded && toFocused && !to.length && !drafts.to.trim() && recentPeople.length > 0 && !locked);
 
   // İmza: gönderirken metnin sonuna eklenir. Hesap değişince o hesabın varsayılanı gelir.
   let sigId = $state<string | null>(null);
@@ -186,6 +195,7 @@
 
   async function init() {
     accounts = await call('accounts_list');
+    if (embedded) void loadRecentPeople();
     fromId = (accounts.find((a) => a.id === initialFrom) ?? accounts[0])?.id ?? '';
     if (messageId == null && initialTo.length) to = [...initialTo];
     if (messageId != null) {
@@ -202,12 +212,15 @@
       }
     }
     baseline = snapshot();
+    // Taşınan metin taban çizgisinden sonra yazılır: kapatınca taslakta kalır.
+    const carriedText = initialBody.trimEnd();
+    if (carriedText) body = carriedText + body;
     ready = true;
     if (!embedded) document.title = title();
     setTimeout(() => {
       if (to.length && bodyEl) {
         bodyEl.focus();
-        bodyEl.setSelectionRange(0, 0);
+        bodyEl.setSelectionRange(carriedText.length, carriedText.length);
         bodyEl.scrollTop = 0;
       } else document.getElementById('compose-to')?.focus();
     });
@@ -428,6 +441,33 @@
     }, 120);
   }
 
+  /**
+   * Son yazışılan 5 kişi: gönderilmiş postaların alıcıları (yeniden eskiye),
+   * eksik kalırsa Kişiler kategorisindeki göndericiler. Hesabın kendi adresleri
+   * atılır. Yalnız mevcut liste komutu kullanılır (yerel veritabanı).
+   */
+  async function loadRecentPeople() {
+    const mine = new Set(accounts.map((a) => a.email.toLowerCase()));
+    const seen = new Map<string, Address>();
+    const add = (list: Address[]) => {
+      for (const a of list) {
+        const k = a.email.toLowerCase();
+        if (seen.size < 5 && !mine.has(k) && !seen.has(k)) seen.set(k, a);
+      }
+    };
+    try {
+      const sent = await call('messages_list', { query: { view: { kind: 'sent' }, accountId: null, category: null, cursor: null, limit: 50 } });
+      for (const m of sent.items) add(m.to);
+      if (seen.size < 5) {
+        const people = await call('messages_list', { query: { view: { kind: 'inbox' }, accountId: null, category: 'people', cursor: null, limit: 50 } });
+        for (const m of people.items) add([m.from]);
+      }
+    } catch {
+      /* öneri yoksa alan yine çalışır */
+    }
+    recentPeople = [...seen.values()];
+  }
+
   function pick(field: 'to' | 'cc' | 'bcc', a: Address) {
     const list = field === 'to' ? to : field === 'cc' ? cc : bcc;
     if (!list.some((x) => same(x, a))) list.push(a);
@@ -468,6 +508,11 @@
 
   function fileName(path: string) {
     return path.split(/[\\/]/).pop() ?? path;
+  }
+
+  /** "Sonra gönder" seçeneklerini açar (mobilde Gönder'e uzun basış). */
+  export function openLater() {
+    if (!locked) laterOpen = true;
   }
 
   /** Gönderir (kapsayıcı da çağırır: mobilde düğme uygulama çubuğunda). */
@@ -589,10 +634,14 @@
             bind:value={drafts[field]}
             oninput={() => lookup(field)}
             onkeydown={(e) => onRecipientKey(field, e)}
-            onblur={() => setTimeout(() => {
-              if (suggest?.field === field) suggest = null;
-              commit(field);
-            }, 120)}
+            onfocus={() => field === 'to' && (toFocused = true)}
+            onblur={() => {
+              if (field === 'to') toFocused = false;
+              setTimeout(() => {
+                if (suggest?.field === field) suggest = null;
+                commit(field);
+              }, 120);
+            }}
             role="combobox"
             aria-expanded={suggest?.field === field}
             aria-controls="suggest-{field}"
@@ -625,6 +674,17 @@
             {#if !showBcc}<button class="btn-ghost" onclick={() => (showBcc = true)}>{t('compose.bcc')}</button>{/if}
           {/if}
         </div>
+        {#if field === 'to' && showRecent}
+          <!-- Basış alandan odağı almaz: çipler kaybolmadan dokunuş yerine ulaşır. -->
+          <div class="recent" role="group" aria-label={t('mob.compose.recent')}>
+            {#each recentPeople as a (a.email)}
+              <button type="button" class="rchip" title={a.email} onmousedown={(e) => e.preventDefault()} onclick={() => pick('to', a)}>
+                <Avatar address={a} size={24} />
+                <span class="trunc">{displayName(a)}</span>
+              </button>
+            {/each}
+          </div>
+        {/if}
       {/if}
     {/each}
 
@@ -785,6 +845,40 @@
     top: calc(100% - 2px);
     left: 56px;
     width: 380px;
+  }
+
+  /* Son yazışılan kişiler (mobil): Kime satırının altında yatay kayan çipler. */
+  .recent {
+    display: flex;
+    gap: 8px;
+    padding: 8px 0 10px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .recent::-webkit-scrollbar {
+    display: none;
+  }
+
+  .rchip {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 200px;
+    min-height: 40px;
+    padding: 0 14px 0 6px;
+    border: 1px solid var(--line-strong);
+    border-radius: 999px;
+    background: var(--paper);
+    color: var(--ink);
+    font-weight: 500;
+    transition: background var(--t-fast);
+  }
+
+  .rchip:active {
+    background: var(--hover);
   }
 
   .suggest .active {

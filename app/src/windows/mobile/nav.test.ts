@@ -131,6 +131,59 @@ describe('mobil gezinme yığını', () => {
     expect(nav.layer).toBeNull();
   });
 
+  it('yanıt alanı ekranın katmanı: üstüne alt sayfa açılır, geri önce alt sayfayı sonra yanıtı kapatır', () => {
+    nav.push({ name: 'read', id: 4 });
+    nav.open('reply');
+    expect(nav.layer).toBe('reply');
+    nav.open('sheet');
+    expect(nav.layer).toBe('sheet');
+    expect(nav.has('reply')).toBe(true);
+    expect(h.entries).toEqual([{ mh: 0 }, { mh: 1 }, { mh: 2 }, { mh: 3 }]);
+    // Alt sayfa kapanır, yanıt alanı açık kalır.
+    nav.close();
+    expect(nav.layer).toBe('reply');
+    // Yalnız üstteki katman kapanır.
+    nav.closeLayer('sheet');
+    expect(nav.layer).toBe('reply');
+    nav.back();
+    expect(nav.layer).toBeNull();
+    expect(nav.current).toEqual({ name: 'read', id: 4 });
+    nav.back();
+    expect(nav.current).toEqual({ name: 'list' });
+  });
+
+  it('yanıt alanından tam ekran yazmaya geçiş girdiyi devralır; iki katman tek adımda kapanır', () => {
+    nav.push({ name: 'read', id: 4 });
+    nav.open('reply');
+    nav.push({ name: 'compose', mode: 'reply', id: 4, to: [], from: null, body: 'Olur' });
+    expect(nav.has('reply')).toBe(false);
+    expect(h.entries).toEqual([{ mh: 0 }, { mh: 1 }, { mh: 2 }]);
+    nav.back();
+    expect(nav.current).toEqual({ name: 'read', id: 4 });
+
+    // Yanıt + alt sayfa açıkken itilen ekran: fazla girdi geri alınır, derinlik tutar.
+    nav.open('reply');
+    nav.open('sheet');
+    nav.push({ name: 'compose', mode: 'new', id: null, to: [], from: null });
+    expect(nav.layer).toBeNull();
+    expect(nav.depth()).toBe(2);
+    expect(h.index).toBe(2);
+    expect(h.entries[h.index]).toEqual({ mh: 2 });
+    nav.back();
+    expect(nav.current).toEqual({ name: 'read', id: 4 });
+    expect(nav.layer).toBeNull();
+  });
+
+  it('pop yanıt alanı ve alt sayfayla birlikte ekrandan tek adımda çıkar', () => {
+    nav.push({ name: 'read', id: 4 });
+    nav.open('reply');
+    nav.open('sheet');
+    expect(nav.pop()).toBe(true);
+    expect(nav.current).toEqual({ name: 'list' });
+    expect(nav.layer).toBeNull();
+    expect(h.index).toBe(0);
+  });
+
   it('geri tuşu birden çok girdi atlarsa yığın hedefe indirgenir', () => {
     nav.push({ name: 'read', id: 1 });
     nav.push({ name: 'search' });
