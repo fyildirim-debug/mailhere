@@ -115,17 +115,24 @@ Avatar; gönderici adresinden deterministik seçilen 9 tonlu paletten gelir (zem
 | Yumuşak düğme | `--paper` zemin, `--line-strong` kenar, 34 px. |
 | İkon düğme | 34×34 (satır içinde 28×28), saydam zemin, `--ink-2` ikon; üzerine gelince `--hover` ve `--ink`. Her ikon düğmede `aria-label` ve kısayollu `title`. |
 | Segment (akıllı süzgeç) | `--ground` iz, 3 px iç boşluk; seçili segment `--paper` + `--shadow-sm`. |
-| Kenar çubuğu | 248 px, `--ground`. Sıra: Yeni posta (kısayol harfi düğmenin içinde, çipsiz) · çok hesapta **hesap kapsamı** ("Tüm hesaplar" + her hesap; 40 px iki satırlı: ad / alan adı, sağda okunmamış) · kapsama göre daralan görünümler · her hesabın başlığı altında yalnız **istenmeyen + özel klasörler** (rol klasörleri görünümlerle sunulduğu için yinelenmez; "Tüm hesaplar"da hesap grupları katlanır) · etiketler · kayıtlı aramalar; tek hesapta kapsam bölümü yoktur, hesap başlığı ad + alan adı taşır (ad kısalır, alan adı hiç kesilmez), "Hesap ekle" listenin sonunda. Kaydırma çubuğu ince ve sessizdir (`.scroll-quiet`: yalnız üzerine gelince ya da kaydırırken). |
+| Kenar çubuğu | varsayılan 248 px (ayırıcıyla 200–360), `--ground`; **geri çekilir**: pasif öğeler `--ink-2`, ikonlar 16 px, bölüm başlıklarındaki yönetim düğmeleri yalnız kenar çubuğu kullanılırken (üzerine gelme, klavye odağı) belirir, alt satır ayırıcısızdır. Sıra: Yeni posta (kısayol harfi düğmenin içinde, çipsiz) · çok hesapta **hesap kapsamı** ("Tüm hesaplar" + her hesap; 40 px iki satırlı: ad / alan adı, sağda okunmamış) · kapsama göre daralan görünümler · her hesabın başlığı altında yalnız **istenmeyen + özel klasörler** (rol klasörleri görünümlerle sunulduğu için yinelenmez; "Tüm hesaplar"da hesap grupları katlanır) · etiketler · kayıtlı aramalar; tek hesapta kapsam bölümü yoktur, hesap başlığı ad + alan adı taşır (ad kısalır, alan adı hiç kesilmez), "Hesap ekle" listenin sonunda. Kaydırma çubuğu ince ve sessizdir (`.scroll-quiet`: yalnız üzerine gelince ya da kaydırırken). Altta eşitleme durumu, Ayarlar ve "Kenar çubuğunu daralt" (Ctrl B). |
+| İkon rayı | 56 px, `--ground`: Yeni posta (40 px `--accent` kare, ekranın tek birincil düğmesi) · "Kenar çubuğunu aç" (Ctrl B) · görünümler (40×38, ikon 18, etkin `--paper`/`--raised`) · altta eşitleme noktası ve Ayarlar. Sayaç ikonun sağ üstünde 12/600 `tabular-nums`, zemini düğmeninki (ikon çizgisini örter), 99'dan sonra "99+". Ad ve sayı `title` ve erişilebilir adda ("Gelen Kutusu · 3"). |
+| Dar pencere | ≥ 1120 px kenar çubuğu · liste · okuma. 860–1120 px kenar çubuğu ikon rayına iner; Ctrl B tam kenar çubuğunu **katman** olarak açar (`--shadow-lg`, 200 ms soldan kayma + saydamlık, arkası `--ground` %40 örtü, bulanıklık yok); görünüm seçince, Esc ya da dışarı tıklayınca kapanır, odak ilk öğeye gider. Geniş pencerede Ctrl B kenar çubuğunu raya indirir (tercih kalıcı). < 860 px **yığın**: ray · liste YA DA okuma; posta açılınca (tık, Enter, palet, bildirim) okuma tam genişlik, araç çubuğunun başında "Listeye dön" (Esc); görünüm ya da arama değişince liste. Okuma alanı 680 px'ten darsa yanıt düğmeleri yalnız ikondur (kapsayıcı sorgusu). |
+| Sütun ayırıcısı | sütunlar arasındaki 1 px `--line` çizgi, iki yanına taşan 9 px görünmez tutma alanı, `col-resize`; üzerine gelince `--line-strong`, sürüklerken ve klavye odağında `--accent`. `role="separator"`, `aria-valuenow/min/max` (soldaki sütunun genişliği); ←/→ 8 px, Home/End en dar/en geniş, Enter ya da çift tık varsayılan. Kenar çubuğu 200–360, liste 320–640 ve okuma alanına en az 440 px kalır. Genişlikler kişisel tercihtir (tarayıcı deposu). |
+| Odak kipi | Shift O ya da palet ("Odak kipi"); listenin başlığındaki `focus` ikonlu düğme. Kenar çubuğu ve liste gizlenir, okuma alanı tam genişlik; 52 px üst çubukta "Odak" + 12/500 `tabular-nums` ilerleme ("3/17", `role="status"`) ve "Odaktan çık · Esc". Sağda 232 px `--surface` sütunda kısayol çipli dikey eylem listesi: Arşivle E (tek birincil, `--accent`), Ertele H, Yanıtla R, Sil #, Yıldızla S, Klasöre taşı V, Etiketle L · Okunmadı say U · Atla J, Önceki posta K. Listeden çıkaran eylemden sonra sıradaki işlenmemiş posta 120 ms saydamlıkla gelir; geri alma (toast, Ctrl Z) postayı kipe de geri getirir. Hepsi bitince boş durum ("Gelen kutusu bitti" + ne yapılabilir, Odaktan çık / Ertelenenleri aç). |
+| Seçici (V / L) | 440 px, palet gibi (`--paper`, köşe 16, `--shadow-lg`); başlık 12/600 `--ink-3`, 40 px arama girdisi, 38 px satırlar (klasörler ağaç girintili, etiketler renk noktalı, takılı etiket `check`), seçili satır `--sel`; yazarak bulanık süzülür, eşleşen parça 600 + alt çizgi. Taşıma ve etiket mevcut komutlarla, geri alınabilir. Etiket yoksa boş durum + "Etiket oluştur". |
+| Kısayol sayfası (?) | 920 px pencere, üç grup (Eylemler · Gezinme · Uygulama), her satırda kısayol çipleri ve açıklama; Esc ya da ? kapatır. Ayarlar › Güncellemeler › Klavye kısayolları aynı listeyi (`KEY_GROUPS`) gösterir. |
+| Arama çipleri | arama sonuçlarının başlığı altında: Kimden, Tarih ve Hesap (çok hesapta) menülü; Ekli ve Okunmamış aç-kapa. 28 px, köşe 999, 12/500, `--line-strong` kenar; seçili `--accent-soft` + `--accent-text`, değerli çipte değer ve kaldır (×) düğmesi. Seçim sorgu metnine işleç olarak yazılır (`from:`, `after:`, `has:ek`, `is:okunmamış`, `hesap:`); çipin durumu metinden okunur. Arama başlığına basınca sorgu palette düzenlenir. |
 | Kenar çubuğu öğesi | 34 px, köşe 8; etkin öğe `--paper` zemin (koyuda `--raised`). Sayaç 12/500 sağda, `tabular-nums`, tek sütunda hizalı. |
 | Liste satırı | 3 satır (gönderen+saat, konu, önizleme), 8 px okunmamış noktası, 34 px avatar; seçili `--sel`; üzerine gelince sağ üstte Arşivle / Ertele / Sil eylemleri saati örter. |
 | Okuma alanı | araç çubuğu 52 px; konu 24/600; önceki iletiler tek satıra katlanır; gövde 68ch; ekler 252 px kartlar; altta hızlı yanıt kutusu. |
 | Uzak içerik şeridi | koruma ikonu + "Uzak görseller ve izleme pikselleri engellendi" + "Bu göndericiye izin ver". |
 | Özgün renkler geçişi | gönderen satırında (hızlı okumada başlık çubuğunda) `contrast` ikonlu düğme; yalnız koyu temada ve HTML postada, `aria-pressed`; basılıyken `--accent-soft` zemin + `--accent-text`. Çerçeve yeniden yüklenmez, yalnız renkler değişir. |
-| Toast | ters renk (`--ink` zemin), alt ortada, "Geri al" eylemi, 5 sn. |
+| Toast | ters renk (`--ink` zemin), alt ortada, "Geri al" eylemi, 5 sn. Kısayol ipucu (masaüstü): metnin yanında soluk "Kısayol" + ters renkli kısayol çipi. |
 | Bildirim kartı | 372 px, köşe 14, `--shadow-lg`; başlık satırı (logo, hesap, zaman, sessize al, kapat), avatar 40, gönderen / konu / 2 satır önizleme, eylemler Aç · Okundu say · Arşivle, altta 2 px geri sayım çizgisi (üzerine gelince durur). En çok 3 kart, fazlası "N posta daha" özeti. |
 | Hızlı okuma | 440×700 pencere; başlık çubuğunda Üstte tut, Uygulamada aç, Kapat; altta hazır yanıt çipleri ve yanıt kutusu. |
 | Yazma | Kimden / Kime (çipler) / Konu alanları, sade biçim çubuğu, "Gönder" + "Sonra gönder" bölünmüş düğmesi, gönderdikten sonra 10 sn geri alma. |
-| Komut paleti | 620 px, üstte 19 px arama girdisi; bölümler Arama · Eylemler · Postalar · Kişiler; ok tuşları + Enter. |
+| Komut paleti | 620 px, üstte 19 px arama girdisi; bölümler Arama · Eylemler · Postalar · Kişiler; ok tuşları + Enter. Her komutun kısayolu sağda çip olarak yazar. Komutlar iki dilin adlarıyla ve eşanlamlılarla bulanık eşleşir (Türkçe harf ve aksan katlanır); boş palette sık kullanılanlar üstte. Eşleşen parça renkle değil 600 + alt çizgiyle. İşleç tamamlama: `from:` kişi, `after:` / `before:` hazır tarih (bugün, bu hafta, bu ay, son 30 gün), `hesap:` hesap önerir; değer boşken öneriler, yazılınca Enter arar, Tab ilk öneriyi yazar. |
 | Girdi | 44 px (form) / 32 px (satır içi), `--line-strong` kenar; odakta `--accent` kenar + 3 px `--accent-soft` halka. |
 | Kısayol çipi | 20–22 px, köşe 5, `--line-strong` kenar, 12/500. |
 | Boş durum | ikon 56 px `--accent-soft` disk içinde (`--accent-text`, 26 px), başlık 19/600, gövde `--ink-3` en çok 32ch; liste ve mobil ekranlarda aynı. |
@@ -149,7 +156,7 @@ Boş durumlar ve hatalar her zaman iki şey söyler: **ne oldu** ve **ne yapıla
 
 - Kendi çizimimiz: 24 px ızgara, **1.6** çizgi, yuvarlak uç ve birleşim, dolgu yok (yıldız dolu hali hariç). Tek kaynak `app/src/lib/ui/icons.ts`, tek bileşen `Icon.svelte`.
 - Başka kütüphane ikonu, emoji ya da unicode sembolü ikon yerine kullanılmaz.
-- Boyutlar: 14 (satır içi işaret), 16 (küçük düğme), 18 (araç çubuğu), 28–32 (boş durum).
+- Boyutlar: 14 (satır içi işaret), 16 (küçük düğme, kenar çubuğu satırı), 18 (araç çubuğu, ikon rayı), 28–32 (boş durum).
 
 ## 8. Kısayollar
 
@@ -172,8 +179,19 @@ Boş durumlar ve hatalar her zaman iki şey söyler: **ne oldu** ve **ne yapıla
 | Ctrl Enter | Gönder |
 | Ctrl Z | Son işlemi geri al |
 | Esc | Seçimi bırak / kapat / geri |
+| V / L | Klasöre taşı / etiketle seçicisi |
+| G sonra I / S / T / D / A / H / # | Gelen kutusu / Yıldızlılar / Gönderilenler / Taslaklar / Arşiv / Ertelenenler / Çöp |
+| Shift O | Odak (tek tek işleme) kipi |
+| ? | Kısayol sayfası |
+| / | Arama (komut paleti) |
+| Ctrl B | Kenar çubuğunu daralt / katman olarak aç |
+| Ctrl + / Ctrl - / Ctrl 0 | Arayüz ölçeği büyüt / küçült / sıfırla |
 
-Kısayollar metin girdisinde odak varken tek harfli tuşlarda çalışmaz.
+Kısayollar metin girdisinde odak varken tek harfli tuşlarda çalışmaz (ölçek kısayolları çalışır).
+
+İki tuşlu gezinme: G'den sonra sağ altta 12 px ipucu (`--raised`, `--shadow`) ikinci tuşları listeler; 1,5 sn içinde tanınmayan tuş ya da Esc zinciri bitirir ve tek harf eylemi tetiklemez. Sil için # ve Del ikisi de çalışır; arayüzde # yazılır.
+
+Kısayol öğretimi: fareyle yapılan arşivle, ertele, yanıtla, sil, yıldızla ve okunmadı say eylemlerinden sonra toast kısayolu bir kez söyler (eylemin kendi toast'ına eklenir; toast'sız eylemde kısa ipucu toast'ı). Eylem başına en çok 3 kez; kısayol klavyeyle kullanıldıysa o eylem öğrenilmiş sayılır. Klavyeyle basılan düğme öğretmez. Ayarlar › Genel › "Kısayol ipuçları" kapatır (kişisel tercih).
 
 Çoklu seçim: Ctrl (Cmd) + tık satırı tek tek işaretler, Shift + tık aralık seçer; satırın avatarı üzerine gelince çıkan seçim düğmesi de aynı işi yapar. İşaretli satır `--sel` zemini alır. Birden çok satır işaretliyken okuma alanının yerine toplu işlem paneli gelir (sayı, Arşivle, Sil, Okundu/Okunmadı, Yıldızla, Ertele, Klasöre taşı, Etiketler, Sabitle, Seçimi bırak); her eylem sayılı bildirimle geri alınabilir.
 
@@ -199,6 +217,7 @@ Sabitleme ve etiketler yalnız bu bilgisayarda tutulur; sunucuya bayrak ya da kl
 - Pencereler kendi başlık çubuğunu çizer (46 px ana, 40–42 px ikincil); küçült / büyüt / kapat sağda, kapatın üzerine gelince `#C42B1C`.
 - Uygulama kapatılınca tepside kalır; tepsi ikonunda okunmamış sayısı.
 - Linux Wayland'de bildirim kartı konumlanamıyorsa işlem düğmeli sistem bildirimi kullanılır.
+- Arayüz ölçeği %90 / 100 / 110 / 120 / 135 / 150: Ctrl + / Ctrl - / Ctrl 0 ve Ayarlar › Genel (yalnız masaüstü). Tauri'de web görünümü yakınlaştırması (`setZoom`; CSS piksel oranı değişir, yazı ölçeğinin oranları korunur, dar pencere kipleri ölçekli genişliğe göre seçilir), tarayıcıda kök öğeye CSS `zoom`. Kişisel tercih, tarayıcı deposunda; mobil kabukta etkisiz.
 
 ## 12. Mobil uyarlama
 
