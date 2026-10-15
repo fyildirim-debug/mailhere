@@ -8,6 +8,8 @@
   import { mail, moveTo, snooze, type Row } from '../../lib/stores/mail.svelte';
   import { clickRow, isChecked, toggleCheck } from '../../lib/stores/selection.svelte';
   import { tagsOf } from '../../lib/stores/tags.svelte';
+  import { showReader } from './layout.svelte';
+  import { teach } from './teach.svelte';
 
   interface Props {
     message: Row;
@@ -30,7 +32,11 @@
   <button
     class="main"
     aria-current={selected ? 'true' : undefined}
-    onclick={(e) => clickRow(e, message.id)}
+    onclick={(e) => {
+      clickRow(e, message.id);
+      // Yığın kipinde (dar pencere) düz tık okuma alanını açar.
+      if (!e.ctrlKey && !e.metaKey && !e.shiftKey) showReader();
+    }}
     ondblclick={() => call('open_quick', { id: message.id })}
   >
     <span class="dot" aria-hidden="true"></span>
@@ -65,13 +71,13 @@
     <Icon name="check" size={16} />
   </button>
   <div class="acts">
-    <button class="btn-icon small" aria-label={t('act.archive')} title="{t('act.archive')} · E" onclick={() => moveTo(message.ids, 'archive')}>
+    <button class="btn-icon small" aria-label={t('act.archive')} title="{t('act.archive')} · E" onclick={(e) => void teach('archive', e, moveTo(message.ids, 'archive'))}>
       <Icon name="archive" size={16} />
     </button>
-    <button class="btn-icon small" aria-label={t('act.snooze')} title="{t('snooze.tomorrow')} · H" onclick={() => snooze(message.ids, tomorrow)}>
+    <button class="btn-icon small" aria-label={t('act.snooze')} title="{t('snooze.tomorrow')} · H" onclick={(e) => void teach('snooze', e, snooze(message.ids, tomorrow))}>
       <Icon name="clock" size={16} />
     </button>
-    <button class="btn-icon small" aria-label={t('act.delete')} title="{t('act.delete')} · Del" onclick={() => moveTo(message.ids, 'trash')}>
+    <button class="btn-icon small" aria-label={t('act.delete')} title="{t('act.delete')} · #" onclick={(e) => void teach('delete', e, moveTo(message.ids, 'trash'))}>
       <Icon name="trash" size={16} />
     </button>
   </div>

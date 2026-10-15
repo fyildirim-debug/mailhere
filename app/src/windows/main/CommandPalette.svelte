@@ -1,19 +1,33 @@
 <script lang="ts">
-  import { call, type MessageSummary } from '../../lib/api';
+  // Komut paleti (Ctrl K, /): arama, komutlar, postalar ve kişiler. Her
+  // komutun kısayolu yanında yazar; komutlar iki dilde (ve eşanlamlılarıyla)
+  // bulanık eşleşir, sık kullanılanlar üste çıkar. Arama işleçleri yazılırken
+  // tamamlanır: from: kişi, after: / before: hazır tarih, hesap: hesap.
+  import { call, type Address, type MessageSummary } from '../../lib/api';
   import { t, when, type MessageKey } from '../../lib/i18n/index.svelte';
+  import { en } from '../../lib/i18n/en';
+  import { tr } from '../../lib/i18n/tr';
+  import { completeWith, completing, presetDate, type DatePreset } from '../../lib/mail/query';
   import Avatar from '../../lib/ui/Avatar.svelte';
   import Icon from '../../lib/ui/Icon.svelte';
   import type { IconName } from '../../lib/ui/icons';
   import { displayName, snoozeOptions } from '../../lib/util/format';
-  import { mail, moveTo, openSettings, searchAll, select, selectedIds, setView, snooze } from '../../lib/stores/mail.svelte';
+  import { goLabel, KEY_LABEL, type GoTarget } from '../../lib/util/keys';
+  import { mail, moveTo, openSettings, pullMail, searchAll, select, selectedIds, setUnread, setView, snooze, toggleStar } from '../../lib/stores/mail.svelte';
   import { togglePin } from '../../lib/stores/bulk.svelte';
   import { resolvedTheme, toggleTheme } from '../../lib/stores/settings.svelte';
+  import { matchRange, score } from './fuzzy';
+  import { desk, showReader, toggleSidebar } from './layout.svelte';
+  import { scale, setScale, stepped } from './scale.svelte';
+  import { startTriage } from './triage.svelte';
 
   interface Props {
     onclose: () => void;
+    /** Ana pencerenin yönettiği katmanlar: kısayol sayfası, taşı / etiket seçicisi, yanıt kutusu. */
+    onopen: (what: 'keys' | 'move' | 'tag' | 'reply') => void;
   }
 
-  let { onclose }: Props = $props();
+  let { onclose, onopen }: Props = $props();
 
   interface Item {
     key: string;
@@ -26,18 +40,26 @@
     run: () => void;
   }
 
-  let q = $state('');
+  interface Cmd extends Item {
+    /** Eşleşmede kullanılan metinler (iki dilde ad + eşanlamlılar). */
+    texts: string[];
+  }
+
+  // "Aramayı düzenle" paleti sorguyla açar.
+  let q = $state(desk.paletteSeed ?? '');
+  desk.paletteSeed = null;
   let active = $state(0);
   let found = $state<MessageSummary[]>([]);
   let input = $state<HTMLInputElement>();
   let listEl = $state<HTMLDivElement>();
 
-  const needle = $derived(q.trim().toLocaleLowerCase('tr'));
+  const needle = $derived(q.trim());
+  const comp = $derived(completing(q));
 
-  // Yazarken yerel dizinde ara (kısa gecikmeyle).
+  // Yazarken yerel dizinde ara (kısa gecikmeyle). Değeri boş işleç ("from:") aranmaz.
   $effect(() => {
     const query = q.trim();
-    if (!query) {
+    if (!query || (comp && !comp.value)) {
       found = [];
       return;
     }
@@ -56,100 +78,248 @@
     input?.focus();
   });
 
-  function done(fn: () => void) {
+  // ------------------------------------------------------- kullanım sıklığı
+
+  const USE_KEY = 'mh.palette.use';
+
+  function loadUse(): Record<string, number> {
+    try {
+      return JSON.parse(localStorage.getItem(USE_KEY) ?? '{}') as Record<string, number>;
+    } catch {
+      return {};
+    }
+  }
+
+  const use = loadUse();
+
+  function used(key: string) {
+    use[key] = (use[key] ?? 0) + 1;
+    try {
+      localStorage.setItem(USE_KEY, JSON.stringify(use));
+    } catch {
+      /* yalnız bu oturum */
+    }
+  }
+
+  function done(key: string, fn: () => void) {
     return () => {
+      used(key);
       onclose();
       fn();
     };
   }
 
-  const actions = $derived.by((): Item[] => {
+  // ------------------------------------------------------------- komutlar
+
+  // Arama için görünmeyen anahtar sözcükler (iki dilde); arayüzde gösterilmez.
+  const SYN: Record<string, string> = {
+    compose: 'yaz oluştur e-posta mesaj new write message email',
+    archive: 'bitti kaldır done remove',
+    snooze: 'sonra hatırlat later remind',
+    reply: 'cevap cevapla respond answer',
+    delete: 'çöp kaldır trash remove bin',
+    star: 'önemli işaretle favori flag important',
+    unread: 'okunmamış işaretle mark',
+    pin: 'üste tut sabit',
+    move: 'klasör folder',
+    tag: 'etiket label',
+    triage: 'odak tek tek işle sıfır inbox zero focus process one by one',
+    'go-inbox': 'gelen inbox',
+    'go-starred': 'yıldız starred',
+    'go-sent': 'giden gönderilen sent',
+    'go-drafts': 'taslak draft',
+    'go-archive': 'arşiv archive',
+    'go-snoozed': 'ertelenen snoozed',
+    'go-trash': 'çöp silinen trash bin deleted',
+    theme: 'karanlık aydınlık koyu açık dark light mode tema theme',
+    mute: 'sessiz sustur rahatsız etme dnd quiet bildirim notification',
+    account: 'hesap ekle add account',
+    settings: 'ayar tercih preferences options',
+    rules: 'kural süzgeç filter',
+    tags: 'etiket label',
+    templates: 'şablon hazır yanıt template snippet',
+    scheduled: 'planlanan zamanlanmış sonra gönder send later',
+    keys: 'kısayol klavye yardım help shortcuts keyboard',
+    sidebar: 'kenar çubuğu panel menü sidebar',
+    sync: 'eşitle yenile al refresh sync fetch',
+    zoomIn: 'büyüt yakınlaştır ölçek zoom larger bigger',
+    zoomOut: 'küçült uzaklaştır ölçek zoom smaller',
+    zoomReset: 'sıfırla ölçek zoom reset 100',
+  };
+
+  function cmd(key: string, label: MessageKey, icon: IconName, run: () => void, kbd?: string, text?: string): Cmd {
+    return { key, label: text ?? t(label), kbd, icon, run: done(key, run), texts: [text ?? t(label), tr[label], en[label], SYN[key] ?? ''] };
+  }
+
+  const GO: [GoTarget, MessageKey][] = [
+    ['inbox', 'palette.goInbox'],
+    ['starred', 'palette.goStarred'],
+    ['sent', 'palette.goSent'],
+    ['drafts', 'palette.goDrafts'],
+    ['archive', 'palette.goArchive'],
+    ['snoozed', 'palette.goSnoozed'],
+    ['trash', 'palette.goTrash'],
+  ];
+
+  const commands = $derived.by((): Cmd[] => {
     const sel = mail.selectedId;
-    const list: (Item & { label: string })[] = [
-      { key: 'compose', label: t('act.compose'), kbd: 'C', icon: 'pen', run: done(() => call('open_compose', { prefill: { mode: 'new', messageId: null } })) },
-    ];
+    const list: Cmd[] = [cmd('compose', 'act.compose', 'pen', () => call('open_compose', { prefill: { mode: 'new', messageId: null } }), KEY_LABEL.compose)];
     if (sel != null) {
       const pinned = mail.items.find((m) => m.id === sel)?.pinned ?? mail.detail?.pinned ?? false;
+      const tomorrow = snoozeOptions(Date.now()).find((o) => o.key === 'tomorrow')!.at;
       list.push(
-        { key: 'archive', label: t('act.archive'), kbd: 'E', icon: 'archive', run: done(() => moveTo([sel], 'archive')) },
-        {
-          key: 'snooze',
-          label: `${t('act.snooze')} · ${t('snooze.tomorrow')}`,
-          kbd: 'H',
-          icon: 'clock',
-          run: done(() => snooze([sel], snoozeOptions(Date.now()).find((o) => o.key === 'tomorrow')!.at)),
-        },
-        { key: 'pin', label: pinned ? t('pin.unpin') : t('pin.pin'), kbd: 'P', icon: 'pin', run: done(() => togglePin(selectedIds())) },
+        cmd('archive', 'act.archive', 'archive', () => moveTo(selectedIds(), 'archive'), KEY_LABEL.archive),
+        cmd('snooze', 'act.snooze', 'clock', () => snooze(selectedIds(), tomorrow), KEY_LABEL.snooze, `${t('act.snooze')} · ${t('snooze.tomorrow')}`),
+        cmd('reply', 'palette.reply', 'reply', () => onopen('reply'), KEY_LABEL.reply),
+        cmd('delete', 'act.delete', 'trash', () => moveTo(selectedIds(), 'trash'), KEY_LABEL.delete),
+        cmd('star', 'palette.star', 'star', () => toggleStar(sel), KEY_LABEL.star),
+        cmd('unread', 'palette.unread', 'mail', () => setUnread([sel], true), KEY_LABEL.unread),
+        cmd('pin', pinned ? 'pin.unpin' : 'pin.pin', 'pin', () => togglePin(selectedIds()), KEY_LABEL.pin),
+        cmd('move', 'palette.moveTo', 'folder', () => onopen('move'), KEY_LABEL.movePicker),
+        cmd('tag', 'palette.tagWith', 'tag', () => onopen('tag'), KEY_LABEL.tagPicker),
       );
     }
+    list.push(cmd('triage', 'palette.triage', 'focus', () => startTriage(), KEY_LABEL.triage));
+    for (const [target, label] of GO) list.push(cmd(`go-${target}`, label, target === 'inbox' ? 'inbox' : 'chevronRight', () => setView({ kind: target }, mail.accountId), goLabel(target)));
     list.push(
-      { key: 'inbox', label: t('palette.goInbox'), icon: 'inbox', run: done(() => setView({ kind: 'inbox' })) },
-      { key: 'archiveView', label: t('palette.goArchive'), icon: 'archive', run: done(() => setView({ kind: 'archive' })) },
-      {
-        key: 'theme',
-        label: resolvedTheme() === 'dark' ? t('palette.themeLight') : t('palette.themeDark'),
-        icon: resolvedTheme() === 'dark' ? 'sun' : 'moon',
-        run: done(() => toggleTheme()),
-      },
-      { key: 'mute', label: t('act.muteHour'), icon: 'bellOff', run: done(() => call('notify_snooze', { minutes: 60 })) },
-      { key: 'account', label: t('act.addAccount'), icon: 'plus', run: done(() => (mail.screen = 'onboarding')) },
-      { key: 'settings', label: t('act.settings'), kbd: 'Ctrl ,', icon: 'settings', run: done(() => openSettings()) },
-      { key: 'rules', label: t('palette.rules'), icon: 'rules', run: done(() => openSettings('rules')) },
-      { key: 'tags', label: t('tag.manage'), icon: 'tag', run: done(() => openSettings('tags')) },
-      { key: 'templates', label: t('palette.templates'), icon: 'template', run: done(() => openSettings('compose')) },
-      { key: 'scheduled', label: t('palette.scheduled'), icon: 'calendarClock', run: done(() => (mail.screen = 'scheduled')) },
+      cmd('keys', 'palette.keys', 'keyboard', () => onopen('keys'), KEY_LABEL.help),
+      cmd('sidebar', 'palette.sidebar', 'sidebar', () => toggleSidebar(), KEY_LABEL.sidebar),
+      cmd('sync', 'palette.sync', 'refresh', () => pullMail(), KEY_LABEL.sync),
+      cmd('theme', resolvedTheme() === 'dark' ? 'palette.themeLight' : 'palette.themeDark', resolvedTheme() === 'dark' ? 'sun' : 'moon', () => toggleTheme()),
+      cmd('zoomIn', 'palette.zoomIn', 'plus', () => setScale(stepped(scale.value, 1)), KEY_LABEL.zoomIn),
+      cmd('zoomOut', 'palette.zoomOut', 'minimize', () => setScale(stepped(scale.value, -1)), KEY_LABEL.zoomOut),
+      cmd('zoomReset', 'palette.zoomReset', 'reset', () => setScale(1), KEY_LABEL.zoomReset),
+      cmd('mute', 'act.muteHour', 'bellOff', () => call('notify_snooze', { minutes: 60 })),
+      cmd('account', 'act.addAccount', 'plus', () => (mail.screen = 'onboarding')),
+      cmd('settings', 'act.settings', 'settings', () => openSettings(), 'Ctrl ,'),
+      cmd('rules', 'palette.rules', 'rules', () => openSettings('rules')),
+      cmd('tags', 'tag.manage', 'tag', () => openSettings('tags')),
+      cmd('templates', 'palette.templates', 'template', () => openSettings('compose')),
+      cmd('scheduled', 'palette.scheduled', 'calendarClock', () => (mail.screen = 'scheduled')),
     );
     for (const a of mail.accounts) {
-      list.push({ key: `acc-${a.id}`, label: t('palette.accountSettings', { name: a.name }), icon: 'user', run: done(() => openSettings(`account:${a.id}`)) });
+      const label = t('palette.accountSettings', { name: a.name });
+      list.push({ key: `acc-${a.id}`, label, icon: 'user', run: done(`acc-${a.id}`, () => openSettings(`account:${a.id}`)), texts: [label, a.email] });
     }
     return list;
   });
 
-  function matches(label: string) {
-    return !needle || label.toLocaleLowerCase('tr').includes(needle);
+  /** Eşleşen komutlar: puana, sonra kullanım sıklığına göre; boşken sık kullanılanlar. */
+  const matched = $derived.by(() => {
+    const order = new Map(commands.map((c, i) => [c.key, i]));
+    if (!needle) {
+      return [...commands].sort((a, b) => (use[b.key] ?? 0) - (use[a.key] ?? 0) || order.get(a.key)! - order.get(b.key)!).slice(0, 6);
+    }
+    return commands
+      .map((c) => ({ c, s: score(c.texts, needle) }))
+      .filter((x) => x.s > 0)
+      .sort((a, b) => b.s - a.s || (use[b.c.key] ?? 0) - (use[a.c.key] ?? 0) || order.get(a.c.key)! - order.get(b.c.key)!)
+      .slice(0, 5)
+      .map((x) => x.c);
+  });
+
+  // ----------------------------------------------------------- tamamlama
+
+  /** Tamamlama seçilince palet açık kalır, sorgu güncellenir. */
+  function fill(next: string) {
+    q = next;
+    active = 0;
+    input?.focus();
   }
+
+  const DATES: Record<'after' | 'before', [DatePreset, MessageKey][]> = {
+    after: [
+      ['today', 'date.today'],
+      ['week', 'date.week'],
+      ['month', 'date.month'],
+      ['last30', 'date.last30'],
+    ],
+    before: [
+      ['today', 'date.beforeToday'],
+      ['week', 'date.beforeWeek'],
+      ['month', 'date.beforeMonth'],
+    ],
+  };
+
+  const completions = $derived.by((): { title: MessageKey; items: Item[] } | null => {
+    if (!comp) return null;
+    const v = comp.value.toLocaleLowerCase('tr');
+    if (comp.kind === 'from') {
+      const seen = new Map<string, Address>();
+      for (const m of [...found, ...mail.items]) {
+        const a = m.from;
+        const k = a.email.toLowerCase();
+        if (seen.has(k)) continue;
+        if (v && !`${a.name ?? ''} ${a.email}`.toLocaleLowerCase('tr').includes(v)) continue;
+        seen.set(k, a);
+      }
+      const people = [...seen.values()].slice(0, 6);
+      return {
+        title: 'palette.people',
+        items: people.map((p) => ({ key: `c-${p.email}`, label: displayName(p), meta: p.email, person: p, plain: true, run: () => fill(completeWith(q, 'from', p.email)) })),
+      };
+    }
+    if (comp.kind === 'account') {
+      return {
+        title: 'chip.account',
+        items: mail.accounts
+          .filter((a) => !v || `${a.name} ${a.email}`.toLocaleLowerCase('tr').includes(v))
+          .map((a) => ({ key: `a-${a.id}`, label: a.name, meta: a.email, icon: 'user' as IconName, plain: true, run: () => fill(completeWith(q, 'account', a.email)) })),
+      };
+    }
+    const now = Date.now();
+    const kind = comp.kind;
+    return {
+      title: 'palette.dates',
+      items: DATES[kind].map(([p, label]) => {
+        const day = presetDate(p, now);
+        return { key: `d-${p}`, label: t(label), meta: `${kind}:${day}`, icon: 'calendar' as IconName, plain: true, run: () => fill(completeWith(q, kind, day)) };
+      }),
+    };
+  });
 
   const sections = $derived.by(() => {
     const out: { title: MessageKey; items: Item[] }[] = [];
-    if (needle) {
-      out.push({
-        title: 'palette.search',
-        items: [
-          {
-            key: 'search',
-            label: t('palette.searchAll', { q: q.trim() }),
-            meta: t('palette.searchMeta'),
-            icon: 'search',
-            plain: true,
-            run: done(() => searchAll(q)),
-          },
-        ],
-      });
-    }
-    const acts = actions.filter((a) => matches(a.label)).slice(0, needle ? 4 : 6);
-    if (acts.length) out.push({ title: 'palette.actions', items: acts });
+    const searchItem: Item = {
+      key: 'search',
+      label: t('palette.searchAll', { q: needle }),
+      meta: t('palette.searchMeta'),
+      icon: 'search',
+      plain: true,
+      run: () => {
+        onclose();
+        showList();
+        searchAll(q);
+      },
+    };
+    // Değeri yazılmamış işleçte ("from:") önce öneriler; yazılmışsa Enter arar.
+    const early = completions && comp && !comp.value;
+    if (early && completions.items.length) out.push(completions);
+    if (needle && !early) out.push({ title: 'palette.search', items: [searchItem] });
+    if (completions && !early && completions.items.length) out.push(completions);
+    if (!comp && matched.length) out.push({ title: 'palette.actions', items: matched });
     // Arama işleçleri: tıklayınca sorguya eklenir, palet açık kalır.
-    if (!needle || /^\S*$/.test(q.trim())) {
-      const ops: [string, string][] = [
-        ['from:', t('palette.op.from')],
-        ['has:ek', t('palette.op.attachment')],
-        ['is:okunmamış', t('palette.op.unread')],
-        ['in:arşiv', t('palette.op.in')],
-        ['tag:', t('tag.op')],
-        ['after:2026-01-01', t('palette.op.after')],
+    if (!comp && (!needle || /^\S*$/.test(needle))) {
+      const ops: [string, MessageKey][] = [
+        ['from:', 'palette.op.from'],
+        ['has:ek', 'palette.op.attachment'],
+        ['is:okunmamış', 'palette.op.unread'],
+        ['in:arşiv', 'palette.op.in'],
+        ['tag:', 'tag.op'],
+        ['after:', 'palette.op.after'],
+        ['before:', 'palette.op.before'],
+        ...(mail.accounts.length > 1 ? ([['hesap:', 'palette.op.account']] as [string, MessageKey][]) : []),
       ];
+      const lower = needle.toLocaleLowerCase('tr');
       const tips = ops
-        .filter(([op]) => !needle || op.startsWith(needle))
+        .filter(([op]) => !lower || op.startsWith(lower))
         .map(([op, meta]) => ({
           key: `op-${op}`,
           label: op,
-          meta,
+          meta: t(meta),
           icon: 'filter' as IconName,
           plain: true,
-          run: () => {
-            q = `${q.trim() && !op.startsWith(needle) ? `${q.trim()} ` : ''}${op}`;
-            input?.focus();
-          },
+          run: () => fill(`${needle && !op.startsWith(lower) ? `${needle} ` : ''}${op}`),
         }));
       if (tips.length && !found.length) out.push({ title: 'palette.ops', items: tips.slice(0, needle ? 3 : 5) });
     }
@@ -162,11 +332,15 @@
           label: m.subject || '—',
           meta: `${displayName(m.from)} · ${when(m.date)}`,
           icon: 'mail' as IconName,
-          run: done(() => select(m.id)),
+          run: () => {
+            onclose();
+            void select(m.id);
+            showReader();
+          },
         })),
       });
     }
-    if (needle) {
+    if (needle && !comp) {
       const seen = new Set<string>();
       const people = found
         .map((m) => m.from)
@@ -180,12 +354,26 @@
       if (people.length) {
         out.push({
           title: 'palette.people',
-          items: people.map((p) => ({ key: `p${p.email}`, label: displayName(p), meta: p.email, person: p, run: done(() => searchAll(p.email)) })),
+          items: people.map((p) => ({
+            key: `p${p.email}`,
+            label: displayName(p),
+            meta: p.email,
+            person: p,
+            run: () => {
+              onclose();
+              showList();
+              searchAll(`from:${p.email}`);
+            },
+          })),
         });
       }
     }
     return out;
   });
+
+  function showList() {
+    desk.reading = false;
+  }
 
   const flat = $derived(sections.flatMap((s) => s.items));
   const total = $derived(flat.length);
@@ -199,10 +387,9 @@
   });
 
   function split(label: string, plain?: boolean) {
-    if (plain || !needle) return { pre: label, mid: '', post: '' };
-    const i = label.toLocaleLowerCase('tr').indexOf(needle);
-    if (i < 0) return { pre: label, mid: '', post: '' };
-    return { pre: label.slice(0, i), mid: label.slice(i, i + needle.length), post: label.slice(i + needle.length) };
+    const r = plain ? null : matchRange(label, needle);
+    if (!r) return { pre: label, mid: '', post: '' };
+    return { pre: label.slice(0, r[0]), mid: label.slice(r[0], r[1]), post: label.slice(r[1]) };
   }
 
   function onKey(e: KeyboardEvent) {
@@ -215,6 +402,10 @@
     } else if (e.key === 'Enter') {
       e.preventDefault();
       flat[active]?.run();
+    } else if (e.key === 'Tab' && !e.shiftKey && completions?.items.length) {
+      // Tab ilk öneriyle tamamlar.
+      e.preventDefault();
+      completions.items[0].run();
     } else if (e.key === 'Escape') {
       e.preventDefault();
       e.stopPropagation();
@@ -239,7 +430,7 @@
         role="combobox"
         aria-expanded="true"
       />
-      {#if q}<button class="btn-ghost" onclick={() => (q = '')}>{t('act.clear')}</button>{/if}
+      {#if q}<button class="btn-ghost" onclick={() => fill('')}>{t('act.clear')}</button>{/if}
       <span class="kbd">Esc</span>
     </div>
 
@@ -265,7 +456,8 @@
               <span class="item-icon"><Icon name={it.icon} size={16} /></span>
             {/if}
             <span class="it-label trunc">{parts.pre}<mark>{parts.mid}</mark>{parts.post}</span>
-            {#if it.kbd}<span class="kbd">{it.kbd}</span>{:else if it.meta}<span class="meta trunc item-meta">{it.meta}</span>{/if}
+            {#if it.meta}<span class="meta trunc item-meta">{it.meta}</span>{/if}
+            {#if it.kbd}<span class="keys">{#each it.kbd.split(' ') as k, i (i)}<span class="kbd">{k}</span>{/each}</span>{/if}
           </button>
         {/each}
       {/each}
@@ -277,6 +469,7 @@
     <div class="foot">
       <span class="hint"><span class="kbd"><Icon name="arrowUp" size={12} /></span><span class="kbd"><Icon name="arrowDown" size={12} /></span>{t('palette.navigate')}</span>
       <span class="hint"><span class="kbd">Enter</span>{t('palette.select')}</span>
+      {#if completions?.items.length}<span class="hint"><span class="kbd">Tab</span>{t('palette.complete')}</span>{/if}
       <span class="grow"></span>
       <span>{needle ? t('palette.results', { n: total }) : t('palette.hint')}</span>
     </div>
@@ -299,7 +492,7 @@
   .palette {
     width: 620px;
     max-width: 100%;
-    max-height: min(520px, calc(100vh - 96px));
+    max-height: min(560px, calc(100vh - 96px));
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -385,15 +578,24 @@
     flex: 1;
   }
 
+  /* Eşleşen parça renkle değil ağırlık ve alt çizgiyle vurgulanır. */
   mark {
     background: transparent;
-    color: var(--accent-text);
+    color: inherit;
     font-weight: 600;
+    text-decoration: underline;
+    text-underline-offset: 3px;
   }
 
   .item-meta {
     flex: none;
     max-width: 220px;
+  }
+
+  .keys {
+    flex: none;
+    display: inline-flex;
+    gap: 4px;
   }
 
   .nothing {

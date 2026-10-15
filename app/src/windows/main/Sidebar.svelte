@@ -41,8 +41,18 @@
   import { settings, updateSettings } from '../../lib/stores/settings.svelte';
   import { tagStore } from '../../lib/stores/tags.svelte';
   import { installUpdate, update } from '../../lib/stores/update.svelte';
+  import { toggleSidebar } from './layout.svelte';
 
   // Görünüm listesi ve etkinlik kuralları mobil çekmeceyle ortak (lib/mail/nav.ts).
+
+  interface Props {
+    /** Genişlik (px); sütun ayırıcısıyla değişir. */
+    width?: number;
+    /** Dar pencerede ray üstünde açılan katman (Ctrl B). */
+    overlay?: boolean;
+  }
+
+  let { width = 248, overlay = false }: Props = $props();
 
   const multi = $derived(mail.accounts.length > 1);
   /** Hesap kapsamı: depodaki `accountId`; `null` tüm hesaplar. */
@@ -211,7 +221,7 @@
   }
 </script>
 
-<nav class="side" aria-label={t('nav.label')}>
+<nav class="side" class:overlay style:width="{width}px" aria-label={t('nav.label')}>
   <button class="btn-primary compose" title="{t('act.compose')} (C)" onclick={() => call('open_compose', { prefill: { mode: 'new', messageId: null } })}>
     <Icon name="pen" />
     <span class="trunc">{t('act.compose')}</span>
@@ -259,7 +269,7 @@
         {@const n = viewCount(item, mail.counts, scope)}
         {#if viewVisible(item, mail)}
           <button class="nav" class:active aria-current={active ? 'page' : undefined} onclick={() => setView({ kind: item.kind }, scope)}>
-            <Icon name={item.icon} />
+            <Icon name={item.icon} size={16} />
             <span class="trunc">{t(item.label)}</span>
             {#if n > 0}<span class="count num">{n}</span>{/if}
           </button>
@@ -267,7 +277,7 @@
         {#if item.kind === 'drafts' && scheduledVisible(mail)}
           {@const on = mail.screen === 'scheduled'}
           <button class="nav" class:active={on} aria-current={on ? 'page' : undefined} onclick={() => (mail.screen = 'scheduled')}>
-            <Icon name="calendarClock" />
+            <Icon name="calendarClock" size={16} />
             <span class="trunc">{t('nav.scheduled')}</span>
             {#if mail.counts.scheduled > 0}<span class="count num">{mail.counts.scheduled}</span>{/if}
           </button>
@@ -335,7 +345,7 @@
                 oncontextmenu={(e) => folderMenu(e, account, b)}
                 onkeydown={(e) => menuKey(e, (ev) => folderMenu(ev, account, b))}
               >
-                <Icon name={folderIcon(b)} />
+                <Icon name={folderIcon(b)} size={16} />
                 <span class="trunc">{folderLabel(b)}</span>
                 {#if folderCount(b) > 0}<span class="count num">{folderCount(b)}</span>{/if}
               </button>
@@ -381,7 +391,7 @@
           oncontextmenu={(e) => searchMenu(e, s)}
           onkeydown={(e) => menuKey(e, (ev) => searchMenu(ev, s))}
         >
-          <Icon name="bookmark" />
+          <Icon name="bookmark" size={16} />
           <span class="trunc">{s.name}</span>
         </button>
       {/each}
@@ -389,7 +399,7 @@
 
     {#if !multi}
       <button class="nav quiet" onclick={() => (mail.screen = 'onboarding')}>
-        <Icon name="plus" />
+        <Icon name="plus" size={16} />
         <span class="trunc">{t('act.addAccount')}</span>
       </button>
     {/if}
@@ -423,10 +433,13 @@
       class="btn-icon"
       class:on={mail.screen === 'settings'}
       aria-label={t('act.settings')}
-      title={t('act.settings')}
+      title="{t('act.settings')} · Ctrl ,"
       onclick={() => (mail.screen === 'settings' ? (mail.screen = 'mail') : openSettings())}
     >
       <Icon name="settings" />
+    </button>
+    <button class="btn-icon" aria-label={t('desk.collapse')} title="{t('desk.collapse')} · Ctrl B" onclick={toggleSidebar}>
+      <Icon name="sidebar" />
     </button>
   </div>
 </nav>
@@ -449,10 +462,29 @@
   .side {
     flex: none;
     width: 248px;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     padding: 12px 0 8px;
     background: var(--ground);
+  }
+
+  /* Dar pencerede ray üstünde açılan tam kenar çubuğu: kenarsız, gölgeyle. */
+  .side.overlay {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 25;
+    box-shadow: var(--shadow-lg);
+    animation: side-in var(--t-state) var(--ease);
+  }
+
+  @keyframes side-in {
+    from {
+      opacity: 0;
+      transform: translateX(-16px);
+    }
   }
 
   /* Yeni posta: kenar çubuğunun tek birincil düğmesi; kısayol harfi sakin, çipsiz. */
@@ -556,12 +588,12 @@
     margin-top: 12px;
   }
 
-  /* Etiket rengi kullanıcı verisidir; ikon genişliğine (18 px) hizalanır. */
+  /* Etiket rengi kullanıcı verisidir; ikon genişliğine (16 px) hizalanır. */
   .tdot {
     flex: none;
     width: 10px;
     height: 10px;
-    margin: 0 4px;
+    margin: 0 3px;
     border-radius: 50%;
   }
 
@@ -638,8 +670,20 @@
     margin-top: 4px;
   }
 
+  /* Bölüm başlığındaki yönetim düğmeleri kenar çubuğu kullanılırken belirir
+     (üzerine gelme ya da klavye odağı); dinlenirken başlıklar yalnız metindir. */
   .group .btn-icon {
     color: var(--ink-2);
+    opacity: 0;
+    transition:
+      opacity var(--t-fast),
+      background var(--t-fast),
+      color var(--t-fast);
+  }
+
+  .side:hover .group .btn-icon,
+  .side:focus-within .group .btn-icon {
+    opacity: 1;
   }
 
   .group .btn-icon:hover {
@@ -795,18 +839,17 @@
 
   /* ---------------------------------------------------------------- alt */
 
+  /* Alt satır ayırıcısız: boşluk yeter. */
   .foot {
     flex: none;
     display: flex;
     align-items: center;
-    gap: 8px;
-    margin: 8px 10px 0;
-    padding-top: 8px;
-    border-top: 1px solid var(--line);
+    gap: 2px;
+    margin: 6px 6px 0 12px;
   }
 
-  .foot .btn-icon {
-    margin-right: -6px;
+  .foot .state {
+    margin-right: 6px;
   }
 
   .foot-text {

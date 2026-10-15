@@ -10,6 +10,7 @@
   import { mail, openSettings } from '../../lib/stores/mail.svelte';
   import { checkedIds, checkedRows, clearChecked } from '../../lib/stores/selection.svelte';
   import { tagStore } from '../../lib/stores/tags.svelte';
+  import { teach } from './teach.svelte';
 
   const rows = $derived(checkedRows());
   const ids = $derived(checkedIds());
@@ -21,6 +22,8 @@
   const oneAccount = $derived(accounts.length === 1 ? accounts[0] : null);
 
   let snoozeOpen = $state(false);
+  /** Erteleme menüsü fareyle açıldı (seçimden sonra kısayol öğretilir). */
+  let snoozeFromMouse = false;
   let menu = $state<{ at: { x: number; y: number }; title?: string; items: MenuItem[] } | null>(null);
 
   function anchorOf(e: MouseEvent) {
@@ -65,20 +68,29 @@
     </div>
 
     <div class="grid">
-      <button class="act" onclick={() => bulkMove(ids, 'archive')}>
+      <button class="act" onclick={(e) => void teach('archive', e, bulkMove(ids, 'archive'))}>
         <Icon name="archive" /><span class="grow">{t('act.archive')}</span><span class="kbd">E</span>
       </button>
-      <button class="act" onclick={() => bulkMove(ids, 'trash')}>
-        <Icon name="trash" /><span class="grow">{t('act.delete')}</span><span class="kbd">Del</span>
+      <button class="act" onclick={(e) => void teach('delete', e, bulkMove(ids, 'trash'))}>
+        <Icon name="trash" /><span class="grow">{t('act.delete')}</span><span class="kbd">#</span>
       </button>
-      <button class="act" onclick={() => bulkSetUnread(ids, allRead)}>
+      <button class="act" onclick={(e) => void (allRead ? teach('unread', e, bulkSetUnread(ids, true)) : bulkSetUnread(ids, false))}>
         <Icon name="mail" /><span class="grow">{allRead ? t('act.markUnread') : t('act.markRead')}</span>{#if allRead}<span class="kbd">U</span>{/if}
       </button>
-      <button class="act" onclick={() => bulkStar(ids, !allStarred)}>
+      <button class="act" onclick={(e) => void teach('star', e, bulkStar(ids, !allStarred))}>
         <span class:star={!allStarred}><Icon name="star" filled={!allStarred} /></span><span class="grow">{allStarred ? t('act.unstar') : t('act.star')}</span><span class="kbd">S</span>
       </button>
       <div class="anchor">
-        <button class="act" class:on={snoozeOpen} aria-haspopup="menu" aria-expanded={snoozeOpen} onclick={() => (snoozeOpen = !snoozeOpen)}>
+        <button
+          class="act"
+          class:on={snoozeOpen}
+          aria-haspopup="menu"
+          aria-expanded={snoozeOpen}
+          onclick={(e) => {
+            snoozeFromMouse = e.detail > 0;
+            snoozeOpen = !snoozeOpen;
+          }}
+        >
           <Icon name="clock" /><span class="grow">{t('act.snooze')}</span><span class="kbd">H</span>
         </button>
         {#if snoozeOpen}
@@ -87,16 +99,17 @@
             onclose={() => (snoozeOpen = false)}
             onpick={(at) => {
               snoozeOpen = false;
-              void bulkSnooze(ids, at);
+              const done = bulkSnooze(ids, at);
+              if (snoozeFromMouse) void teach('snooze', null, done);
             }}
           />
         {/if}
       </div>
       <button class="act" aria-haspopup="menu" disabled={!oneAccount} title={oneAccount ? undefined : t('bulk.mixedAccounts')} onclick={folderMenu}>
-        <Icon name="folder" /><span class="grow">{t('read.moveTo')}</span>
+        <Icon name="folder" /><span class="grow">{t('read.moveTo')}</span><span class="kbd">V</span>
       </button>
       <button class="act" aria-haspopup="menu" onclick={tagMenu}>
-        <Icon name="tag" /><span class="grow">{t('tag.menu')}</span>
+        <Icon name="tag" /><span class="grow">{t('tag.menu')}</span><span class="kbd">L</span>
       </button>
       <button class="act" onclick={() => setPinned(ids, !allPinned)}>
         <Icon name="pin" /><span class="grow">{allPinned ? t('pin.unpin') : t('pin.pin')}</span><span class="kbd">P</span>

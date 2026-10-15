@@ -32,8 +32,20 @@
   import { settings } from '../../lib/stores/settings.svelte';
   import { bulkMove, senderMessages, setTag, togglePin } from '../../lib/stores/bulk.svelte';
   import { tagStore, tagsOf } from '../../lib/stores/tags.svelte';
+  import { teach } from './teach.svelte';
+
+  interface Props {
+    /** Odak kipinde araç çubuğu yok: eylemler sağdaki listede. */
+    focus?: boolean;
+    /** Yığın kipinde (dar pencere) listeye dönüş düğmesi. */
+    onback?: () => void;
+  }
+
+  let { focus = false, onback }: Props = $props();
 
   let snoozeOpen = $state(false);
+  /** Erteleme menüsü fareyle açıldı (seçimden sonra kısayol öğretilir). */
+  let snoozeFromMouse = false;
   /** Hızlı yanıt kutusu (odak için). */
   let quick = $state<QuickReply>();
   /** "Yanıt gelmezse hatırlat" menüsünün konumu (açıkken). */
@@ -54,6 +66,21 @@
   export function focusReply() {
     if (isDraft) editDraft();
     else quick?.focus();
+  }
+
+  function replyClick(e: MouseEvent) {
+    focusReply();
+    if (!isDraft) void teach('reply', e);
+  }
+
+  /**
+   * Postadaki yıldız düğmesi (MessageView) fareyle basılınca kısayol öğretilir.
+   * Düğme okuma bileşeninin içinde olduğu için tıklama buradan dinlenir.
+   */
+  function starTeach(e: MouseEvent) {
+    const b = (e.target as Element | null)?.closest?.('button');
+    const label = b?.getAttribute('aria-label');
+    if (label && (label === t('act.star') || label === t('act.unstar'))) void teach('star', e);
   }
 
   function editDraft() {
@@ -202,60 +229,106 @@
   }
 </script>
 
-<main class="reader">
+<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
+<main class="reader" class:focus onclick={starTeach}>
   {#if d}
-    <div class="toolbar">
-      <button class="btn-icon" aria-label={t('act.archive')} title="{t('act.archive')} · E" onclick={() => moveTo(selectedIds(), 'archive')}>
-        <Icon name="archive" />
-      </button>
-      <div class="anchor">
-        <button class="btn-icon" class:on={snoozeOpen} aria-label={t('act.snooze')} title="{t('act.snooze')} · H" aria-haspopup="menu" aria-expanded={snoozeOpen} onclick={() => (snoozeOpen = !snoozeOpen)}>
-          <Icon name="clock" />
-        </button>
-        {#if snoozeOpen}
-          <SnoozeMenu
-            onclose={() => (snoozeOpen = false)}
-            onpick={(at) => {
-              snoozeOpen = false;
-              void snooze(selectedIds(), at);
-            }}
-          />
+    {#if !focus}
+      <div class="toolbar">
+        {#if onback}
+          <button class="btn-icon back" aria-label={t('desk.back')} title="{t('desk.back')} · Esc" onclick={onback}>
+            <Icon name="arrowLeft" />
+          </button>
         {/if}
+        <button
+          class="btn-icon"
+          aria-label={t('act.archive')}
+          title="{t('act.archive')} · E"
+          onclick={(e) => void teach('archive', e, moveTo(selectedIds(), 'archive'))}
+        >
+          <Icon name="archive" />
+        </button>
+        <div class="anchor">
+          <button
+            class="btn-icon"
+            class:on={snoozeOpen}
+            aria-label={t('act.snooze')}
+            title="{t('act.snooze')} · H"
+            aria-haspopup="menu"
+            aria-expanded={snoozeOpen}
+            onclick={(e) => {
+              snoozeFromMouse = e.detail > 0;
+              snoozeOpen = !snoozeOpen;
+            }}
+          >
+            <Icon name="clock" />
+          </button>
+          {#if snoozeOpen}
+            <SnoozeMenu
+              onclose={() => (snoozeOpen = false)}
+              onpick={(at) => {
+                snoozeOpen = false;
+                const done = snooze(selectedIds(), at);
+                if (snoozeFromMouse) void teach('snooze', null, done);
+              }}
+            />
+          {/if}
+        </div>
+        <button
+          class="btn-icon"
+          aria-label={t('act.delete')}
+          title="{t('act.delete')} · #"
+          onclick={(e) => void teach('delete', e, moveTo(selectedIds(), 'trash'))}
+        >
+          <Icon name="trash" />
+        </button>
+        <button class="btn-icon" aria-label={t('read.moveTo')} title="{t('read.moveTo')} · V" aria-haspopup="menu" onclick={moveMenu}>
+          <Icon name="folder" />
+        </button>
+        <button
+          class="btn-icon"
+          aria-label={t('act.markUnread')}
+          title="{t('act.markUnread')} · U"
+          onclick={(e) => {
+            void setUnread([d.id], true);
+            void teach('unread', e);
+          }}
+        >
+          <Icon name="mail" />
+        </button>
+        <button
+          class="btn-icon"
+          class:on={d.pinned}
+          aria-label={d.pinned ? t('pin.unpin') : t('pin.pin')}
+          aria-pressed={d.pinned}
+          title="{d.pinned ? t('pin.unpin') : t('pin.pin')} · P"
+          onclick={() => togglePin(selectedIds())}
+        >
+          <Icon name="pin" />
+        </button>
+        <button class="btn-icon" class:on={tags.length > 0} aria-label={t('tag.menu')} title="{t('tag.menu')} · L" aria-haspopup="menu" onclick={tagMenu}>
+          <Icon name="tag" />
+        </button>
+        <span class="grow"></span>
+        {#if isDraft}
+          <button class="btn-primary small" aria-label={t('read.editDraft')} title="{t('read.editDraft')} · R" onclick={editDraft}>
+            <Icon name="pen" size={16} /><span class="lbl">{t('read.editDraft')}</span>
+          </button>
+        {:else}
+          <button class="btn-soft" aria-label={t('act.reply')} title="{t('act.reply')} · R" onclick={replyClick}>
+            <Icon name="reply" size={16} /><span class="lbl">{t('act.reply')}</span>
+          </button>
+          <button class="btn-soft" aria-label={t('act.replyAllLong')} title="{t('act.replyAllLong')} · A" onclick={() => compose('replyAll')}>
+            <Icon name="replyAll" size={16} /><span class="lbl">{t('act.replyAll')}</span>
+          </button>
+          <button class="btn-soft" aria-label={t('act.forward')} title="{t('act.forward')} · F" onclick={() => compose('forward')}>
+            <Icon name="forward" size={16} /><span class="lbl">{t('act.forward')}</span>
+          </button>
+        {/if}
+        <button class="btn-icon" aria-label={t('read.more')} title={t('read.more')} aria-haspopup="menu" onclick={moreMenu}>
+          <Icon name="more" />
+        </button>
       </div>
-      <button class="btn-icon" aria-label={t('act.delete')} title="{t('act.delete')} · Del" onclick={() => moveTo(selectedIds(), 'trash')}>
-        <Icon name="trash" />
-      </button>
-      <button class="btn-icon" aria-label={t('read.moveTo')} title={t('read.moveTo')} aria-haspopup="menu" onclick={moveMenu}>
-        <Icon name="folder" />
-      </button>
-      <button class="btn-icon" aria-label={t('act.markUnread')} title="{t('act.markUnread')} · U" onclick={() => setUnread([d.id], true)}>
-        <Icon name="mail" />
-      </button>
-      <button
-        class="btn-icon"
-        class:on={d.pinned}
-        aria-label={d.pinned ? t('pin.unpin') : t('pin.pin')}
-        aria-pressed={d.pinned}
-        title="{d.pinned ? t('pin.unpin') : t('pin.pin')} · P"
-        onclick={() => togglePin(selectedIds())}
-      >
-        <Icon name="pin" />
-      </button>
-      <button class="btn-icon" class:on={tags.length > 0} aria-label={t('tag.menu')} title={t('tag.menu')} aria-haspopup="menu" onclick={tagMenu}>
-        <Icon name="tag" />
-      </button>
-      <span class="grow"></span>
-      {#if isDraft}
-        <button class="btn-primary small" title="{t('read.editDraft')} · R" onclick={editDraft}><Icon name="pen" size={16} />{t('read.editDraft')}</button>
-      {:else}
-        <button class="btn-soft" title="{t('act.reply')} · R" onclick={focusReply}><Icon name="reply" size={16} />{t('act.reply')}</button>
-        <button class="btn-soft" title="{t('act.replyAllLong')} · A" onclick={() => compose('replyAll')}><Icon name="replyAll" size={16} />{t('act.replyAll')}</button>
-        <button class="btn-soft" title="{t('act.forward')} · F" onclick={() => compose('forward')}><Icon name="forward" size={16} />{t('act.forward')}</button>
-      {/if}
-      <button class="btn-icon" aria-label={t('read.more')} title={t('read.more')} aria-haspopup="menu" onclick={moreMenu}>
-        <Icon name="more" />
-      </button>
-    </div>
+    {/if}
 
     <div class="scroll">
       {#if conversation}
@@ -359,6 +432,58 @@
 
   .toolbar .btn-soft {
     margin-left: 6px;
+  }
+
+  .toolbar .back {
+    margin-right: 6px;
+  }
+
+  /* Dar okuma alanında (ray ve yığın kipleri) yanıt düğmeleri yalnız ikon. */
+  .reader {
+    container: reader / inline-size;
+  }
+
+  @container reader (max-width: 680px) {
+    .toolbar .lbl {
+      display: none;
+    }
+
+    .toolbar .btn-soft,
+    .toolbar .btn-primary {
+      width: 34px;
+      padding: 0;
+    }
+
+    .toolbar .btn-soft {
+      margin-left: 2px;
+      border-color: transparent;
+      background: transparent;
+      color: var(--ink-2);
+    }
+
+    .toolbar .btn-soft:hover {
+      background: var(--hover);
+      color: var(--ink);
+    }
+
+    .article {
+      padding: 24px 24px 20px;
+    }
+
+    .reply-wrap {
+      padding: 10px 24px 16px;
+    }
+  }
+
+  /* Odak kipinde sıradaki posta yalnız saydamlıkla gelir (120 ms). */
+  .focus .article {
+    animation: focus-in var(--t-fast) var(--ease);
+  }
+
+  @keyframes focus-in {
+    from {
+      opacity: 0;
+    }
   }
 
   .anchor {
