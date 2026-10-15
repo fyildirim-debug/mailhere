@@ -17,6 +17,8 @@
   --m-drawer: 300px;
   --m-fab: 56px;
   --m-chip: 32px;
+  /* Satır içi metin aralığı birimsiz (15 px'te 20 px): sistem yazı ölçeğiyle birlikte büyür. */
+  --m-line: 1.3334;
 
   /* Güvenli alan (çentik, gezinme çubuğu). */
   --sat: env(safe-area-inset-top, 0px);
@@ -62,7 +64,9 @@ body {
   }
 }
 
-/* Dokunma hedefleri: ikon düğmeler 44, satır içi 40; menü satırları 48. */
+/* Dokunma hedefleri: ikon düğmeler 44, satır içi 40; menü satırları 48.
+   Metin taşıyan öğelerde yükseklik alt sınırdır (`min-height`): Android
+   WebView sistem yazı ölçeğini büyütünce metin kırpılmaz, öğe uzar. */
 .m-shell .btn-icon {
   width: var(--m-touch);
   height: var(--m-touch);
@@ -74,26 +78,31 @@ body {
 }
 
 .m-shell .menu-item {
-  height: var(--m-nav-row);
+  height: auto;
+  min-height: var(--m-nav-row);
 }
 
 .m-shell .btn-soft,
 .m-shell .btn-primary {
+  height: auto;
   min-height: var(--m-touch);
 }
 
 /* Form denetimleri (ayarlar, hesap ekleme): girdi ve segment 44, ikincil düğme 40. */
 .m-shell .input.small {
-  height: var(--m-touch);
+  height: auto;
+  min-height: var(--m-touch);
   padding: 0 12px;
 }
 
 .m-shell .seg {
-  height: var(--m-touch);
+  height: auto;
+  min-height: var(--m-touch);
 }
 
 .m-shell .btn-ghost {
-  height: 40px;
+  height: auto;
+  min-height: 40px;
   padding: 0 10px;
   font-size: var(--fs-body);
 }
@@ -117,7 +126,8 @@ body {
   flex: none;
   display: inline-flex;
   align-items: center;
-  height: var(--m-chip);
+  gap: 6px;
+  min-height: var(--m-chip);
   padding: 0 14px;
   border: 1px solid var(--line-strong);
   border-radius: 999px;
@@ -145,6 +155,17 @@ body {
   border-color: transparent;
   background: var(--accent-soft);
   color: var(--accent-text);
+}
+
+/* Çipteki okunmamış sayısı: 12/500, sayı yoksa yazılmaz. */
+.m-chip-n {
+  font-size: var(--fs-meta);
+  font-weight: 500;
+  color: var(--ink-3);
+}
+
+.m-chip[aria-pressed='true'] .m-chip-n {
+  color: inherit;
 }
 
 /* ------------------------------------------------------------ bölüm başlığı */
@@ -204,13 +225,26 @@ body {
   margin-top: 12px;
 }
 
-/* Yüzen birincil eylem: 56 px, sağ alt, güvenli alanın üstünde; adı yanında. */
-.m-fab {
+/* Başparmak bölgesi: sağ altta, güvenli alanın üstünde; solda arama, sağda yeni posta. */
+.thumb {
   position: absolute;
   right: calc(var(--m-gutter) + var(--sar));
   bottom: calc(var(--m-gutter) + var(--sab));
   z-index: 5;
-  height: var(--m-fab);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  pointer-events: none;
+}
+
+.thumb > * {
+  pointer-events: auto;
+}
+
+/* Yüzen birincil eylem: 56 px; adı yanında. Aşağı kaydırırken ad 200 ms'de
+   kapanır, yalnız ikon kalır (56 × 56). */
+.m-fab {
+  min-height: var(--m-fab);
   min-width: var(--m-fab);
   padding: 0 20px 0 16px;
   gap: 10px;
@@ -218,16 +252,63 @@ body {
   box-shadow: var(--shadow);
   transition:
     transform var(--t-state) var(--ease),
+    padding var(--t-state) var(--ease),
+    gap var(--t-state) var(--ease),
     opacity var(--t-state),
     filter var(--t-fast);
+}
+
+.m-fab-label {
+  max-width: 12em;
+  overflow: hidden;
+  white-space: nowrap;
+  transition:
+    max-width var(--t-state) var(--ease),
+    opacity var(--t-fast);
+}
+
+.m-fab.small {
+  padding: 0 16px;
+  gap: 0;
+}
+
+.m-fab.small .m-fab-label {
+  max-width: 0;
+  opacity: 0;
 }
 
 .m-fab:active {
   transform: scale(0.96);
 }
 
+/* Arama: 48 px yuvarlak, kâğıt zemin ve kenar (birincil değil). */
+.m-search-fab {
+  display: grid;
+  place-items: center;
+  width: var(--m-touch-lg);
+  height: var(--m-touch-lg);
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--paper);
+  color: var(--ink-2);
+  transition:
+    transform var(--t-state) var(--ease),
+    background var(--t-fast);
+}
+
+.m-search-fab:active {
+  transform: scale(0.94);
+  background: var(--surface);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .m-screen.pushed {
     animation: none;
+  }
+
+  .m-fab,
+  .m-fab-label {
+    transition: none;
   }
 }

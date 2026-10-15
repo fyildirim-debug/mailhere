@@ -1,8 +1,14 @@
 <script lang="ts">
-  // Mobil liste satırı (72 px, sıkı 60): gönderen + saat, konu, önizleme.
-  // Sol oluk: 8 px okunmamış noktası, 40 px avatar; metin 15 px tek ölçekte,
-  // hiyerarşi ağırlık ve mürekkeple kurulur (okunmamış: nokta + 600 + --ink).
-  // Seçim kipinde avatarın yerine işaret gelir; hareket mantığı SwipeRow'da.
+  // Mobil liste satırı (72 px, sıkı 60; sistem yazı ölçeğiyle büyür):
+  // gönderen + saat, konu, önizleme. Sol oluk: 8 px okunmamış noktası, 40 px
+  // avatar; metin 15 px tek ölçekte, hiyerarşi ağırlık ve mürekkeple kurulur
+  // (okunmamış: nokta + 600 + --ink). Birleşik görünümde saatin yanında 8 px
+  // hesap rengi noktası (renkli kenar çizgisi değil).
+  //
+  // Avatar ayrı düğmedir (44 px hedef): dokunmak seçimi başlatır. Seçim
+  // kipinde satırın tamamı işaretler, avatarın yerine işaret gelir. Hareket
+  // mantığı (kaydırma, uzun basış) SwipeRow'da.
+  import type { Account } from '../../lib/api';
   import { locale, t } from '../../lib/i18n/index.svelte';
   import Avatar from '../../lib/ui/Avatar.svelte';
   import Icon from '../../lib/ui/Icon.svelte';
@@ -18,57 +24,74 @@
     checked: boolean;
     /** Seçim kipi: dokunma işaretler, açmaz. */
     selecting: boolean;
+    /** Birleşik görünümde satırın hesabı (renk noktası); tek hesapta yok. */
+    account?: Account;
     onopen: () => void;
     ontoggle: () => void;
   }
 
-  let { message, now, compact, checked, selecting, onopen, ontoggle }: Props = $props();
+  let { message, now, compact, checked, selecting, account, onopen, ontoggle }: Props = $props();
 
   const tags = $derived(tagsOf(message.tags));
   // Yanıt hatırlatmalı (gönderilmiş) satırda beklenen kişi, yani ilk alıcı görünür.
   const who = $derived(message.followUp != null && message.to[0] ? message.to[0] : message.from);
   const awaiting = $derived(followUpDue(message.followUp, now));
+  const selectLabel = $derived(t('list.selectRow', { subject: message.subject || displayName(message.from) }));
 </script>
 
-<button
-  class="row"
-  class:unread={message.unread}
-  class:checked
-  class:compact
-  data-id={message.id}
-  aria-pressed={selecting ? checked : undefined}
-  aria-label={selecting ? t('list.selectRow', { subject: message.subject || displayName(message.from) }) : undefined}
-  onclick={() => (selecting ? ontoggle() : onopen())}
->
-  <span class="dot" aria-hidden="true"></span>
-  <span class="av" aria-hidden="true">
-    {#if checked}
-      <span class="tick"><Icon name="check" size={20} /></span>
-    {:else}
-      <Avatar address={who} size={40} />
-    {/if}
-  </span>
-  <span class="text">
-    <span class="line1">
-      <span class="sender trunc">{displayName(who)}</span>
-      {#if awaiting}<span class="tag">{t('follow.awaiting')}</span>{/if}
-      {#if message.count > 1}<span class="count num">{message.count}</span>{/if}
-      {#if message.hasAttachments}<Icon name="paperclip" size={14} label={t('list.attachment')} class="quiet" />{/if}
-      {#if message.starred}<span class="star"><Icon name="star" size={14} filled label={t('list.starred')} /></span>{/if}
-      {#if message.pinned}<Icon name="pin" size={14} label={t('list.pinnedMark')} class="quiet" />{/if}
-      {#if tags.length}
-        <span class="tags" role="img" aria-label={t('list.tagsOf', { list: tags.map((x) => x.name).join(', ') })}>
-          {#each tags.slice(0, 3) as tg (tg.id)}<span class="tdot" style:background={tg.color}></span>{/each}
-        </span>
+<div class="wrap" class:compact>
+  <button
+    class="row"
+    class:unread={message.unread}
+    class:checked
+    class:compact
+    data-id={message.id}
+    aria-pressed={selecting ? checked : undefined}
+    aria-label={selecting ? selectLabel : undefined}
+    onclick={() => (selecting ? ontoggle() : onopen())}
+  >
+    <span class="dot" aria-hidden="true"></span>
+    <span class="av" aria-hidden="true">
+      {#if checked}
+        <span class="tick"><Icon name="check" size={20} /></span>
+      {:else}
+        <Avatar address={who} size={40} />
       {/if}
-      <span class="time num">{listTime(message.date, now, locale())}</span>
     </span>
-    <span class="subject trunc">{message.subject || '—'}</span>
-    {#if !compact}<span class="snippet trunc">{message.snippet}</span>{/if}
-  </span>
-</button>
+    <span class="text">
+      <span class="line1">
+        <span class="sender trunc">{displayName(who)}</span>
+        {#if awaiting}<span class="tag">{t('follow.awaiting')}</span>{/if}
+        {#if message.count > 1}<span class="count num">{message.count}</span>{/if}
+        {#if message.hasAttachments}<Icon name="paperclip" size={14} label={t('list.attachment')} class="quiet" />{/if}
+        {#if message.starred}<span class="star"><Icon name="star" size={14} filled label={t('list.starred')} /></span>{/if}
+        {#if message.pinned}<Icon name="pin" size={14} label={t('list.pinnedMark')} class="quiet" />{/if}
+        {#if tags.length}
+          <span class="tags" role="img" aria-label={t('list.tagsOf', { list: tags.map((x) => x.name).join(', ') })}>
+            {#each tags.slice(0, 3) as tg (tg.id)}<span class="tdot" style:background={tg.color}></span>{/each}
+          </span>
+        {/if}
+        <span class="time num">
+          {#if account}<span class="acc" style:background={account.color} role="img" aria-label={t('mob.rowAccount', { name: account.name })}></span>{/if}
+          {listTime(message.date, now, locale())}
+        </span>
+      </span>
+      <span class="subject trunc">{message.subject || '—'}</span>
+      {#if !compact}<span class="snippet trunc">{message.snippet}</span>{/if}
+    </span>
+  </button>
+  <!-- Avatara dokunmak seçimi başlatır (seçim kipinde satırın kendisi işaretler). -->
+  {#if !selecting}
+    <button class="pick" aria-label={selectLabel} onclick={ontoggle}></button>
+  {/if}
+</div>
 
 <style>
+  .wrap {
+    position: relative;
+    height: 100%;
+  }
+
   .row {
     display: grid;
     grid-template-columns: 10px 40px minmax(0, 1fr);
@@ -81,7 +104,7 @@
     border-radius: 0;
     background: transparent;
     color: var(--ink);
-    line-height: 20px;
+    line-height: var(--m-line);
     text-align: left;
     transition: background var(--t-fast);
   }
@@ -94,8 +117,30 @@
     background: var(--sel);
   }
 
-  .row:focus-visible {
+  .row:focus-visible,
+  .pick:focus-visible {
     outline-offset: -2px;
+  }
+
+  /* Avatarın üstünde görünmez 44 px hedef (oluk + avatar sütunu). */
+  .pick {
+    position: absolute;
+    top: 10px;
+    left: 22px;
+    width: 52px;
+    height: 52px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+  }
+
+  .compact .pick {
+    top: 4px;
+  }
+
+  .pick:active {
+    background: var(--hover);
   }
 
   /* Okunmamış noktası ilk satırın ortasında; kanalı hep yerinde durur. */
@@ -195,10 +240,20 @@
 
   .time {
     flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     margin-left: auto;
     padding-left: 4px;
     font-size: var(--fs-meta);
     color: var(--ink-3);
+  }
+
+  /* Hesap rengi: 8 px nokta, saatin solunda. */
+  .acc {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
   }
 
   .unread .time {

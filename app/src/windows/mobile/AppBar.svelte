@@ -79,7 +79,7 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    height: calc(var(--m-appbar) + var(--sat));
+    min-height: calc(var(--m-appbar) + var(--sat));
     padding: var(--sat) calc(6px + var(--sar)) 0 calc(6px + var(--sal));
     background: var(--ground);
     border-bottom: 1px solid var(--line);

@@ -8,17 +8,26 @@
   // (`onscrolled`), çipler sayfanın üstüne yapışır. Sanal yerleşim başlığın
   // yüksekliği kadar kaydırılarak okunur.
   import { onMount, untrack } from 'svelte';
-  import { call, type Category } from '../../lib/api';
+  import { fade } from 'svelte/transition';
+  import { call, type Category, type SwipeAction } from '../../lib/api';
   import { t, type MessageKey } from '../../lib/i18n/index.svelte';
+  import { folderLabel } from '../../lib/mail/folders';
   import { emptyState, groupLabel, groupOf, isInboxView, orderRows } from '../../lib/mail/listing';
   import Icon from '../../lib/ui/Icon.svelte';
   import { buildLayout, visibleEntries } from '../../lib/ui/virtual';
   import { snoozeOptions } from '../../lib/util/format';
+  import Menu, { type MenuItem } from '../../lib/ui/Menu.svelte';
+  import { showToast } from '../../lib/ui/toast.svelte';
+  import { bulkMoveToFolder, bulkSetUnread, setPinned } from '../../lib/stores/bulk.svelte';
   import { loadMore, mail, moveTo, refreshCounts, refreshList, rowsOf, setCategory, snooze, type Row } from '../../lib/stores/mail.svelte';
   import { isChecked, openRow, toggleCheck } from '../../lib/stores/selection.svelte';
   import { settings } from '../../lib/stores/settings.svelte';
+  import { categoryUnread } from './counts.svelte';
+  import { junkOf, moveItems } from './folders';
+  import { haptic } from './haptic';
   import MobileRow from './MobileRow.svelte';
-  import SwipeRow from './SwipeRow.svelte';
+  import { connection } from './offline.svelte';
+  import SwipeRow, { removesRow, type SwipeLook } from './SwipeRow.svelte';
 
   interface Props {
     title: string;
@@ -26,22 +35,25 @@
     onopen: (row: Row) => void;
     /** Büyük başlık görünür alandan çıkınca true: uygulama çubuğu başlığı gösterir. */
     onscrolled?: (scrolled: boolean) => void;
+    /** Kaydırma yönü: aşağı inerken true (yüzen düğme daralır), yukarı ya da baştayken false. */
+    ondown?: (down: boolean) => void;
   }
 
-  let { title, subtitle, onopen, onscrolled }: Props = $props();
+  let { title, subtitle, onopen, onscrolled, ondown }: Props = $props();
 
-  const GROUP_H = 34;
   const OVERSCAN = 600;
   const PULL_MAX = 96;
   const PULL_THRESHOLD = 64;
+  /** Yön değişimi bu kadar kaydırmadan sonra sayılır (titremesin). */
+  const DIR_SLOP = 12;
 
   let scroller = $state<HTMLDivElement>();
   let scrollTop = $state(0);
   let viewport = $state(800);
-  /** Kaydırılan alanın başındaki başlık bloğu; sanal yerleşim bunun altından başlar. */
-  let headH = $state(0);
   /** Yalnız büyük başlığın (çipler hariç) yüksekliği: çubuk başlığının eşiği. */
   let titleH = $state(0);
+  /** Çip şeridinin yüksekliği (gelen kutusu dışında 0). */
+  let chipsH = $state(0);
   let now = $state(Date.now());
 
   onMount(() => {
@@ -49,20 +61,43 @@
     return () => clearInterval(id);
   });
 
+  /**
+   * Sistem yazı ölçeği: Android WebView kullanıcının yazı büyütmesini px
+   * yazılara da uygular. Bir satır yüksekliğindeki ölçü metninin gerçek boyu
+   * 20 px'e bölünür; sanal liste satırları bu oranla büyür, metin kırpılmaz.
+   */
+  let probeH = $state(20);
+  const textScale = $derived(Math.max(1, probeH / 20));
   const compact = $derived(settings.value.density === 'compact');
-  const rowH = $derived(compact ? 60 : 72);
+  const rowH = $derived(Math.round((compact ? 60 : 72) * textScale));
+  const groupH = $derived(Math.round(34 * textScale));
   const isInbox = $derived(isInboxView(mail));
+  /** Kaydırılan alanın başındaki başlık bloğu; sanal yerleşim bunun altından başlar. */
+  const headH = $derived(titleH + (isInbox ? chipsH : 0));
   const ctx = $derived({ view: mail.view, search: mail.search, now });
   const rows = $derived(orderRows(rowsOf(mail.items, mail.search == null), ctx));
   const selecting = $derived(mail.checked.length > 0);
   const empty = $derived(emptyState(mail));
 
   const layout = $derived(
-    buildLayout(rows, { rowH, groupH: GROUP_H, tail: 104, groupOf: (m) => groupOf(m, ctx), groupLabel, rowKey: (m) => `m-${m.id}` }),
+    buildLayout(rows, { rowH, groupH, tail: 104, groupOf: (m) => groupOf(m, ctx), groupLabel, rowKey: (m) => `m-${m.id}` }),
   );
   const visible = $derived(visibleEntries(layout.entries, scrollTop - headH, viewport, OVERSCAN));
+  /** Birleşik görünüm (birden çok hesap, hesap seçili değil): satırda hesap rengi noktası. */
+  const unified = $derived(mail.accountId == null && mail.accounts.length > 1);
+  const accountById = $derived(new Map(mail.accounts.map((a) => [a.id, a])));
 
   let scrolled = $state(false);
+  let down = false;
+  /** Geçerli yöndeki en uç konum: ters yöne DIR_SLOP kadar gidilince yön değişir. */
+  let anchor = 0;
+
+  function setDown(v: boolean) {
+    anchor = scrollTop;
+    if (v === down) return;
+    down = v;
+    ondown?.(v);
+  }
 
   function onScroll() {
     if (!scroller) return;
@@ -72,6 +107,10 @@
       scrolled = past;
       onscrolled?.(past);
     }
+    // Aşağı inerken yüzen düğme daralır; yukarı çıkınca ya da başa varınca açılır.
+    if (scrollTop <= 8) setDown(false);
+    else if (down ? scrollTop > anchor : scrollTop < anchor) anchor = scrollTop;
+    else if (Math.abs(scrollTop - anchor) > DIR_SLOP) setDown(!down);
     if (scrollTop + viewport > headH + layout.total - 800) void loadMore();
   }
 
@@ -101,13 +140,84 @@
     onopen(row);
   }
 
-  function archive(row: Row) {
-    void moveTo(row.ids, 'archive');
+  /** Kaydırma eyleminin görünümü; okundu ve sabitle satırın durumuna göre adlanır. */
+  function lookOf(row: Row, a: SwipeAction): SwipeLook | null {
+    switch (a) {
+      case 'archive':
+        return { icon: 'archive', label: t('act.archive'), tone: 'accent' };
+      case 'snooze':
+        return { icon: 'clock', label: t('snooze.tomorrow'), tone: 'amber' };
+      case 'trash':
+        return { icon: 'trash', label: t('act.delete'), tone: 'danger' };
+      case 'spam':
+        return { icon: 'spam', label: t('mob.swipe.spam'), tone: 'danger' };
+      case 'move':
+        return { icon: 'folder', label: t('mob.swipe.move'), tone: 'neutral' };
+      case 'toggleRead':
+        return { icon: 'mail', label: row.unread ? t('mob.read') : t('mob.unread'), tone: 'accent' };
+      case 'pin':
+        return { icon: 'pin', label: row.pinned ? t('pin.unpin') : t('pin.pin'), tone: 'neutral' };
+      default:
+        return null;
+    }
   }
 
-  function snoozeRow(row: Row) {
-    const tomorrow = snoozeOptions(Date.now()).find((o) => o.key === 'tomorrow')!.at;
-    void snooze(row.ids, tomorrow);
+  /** İstenmeyen kutusu olmayan hesapta satır yerinde kalır. */
+  function swipeRemoves(row: Row, a: SwipeAction): boolean {
+    return a === 'spam' ? junkOf(row.accountId) != null : removesRow(a);
+  }
+
+  /** "Klasöre taşı" kaydırmasının açtığı seçici (alt sayfa). */
+  let moving = $state<{ items: MenuItem[] } | null>(null);
+
+  /** Kaydırma eylemi; her biri mevcut geri alma toast'ıyla gelir. */
+  function swipeAction(row: Row, a: SwipeAction) {
+    switch (a) {
+      case 'archive':
+      case 'trash':
+        void moveTo(row.ids, a);
+        break;
+      case 'spam': {
+        const junk = junkOf(row.accountId);
+        if (junk) void bulkMoveToFolder(row.ids, junk, folderLabel(junk));
+        else {
+          haptic('reject');
+          showToast({ text: t('mob.swipe.noJunk') });
+        }
+        break;
+      }
+      case 'move':
+        moving = { items: moveItems(row.accountId, row.mailboxId, (box, label) => void bulkMoveToFolder(row.ids, box, label)) };
+        break;
+      case 'snooze': {
+        const tomorrow = snoozeOptions(Date.now()).find((o) => o.key === 'tomorrow')!.at;
+        void snooze(row.ids, tomorrow);
+        break;
+      }
+      case 'toggleRead':
+        void bulkSetUnread(row.ids, !row.unread);
+        break;
+      case 'pin':
+        void setPinned(row.ids, !row.pinned);
+        break;
+    }
+  }
+
+  function longPress(row: Row) {
+    haptic('confirm');
+    toggleCheck(row.id);
+  }
+
+  // Kategori çiplerinin okunmamış sayıları: sayaçlar ve hesap değişince yenilenir.
+  $effect(() => {
+    if (!isInbox) return;
+    void mail.counts;
+    void mail.accountId;
+    untrack(() => void categoryUnread.refresh(mail.accountId));
+  });
+
+  function chipLabel(label: string, n: number): string | undefined {
+    return n ? t('mob.chipUnread', { name: label, n }) : undefined;
   }
 
   // ------------------------------------------------------- aşağı çekip yenileme
@@ -221,19 +331,29 @@
     style:transform={pull ? `translateY(${pull}px)` : undefined}
   >
     <!-- Büyük başlık: seçim kipinde h1 uygulama çubuğundadır ("2 seçili"); burada yalnız metin kalır. -->
-    <div class="head" bind:clientHeight={headH}>
-      <div class="titles" bind:clientHeight={titleH}>
+    <!-- Başlık ve çipler kaydırıcının doğrudan çocukları: çipler içerik boyunca üste yapışır. -->
+    <div class="titles" bind:clientHeight={titleH}>
         <svelte:element this={selecting ? 'div' : 'h1'} class="big">{title}</svelte:element>
         <span class="sub num">{subtitle}</span>
-      </div>
-      {#if isInbox}
-        <div class="chips" role="group" aria-label={t('list.filter')}>
-          {#each tabs as tab (tab.label)}
-            <button class="m-chip" aria-pressed={mail.category === tab.key} onclick={() => setCategory(tab.key)}>{t(tab.label)}</button>
-          {/each}
-        </div>
-      {/if}
+        <!-- Çevrimdışı durum satırı: bağlantı gelince söner (200 ms). -->
+        {#if connection.offline}
+          <span class="status num" role="status" transition:fade={{ duration: connection.reduced ? 0 : 200 }}>
+            {connection.pending ? t('mob.offlinePending', { n: connection.pending }) : t('mob.offline')}
+          </span>
+        {/if}
     </div>
+    {#if isInbox}
+      <div class="chips" role="group" aria-label={t('list.filter')} bind:clientHeight={chipsH}>
+        {#each tabs as tab (tab.label)}
+          {@const n = categoryUnread.of(tab.key)}
+          <button class="m-chip" aria-pressed={mail.category === tab.key} aria-label={chipLabel(t(tab.label), n)} onclick={() => setCategory(tab.key)}>
+            {t(tab.label)}{#if n}<span class="m-chip-n num" aria-hidden="true">{n > 99 ? '99+' : n}</span>{/if}
+          </button>
+        {/each}
+      </div>
+    {/if}
+    <!-- Yazı ölçeği ölçüsü (görünmez): satır yüksekliği bununla büyür. -->
+    <span class="probe" aria-hidden="true" bind:clientHeight={probeH}>Ag</span>
 
     {#if rows.length}
       <div class="inner" style:height="{layout.total}px">
@@ -243,8 +363,25 @@
               <div class="group">{entry.label}</div>
             {:else}
               {@const row = rows[entry.index]}
-              <SwipeRow disabled={selecting} onarchive={() => archive(row)} onsnooze={() => snoozeRow(row)} onlongpress={() => toggleCheck(row.id)}>
-                <MobileRow message={row} {now} {compact} checked={isChecked(row.id)} {selecting} onopen={() => open(row)} ontoggle={() => toggleCheck(row.id)} />
+              <SwipeRow
+                disabled={selecting}
+                left={settings.value.swipeLeft}
+                right={settings.value.swipeRight}
+                look={(a) => lookOf(row, a)}
+                removes={(a) => swipeRemoves(row, a)}
+                onaction={(a) => swipeAction(row, a)}
+                onlongpress={() => longPress(row)}
+              >
+                <MobileRow
+                  message={row}
+                  {now}
+                  {compact}
+                  checked={isChecked(row.id)}
+                  {selecting}
+                  account={unified ? accountById.get(row.accountId) : undefined}
+                  onopen={() => open(row)}
+                  ontoggle={() => toggleCheck(row.id)}
+                />
               </SwipeRow>
             {/if}
           </div>
@@ -263,6 +400,8 @@
     {/if}
   </div>
 </section>
+
+{#if moving}<Menu title={t('read.moveTo')} items={moving.items} onclose={() => (moving = null)} />{/if}
 
 <style>
   .list {
@@ -333,13 +472,8 @@
 
   /* ------------------------------------------------------------ büyük başlık */
 
-  .head {
-    flex: none;
-    display: flex;
-    flex-direction: column;
-  }
-
   .titles {
+    flex: none;
     display: flex;
     flex-direction: column;
     gap: 2px;
@@ -361,8 +495,26 @@
     color: var(--ink-3);
   }
 
+  /* Çevrimdışı: tek satır, sessiz; ne olduğu + ne bekleneceği. */
+  .status {
+    font-size: var(--fs-meta);
+    color: var(--ink-3);
+  }
+
+  .probe {
+    position: absolute;
+    top: 0;
+    left: 0;
+    visibility: hidden;
+    pointer-events: none;
+    font-size: var(--fs-body);
+    line-height: var(--m-line);
+    white-space: nowrap;
+  }
+
   /* Çipler yatay kayar; içerik akınca sayfanın üstüne yapışır. */
   .chips {
+    flex: none;
     position: sticky;
     top: 0;
     z-index: 2;
