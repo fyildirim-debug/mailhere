@@ -10,7 +10,7 @@
   import { mail, selectedIds, setUnread, setView, toggleStar } from '../../lib/stores/mail.svelte';
   import Reader from './Reader.svelte';
   import { teach, type Teachable } from './teach.svelte';
-  import { archiveCurrent, back, deleteCurrent, finished, progress, skip, snoozeCurrent, stopTriage } from './triage.svelte';
+  import { archiveCurrent, back, deleteCurrent, finished, progress, skip, snoozeCurrent, stopTriage } from './triage-state.svelte';
 
   interface Props {
     /** V / L seçicilerini açar (ana pencere yönetir). */

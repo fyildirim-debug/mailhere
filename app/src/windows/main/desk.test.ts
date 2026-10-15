@@ -6,7 +6,7 @@ import { mail } from '../../lib/stores/mail.svelte';
 import { fold, matchRange, score, scoreText } from './fuzzy';
 import { clamp, LIST, listWidthFor, modeFor, READER_MIN } from './layout.svelte';
 import { SCALES, stepped } from './scale.svelte';
-import { back, finished, progress, skip, startTriage, stopTriage, triage } from './triage.svelte';
+import { back, finished, progress, skip, startTriage, stopTriage, triage } from './triage-state.svelte';
 
 describe('bulanık eşleşme', () => {
   it('Türkçe harfler ve aksanlar katlanır', () => {

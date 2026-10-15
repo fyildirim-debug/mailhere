@@ -19,7 +19,7 @@
   import { matchRange, score } from './fuzzy';
   import { desk, showReader, toggleSidebar } from './layout.svelte';
   import { scale, setScale, stepped } from './scale.svelte';
-  import { startTriage } from './triage.svelte';
+  import { startTriage } from './triage-state.svelte';
 
   interface Props {
     onclose: () => void;

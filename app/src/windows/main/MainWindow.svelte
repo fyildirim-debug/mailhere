@@ -49,7 +49,7 @@
   } from './layout.svelte';
   import { applyStoredScale, percent, scale, setScale, stepped } from './scale.svelte';
   import { learned } from './teach.svelte';
-  import { archiveCurrent, back, deleteCurrent, moveCurrent, skip, startTriage, stopTriage, triage } from './triage.svelte';
+  import { archiveCurrent, back, deleteCurrent, moveCurrent, skip, startTriage, stopTriage, triage } from './triage-state.svelte';
 
   let reader = $state<ReturnType<typeof Reader>>();
   let focusView = $state<ReturnType<typeof Triage>>();

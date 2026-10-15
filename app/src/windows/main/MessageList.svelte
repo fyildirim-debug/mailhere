@@ -14,7 +14,7 @@
   import MessageRow from './MessageRow.svelte';
   import SearchChips from './SearchChips.svelte';
   import { desk } from './layout.svelte';
-  import { startTriage } from './triage.svelte';
+  import { startTriage } from './triage-state.svelte';
 
   interface Props {
     /** Sütun genişliği (px); verilmezse kalan alanı doldurur (yığın kipi). */
