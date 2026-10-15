@@ -10,7 +10,8 @@
 //! rules, tags }`. Aktarılmayan: postalar, taslaklar, giden kutusu,
 //! hatırlatmalar, elek durumu, sabitleme ve posta etiketleri, klasör
 //! gizleme. Cihaza özgü kalan ayarlar: kart konumu ve süresi, yerel bildirim,
-//! otomatik güncelleme ve onaylı sertifikalar ([`merge_settings`]).
+//! bildirim düğmeleri, kaydırma eylemleri, silme sonrası davranış, otomatik
+//! güncelleme ve onaylı sertifikalar ([`merge_settings`]).
 //!
 //! # Uygulama sırası ([`apply_package`])
 //! ayarlar → etiketler (ad çakışırsa yereldekine eşlenir, kuralların etiket
@@ -283,9 +284,10 @@ pub fn validate_package(p: &TransferPackage) -> AppResult<()> {
 }
 
 /// Gelen ayarları yerel ayarların üstüne yazar; cihaza özgü olanlar
-/// (kart konumu ve süresi, yerel bildirim, otomatik güncelleme, telefonun
-/// kaydırma eylemleri ve silme sonrası davranışı) ve onaylı sertifikalar
-/// yerelde kalır.
+/// (kart konumu ve süresi, yerel bildirim, bildirim düğmeleri, otomatik
+/// güncelleme, telefonun kaydırma eylemleri ve silme sonrası davranışı) ve
+/// onaylı sertifikalar yerelde kalır. Bildirim düğmeleri cihaza göre
+/// seçilir: masaüstü kartı ile telefon bildirimi farklı kullanılır.
 pub fn merge_settings(local: &Settings, incoming: Settings) -> Settings {
     Settings {
         card_position: local.card_position,
@@ -296,6 +298,7 @@ pub fn merge_settings(local: &Settings, incoming: Settings) -> Settings {
         after_remove: local.after_remove,
         swipe_left: local.swipe_left,
         swipe_right: local.swipe_right,
+        notify_actions: local.notify_actions.clone(),
         ..incoming
     }
 }
@@ -1053,8 +1056,8 @@ pub async fn transfer_apply(
 mod tests {
     use super::*;
     use mh_core::{
-        CardPosition, Density, RuleCondition, RuleMatch, RuleOp, Security, ServerConfig, Signature,
-        Theme, TransferStateKind,
+        CardPosition, Density, NotifyAction, RuleCondition, RuleMatch, RuleOp, Security,
+        ServerConfig, Signature, Theme, TransferStateKind,
     };
     use mh_sync::MemorySecrets;
 
@@ -1601,17 +1604,27 @@ mod tests {
         assert_eq!(merged.theme, Theme::Dark);
         assert_eq!(merged.density, Density::Compact);
         assert_eq!(merged.vip, incoming.vip);
-        // Telefonun kaydırma ve silme sonrası seçimi bilgisayardan ezilmez.
+        // Telefonun kaydırma, silme sonrası ve bildirim düğmesi seçimi
+        // bilgisayardan ezilmez.
         let phone = Settings {
             swipe_left: mh_core::SwipeAction::Spam,
             swipe_right: mh_core::SwipeAction::Move,
             after_remove: mh_core::AfterRemove::Next,
+            notify_actions: vec![NotifyAction::MarkRead, NotifyAction::Archive],
             ..local.clone()
         };
-        let merged = merge_settings(&phone, incoming.clone());
+        let desktop = Settings {
+            notify_actions: vec![NotifyAction::Reply],
+            ..incoming.clone()
+        };
+        let merged = merge_settings(&phone, desktop);
         assert_eq!(merged.swipe_left, mh_core::SwipeAction::Spam);
         assert_eq!(merged.swipe_right, mh_core::SwipeAction::Move);
         assert_eq!(merged.after_remove, mh_core::AfterRemove::Next);
+        assert_eq!(
+            merged.notify_actions,
+            vec![NotifyAction::MarkRead, NotifyAction::Archive]
+        );
 
         // Uygulama yoluyla: depoya yazılan birleşik ve sadeleştirilmiş ayar.
         let side = Side::new();

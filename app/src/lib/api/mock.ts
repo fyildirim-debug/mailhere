@@ -584,6 +584,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
         ...defaultSettings, theme: 'dark', density: 'compact', vip: ['elif@ornek.com.tr'], conversationView: false,
         // Cihaza özgü alanlar: uygulanırken yereldekiler kalır.
         cardSeconds: 30, cardPosition: 'topLeft', nativeNotifications: true, autoUpdate: false,
+        notifyActions: ['markRead', 'archive'], swipeLeft: 'trash', swipeRight: 'pin', afterRemove: 'next',
       },
       accounts: [
         { account: work, hasSecret: true },
@@ -1418,6 +1419,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
           ...pkg.settings,
           cardPosition: local.cardPosition, cardSeconds: local.cardSeconds, nativeNotifications: local.nativeNotifications,
           autoUpdate: local.autoUpdate, trustedCerts: local.trustedCerts,
+          notifyActions: local.notifyActions, swipeLeft: local.swipeLeft, swipeRight: local.swipeRight, afterRemove: local.afterRemove,
           quickReplies: cleanQuickReplies(pkg.settings.quickReplies), templates: cleanTemplates(pkg.settings.templates),
           savedSearches: cleanSavedSearches(pkg.settings.savedSearches),
         };

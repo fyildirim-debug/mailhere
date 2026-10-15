@@ -134,7 +134,10 @@ describe('telefon tarafı: alma ve uygulama', () => {
   it('uygulama: var olan güncellenir, yeni eklenir, etiket adı eşlenir, hesabı olmayan kural atlanır, cihaza özgü ayarlar korunur', async () => {
     const b = createMockBackend({ now: NOW });
     const local = await b.call('settings_set', {
-      settings: { ...b.state.settings, cardSeconds: 20, cardPosition: 'bottomLeft', nativeNotifications: true, autoUpdate: false, theme: 'light' },
+      settings: {
+        ...b.state.settings, cardSeconds: 20, cardPosition: 'bottomLeft', nativeNotifications: true, autoUpdate: false, theme: 'light',
+        notifyActions: ['reply', 'spam'], swipeLeft: 'spam', swipeRight: 'move', afterRemove: 'previous',
+      },
     });
     expect(local.cardSeconds).toBe(20);
     const changed = vi.fn();
@@ -182,6 +185,9 @@ describe('telefon tarafı: alma ve uygulama', () => {
     expect(s.cardPosition).toBe('bottomLeft');
     expect(s.nativeNotifications).toBe(true);
     expect(s.autoUpdate).toBe(false);
+    // Bildirim düğmeleri, kaydırma ve silme sonrası davranış da bu cihazın.
+    expect(s.notifyActions).toEqual(['reply', 'spam']);
+    expect([s.swipeLeft, s.swipeRight, s.afterRemove]).toEqual(['spam', 'move', 'previous']);
     expect(settings).toHaveBeenCalledTimes(1);
     expect(changed).toHaveBeenCalled();
     // Aynı önizleme ikinci kez uygulanamaz.
