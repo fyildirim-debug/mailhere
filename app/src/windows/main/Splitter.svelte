@@ -22,8 +22,8 @@
   function down(e: PointerEvent) {
     if (e.button !== 0) return;
     e.preventDefault();
+    // Odak alınmaz: fareyle sürükledikten sonra Enter yine postayı açsın.
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    (e.currentTarget as HTMLElement).focus();
     drag = { x: e.clientX, w: value };
   }
 
