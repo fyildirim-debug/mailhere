@@ -117,6 +117,43 @@ test('bildirim izni: daha önce sorulduysa yeniden sorulmaz; ayarlardan verilir'
   await expect(allow).toHaveCount(0);
 });
 
+test('bildirim sağlığı: anlık bildirim açılır, pil kısıtlaması kaldırılır', async ({ page }) => {
+  await page.goto('#/main');
+  await openSettings(page, 'Bildirimler');
+  const system = page.locator('.set-row', { hasText: 'Telefon bildirimleri' });
+  const instant = page.getByRole('switch', { name: 'Anlık bildirim' });
+  const row = page.locator('.set-row', { has: instant });
+  await expect(instant).not.toBeChecked();
+  await expect(row).toContainText('Kapalıyken yeni posta');
+  // Telefon bildirimleri satırının altında; anahtar adıyla aynı satırda, sağ kenarda.
+  const above = await system.boundingBox();
+  const own = await row.boundingBox();
+  expect(own!.y).toBeGreaterThanOrEqual(above!.y + above!.height - 1);
+  const sw = await instant.boundingBox();
+  expect(sw!.x + sw!.width).toBeGreaterThan(page.viewportSize()!.width - 40);
+  await instant.click();
+  await expect(instant).toBeChecked();
+  await expect(row).toContainText('Arka planda da bağlı');
+  await instant.click();
+  await expect(instant).not.toBeChecked();
+  await expect(row).toContainText('Kapalıyken yeni posta');
+
+  // Pil kısıtlaması: açıklama + düğme; kaldırılınca "Yok" ve düğme kalkar.
+  const battery = page.locator('.set-row', { hasText: 'Pil kısıtlaması' });
+  await expect(battery).toContainText('bildirim gecikir');
+  const lift = battery.getByRole('button', { name: 'Kısıtlamayı kaldır', exact: true });
+  await expectTouchHeight(lift);
+  await lift.click();
+  await expect(battery.getByText('Yok', { exact: true })).toBeVisible();
+  await expect(battery).toContainText('uyutmaz');
+  await expect(lift).toHaveCount(0);
+  // Üretici notu bağlantı değil, kısa açıklama.
+  await expect(page.getByText(/^Bazı üreticiler/)).toBeVisible();
+  await expect(page.getByRole('link', { name: /dontkillmyapp/i })).toHaveCount(0);
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
+  expect(overflow).toBe(false);
+});
+
 test('tema ve dil Genel bölümünden değişir', async ({ page }) => {
   await page.goto('#/main');
   await openSettings(page, 'Genel');
