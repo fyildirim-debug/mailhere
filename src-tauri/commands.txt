@@ -5,6 +5,7 @@
 open_quick
 notify_layout
 notify_hide
+notify_focus
 notify_pending
 demo_notify
 update_check

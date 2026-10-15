@@ -93,6 +93,30 @@ test('masaüstüne özgü alanlar mobilde gizli: bildirim kartı, güncelleyici,
   await expect(page.getByText('Klavye kısayolları')).toHaveCount(0);
 });
 
+test('bildirim düğmeleri: beş anahtar, en çok üç; satır dokunma hedefi, kart önizlemesi yok', async ({ page }) => {
+  await page.goto('#/main');
+  await openSettings(page, 'Bildirimler');
+  await expect(page.getByRole('heading', { level: 3, name: 'Bildirim düğmeleri' })).toBeVisible();
+  await expect(page.getByText('Telefon bildiriminin altında, bu sırayla durur. En çok üç düğme.')).toBeVisible();
+  const sw = (name: string) => page.getByRole('switch', { name, exact: true });
+  for (const name of ['Yanıtla', 'Sil', 'İstenmeyen']) await expect(sw(name)).toBeChecked();
+  await expect(sw('Okundu')).toBeDisabled();
+  await expect(sw('Arşivle')).toBeDisabled();
+  await expect(page.getByText('Üç düğme seçili. Başka birini seçmek için önce birini kapat.')).toBeVisible();
+  // Satırın tamamı anahtarın etiketi: satıra dokununca değişir.
+  const row = page.locator('label').filter({ has: sw('İstenmeyen') });
+  await expectTouchHeight(row);
+  await row.getByText('Hesabın İstenmeyen klasörüne taşır.').click();
+  await expect(sw('İstenmeyen')).not.toBeChecked();
+  await expect(sw('Arşivle')).toBeEnabled();
+  await sw('Arşivle').check();
+  expect(await page.evaluate(() => window.__mh.state.settings.notifyActions)).toEqual(['reply', 'archive', 'trash']);
+  // Kart önizlemesi masaüstüne özgü; ekran yatay taşmaz.
+  await expect(page.getByRole('img', { name: /Kart önizlemesi/ })).toHaveCount(0);
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
+  expect(overflow).toBe(false);
+});
+
 test('bildirim izni: hesap varken ilk açılışta bir kez istenir', async ({ page }) => {
   await page.goto('#/main');
   await expect(h1(page, 'Gelen Kutusu')).toBeVisible();

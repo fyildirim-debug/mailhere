@@ -73,6 +73,12 @@ pub async fn notify_layout(app: AppHandle, height: f64) -> Res<()> {
     crate::windows::notify_layout(&app, height).map_err(mh_app::state::internal)
 }
 
+/// Yanıt alanı açılınca kart penceresi klavye odağı alır.
+#[tauri::command]
+pub async fn notify_focus(app: AppHandle) -> Res<()> {
+    crate::windows::notify_focus(&app).map_err(mh_app::state::internal)
+}
+
 #[tauri::command]
 pub async fn notify_hide(app: AppHandle) -> Res<()> {
     crate::windows::notify_hide(&app).map_err(mh_app::state::internal)

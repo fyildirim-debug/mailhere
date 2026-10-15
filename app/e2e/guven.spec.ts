@@ -144,9 +144,9 @@ test('doğrulama kodu: 15 px kalın sabit genişlikli rakam; Kopyala panoya yaza
 test('bildirim kartı: doğrulama kodunda "Kodu kopyala" birincil eylem', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await page.goto('/#/notify');
-  // Örnek kartta kod yok: eylemler değişmez.
+  // Örnek kartta kod yok: birincil eylem "Aç".
   const plain = page.getByRole('alertdialog', { name: 'Yeni posta: Ayşe Demir' });
-  await expect(plain.getByRole('button', { name: 'Arşivle' })).toBeVisible();
+  await expect(plain.getByRole('button', { name: 'Aç', exact: true })).toHaveClass(/btn-primary/);
   await expect(plain.getByRole('button', { name: 'Kodu kopyala' })).toHaveCount(0);
 
   await page.evaluate(async () => {
@@ -163,8 +163,10 @@ test('bildirim kartı: doğrulama kodunda "Kodu kopyala" birincil eylem', async 
   await copy.click();
   await expect(card.getByRole('button', { name: 'Kod kopyalandı' })).toBeVisible();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('482913');
-  // Kart sığar: eylemler kartın içinde kalır.
+  // "Aç" ikincil kalır; seçilen üç düğme sığmak için ikona iner, adları kalır.
+  await expect(card.getByRole('button', { name: 'Aç', exact: true })).toHaveClass(/btn-soft/);
   const cardBox = (await card.boundingBox())!;
-  const last = (await card.getByRole('button', { name: 'Okundu say' }).boundingBox())!;
+  const last = (await card.getByRole('button', { name: 'İstenmeyen olarak işaretle' }).boundingBox())!;
   expect(last.x + last.width).toBeLessThanOrEqual(cardBox.x + cardBox.width);
+  expect(await card.getByRole('group', { name: 'Posta eylemleri' }).evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
 });

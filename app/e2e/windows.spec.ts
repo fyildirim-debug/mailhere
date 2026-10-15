@@ -26,12 +26,13 @@ test('hesap ekleme: adres → ayarlar → parola → hazır', async ({ page }) =
   await expect(page.getByText('Burası sakin')).toBeVisible();
 });
 
-test('bildirim kartı görünür, Okundu say kartı kapatır', async ({ page }) => {
+test('bildirim kartı görünür, Kapat kartı kapatır', async ({ page }) => {
   await page.goto('/#/notify');
   const card = page.getByRole('alertdialog', { name: 'Yeni posta: Ayşe Demir' });
   await expect(card).toBeVisible();
   await expect(card).toContainText('Cumartesi kahvaltı?');
-  await card.getByRole('button', { name: 'Okundu say' }).click();
+  // Düğmeler ve yanıt alanı: e2e/bildirim.spec.ts.
+  await card.getByRole('button', { name: 'Kapat' }).click();
   await expect(card).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Bildirimi yeniden göster' })).toBeVisible();
 });

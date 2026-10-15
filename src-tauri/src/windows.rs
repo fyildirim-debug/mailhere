@@ -224,6 +224,18 @@ pub fn notify_layout(app: &AppHandle, height: f64) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Kart penceresine klavye odağı verir. Pencere odak çalmadan açılır
+/// (`focused(false)`); karttaki yanıt alanına yazılabilmesi için kullanıcı
+/// "Yanıtla"ya basınca arayüz odak ister. Görünmeyen pencere öne alınmaz.
+pub fn notify_focus(app: &AppHandle) -> tauri::Result<()> {
+    if let Some(w) = app.get_webview_window(NOTIFY) {
+        if w.is_visible()? {
+            w.set_focus()?;
+        }
+    }
+    Ok(())
+}
+
 pub fn notify_hide(app: &AppHandle) -> tauri::Result<()> {
     if let Some(w) = app.get_webview_window(NOTIFY) {
         w.hide()?;

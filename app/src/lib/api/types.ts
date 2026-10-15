@@ -828,6 +828,8 @@ export interface Commands {
   notify_action: [{ id: MessageId; action: NotifyAction }, null];
   /** Bildirimden satır içi yanıt: giden kutusuna girer, okundu sayar; `send_cancel` ile geri alınır. */
   notify_reply: [{ id: MessageId; text: string }, OutboxItem];
+  /** Masaüstü: kart penceresine klavye odağı (yanıt alanı açılınca; pencere odak çalmadan açılır). */
+  notify_focus: [Record<string, never>, null];
   demo_notify: [Record<string, never>, null];
 
   // JMAP (Stalwart vb.)

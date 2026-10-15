@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "notify",
-  "description": "Bildirim kartı: yalnız kart, bildirim düğmeleri (okundu, arşiv, sil, istenmeyen, yanıt ve geri alma) ve pencere açma komutları.",
+  "description": "Bildirim kartı: yalnız kart, bildirim düğmeleri (okundu, arşiv, sil, istenmeyen, yanıt ve geri alma; yanıt alanı için kart penceresine odak ve yanıtlanan postanın Reply-To alıcıları) ve pencere açma komutları.",
   "windows": [
     "notify"
   ],
@@ -11,10 +11,12 @@
     "allow-settings-get",
     "allow-notify-layout",
     "allow-notify-hide",
+    "allow-notify-focus",
     "allow-notify-pending",
     "allow-notify-snooze",
     "allow-open-main",
     "allow-open-quick",
+    "allow-message-get",
     "allow-messages-flag",
     "allow-messages-move",
     "allow-notify-action",

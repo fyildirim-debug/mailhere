@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { call, toAppError, type Account, type CardPosition, type NotifyMode } from '../../../lib/api';
+  import { call, NOTIFY_ACTIONS_MAX, toAppError, type Account, type CardPosition, type NotifyAction, type NotifyMode } from '../../../lib/api';
   import { t, type MessageKey } from '../../../lib/i18n/index.svelte';
   import Icon from '../../../lib/ui/Icon.svelte';
   import { showToast } from '../../../lib/ui/toast.svelte';
@@ -7,6 +7,7 @@
   import { mail, reloadAccounts } from '../../../lib/stores/mail.svelte';
   import { settings, updateSettings } from '../../../lib/stores/settings.svelte';
   import { accountUpdate } from './account';
+  import { NOTIFY_ACTION_INFO, NOTIFY_ACTION_ORDER, shownNotifyActions, toggleNotifyAction } from '../../../lib/notify-actions';
   import { notifyPermission, requestNotifyPermission, type NotifyPermission } from '../../../lib/notify-permission';
   import {
     backgroundMode,
@@ -34,6 +35,19 @@
     ['topLeft', 'set.pos.topLeft'],
   ];
   const cardSeconds = [5, 8, 12, 20];
+
+  // Bildirim düğmeleri: kanonik sırada en çok üç; üçü seçiliyken diğerleri kapalı.
+  const naId = $props.id();
+  const chosen = $derived(shownNotifyActions(s.notifyActions));
+  const full = $derived(chosen.length >= NOTIFY_ACTIONS_MAX);
+
+  function setNotifyAction(a: NotifyAction, on: boolean) {
+    void updateSettings({ notifyActions: toggleNotifyAction(chosen, a, on) });
+  }
+
+  function actionHint(a: NotifyAction): MessageKey {
+    return mobile && a === 'reply' ? 'mob.notify.replyHint' : NOTIFY_ACTION_INFO[a].hint;
+  }
 
   let vipText = $state('');
   $effect(() => {
@@ -246,6 +260,51 @@
 </div>
 {/if}
 
+<h3 class="set-h">{t('set.notifyActionsTitle')}</h3>
+<div class="set-row top">
+  <span class="set-name" id="{naId}-name"
+    >{t('set.notifyActions')}<span class="set-hint" id="{naId}-hint">{t(mobile ? 'mob.notify.actionsHint' : 'set.notifyActionsHint')}</span></span
+  >
+  <div class="na">
+    <div class="na-list" role="group" aria-labelledby="{naId}-name" aria-describedby="{naId}-hint">
+      {#each NOTIFY_ACTION_ORDER as a (a)}
+        {@const info = NOTIFY_ACTION_INFO[a]}
+        {@const on = chosen.includes(a)}
+        <label class="na-row" class:off={!on && full}>
+          <Icon name={info.icon} size={mobile ? 22 : 16} />
+          <span class="na-text">
+            <span class="na-name">{t(info.label)}</span>
+            <span class="set-hint" id="{naId}-{a}">{t(actionHint(a))}</span>
+          </span>
+          <input
+            type="checkbox"
+            role="switch"
+            class="switch"
+            aria-label={t(info.label)}
+            aria-describedby="{naId}-{a}"
+            checked={on}
+            disabled={!on && full}
+            onchange={(e) => setNotifyAction(a, (e.currentTarget as HTMLInputElement).checked)}
+          />
+        </label>
+      {/each}
+    </div>
+    <p class="set-hint na-full" role="status">{full ? t('set.notifyActionsFull') : ''}</p>
+    {#if !mobile}
+      <!-- Kartın düğme sırası; yalnız görünüm, etkileşimsiz. -->
+      <div class="na-preview" role="img" aria-label={t('set.notifyActionsPreviewLabel', { list: [t('act.open'), ...chosen.map((a) => t(NOTIFY_ACTION_INFO[a].label))].join(', ') })}>
+        <span class="meta">{t('set.notifyActionsPreview')}</span>
+        <span class="na-btns" aria-hidden="true">
+          <span class="btn-primary small">{t('act.open')}</span>
+          {#each chosen as a (a)}
+            <span class="btn-soft small">{t(NOTIFY_ACTION_INFO[a].label)}</span>
+          {/each}
+        </span>
+      </div>
+    {/if}
+  </div>
+</div>
+
 <h3 class="set-h">{t('set.quiet')}</h3>
 <div class="set-row top">
   <span class="set-name">{t('set.quietOn')}<span class="set-hint">{t(mobile ? 'mob.settings.quietHint' : 'set.quietHint')}</span></span>
@@ -330,6 +389,87 @@
     justify-self: start;
   }
 
+  .na {
+    display: flex;
+    flex-direction: column;
+    max-width: 480px;
+  }
+
+  .na-list {
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Satırın tamamı anahtarın etiketi: dokununca açılıp kapanır. */
+  .na-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 48px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--line);
+    cursor: pointer;
+  }
+
+  .na-row:last-child {
+    border-bottom: 0;
+  }
+
+  .na-row > :global(.icon) {
+    color: var(--ink-2);
+  }
+
+  .na-text {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .na-name {
+    font-weight: 500;
+  }
+
+  /* Üçü seçiliyken seçilemeyenler geri çekilir. */
+  .na-row.off {
+    cursor: default;
+  }
+
+  .na-row.off .na-name {
+    color: var(--ink-2);
+  }
+
+  .na-full {
+    margin: 4px 0 0;
+  }
+
+  /* Canlı bölge hep yerinde durur (duyurulsun); boşken yer kaplamaz. */
+  .na-full:empty {
+    margin: 0;
+  }
+
+  .na-preview {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 12px;
+    padding: 12px 14px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-card);
+    background: var(--surface);
+  }
+
+  .na-btns {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .na-btns > span {
+    pointer-events: none;
+  }
+
   .quiet {
     display: flex;
     flex-wrap: wrap;
@@ -350,6 +490,27 @@
   @container settings (max-width: 600px) {
     .acc {
       min-height: 44px;
+    }
+
+    .na {
+      max-width: none;
+    }
+
+    /* Mobil ayar listesi: ayraç etiket hizasından başlar (ikon 22 + 14). */
+    .na-row {
+      position: relative;
+      min-height: 56px;
+      gap: 14px;
+      border-bottom: 0;
+    }
+
+    .na-row + .na-row::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 36px;
+      right: 0;
+      border-top: 1px solid var(--line);
     }
 
     .quiet {

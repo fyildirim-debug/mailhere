@@ -100,6 +100,7 @@ fn main() {
             windows::open_quick,
             notify_card::notify_layout,
             notify_card::notify_hide,
+            notify_card::notify_focus,
             notify_card::notify_pending,
             notify_card::demo_notify,
             updater::update_check,

@@ -928,6 +928,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     notify_hide: () => null,
     notify_pending: () => [],
     notify_snooze: () => null,
+    notify_focus: () => null,
     notify_action: ({ id, action }) => {
       const m = find(id);
       switch (action) {

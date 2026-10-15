@@ -1,20 +1,57 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
-  import { call, EVENTS, isTauri, on, type NotifyEvent } from '../../lib/api';
+  import { call, EVENTS, isTauri, on, toAppError, type NotifyAction, type NotifyEvent } from '../../lib/api';
   import { t } from '../../lib/i18n/index.svelte';
   import Avatar from '../../lib/ui/Avatar.svelte';
   import Icon from '../../lib/ui/Icon.svelte';
+  import type { IconName } from '../../lib/ui/icons';
   import Logo from '../../lib/ui/Logo.svelte';
   import { displayName } from '../../lib/util/format';
   import { settings } from '../../lib/stores/settings.svelte';
   import { copyText } from '../../lib/mail/otp';
+  import { NOTIFY_ACTION_INFO, shownNotifyActions } from '../../lib/notify-actions';
+  import NotifyActs from './NotifyActs.svelte';
+  import NotifyReply from './NotifyReply.svelte';
+
+  /** Kartın hali: posta, yerinde yanıt ya da onay satırı ("Silindi · Geri al"). */
+  type Mode = 'idle' | 'reply' | 'done';
+
+  interface Done {
+    text: string;
+    sub: string;
+    icon: IconName;
+    /** Geri al; yoksa satır yalnız bilgi verir. */
+    undo: (() => Promise<void>) | null;
+    /** Kart bu süre sonra kapanır. */
+    ms: number;
+    /**
+     * Süre gerçek bir saati izler (giden kutusundaki gönderim): üzerine
+     * gelince durmaz, çünkü gönderim de durmaz.
+     */
+    fixed?: boolean;
+  }
 
   interface Card extends NotifyEvent {
     key: number;
     at: number;
+    mode: Mode;
+    /** Yanıt taslağı: Vazgeç ve geri almada korunur, kart kapanınca gider. */
+    draft: string;
+    /** "Kime" satırı (Reply-To varsa o). */
+    to: string;
+    busy: boolean;
+    error: string | null;
+    done: Done | null;
   }
 
   const MAX = 3;
+  /** Eylemden sonra "Geri al" bu kadar durur (toast gibi). */
+  const UNDO_MS = 5000;
+  /** Geri alınamayan bilgi satırı. */
+  const INFO_MS = 4000;
+  /** Gönderim bundan yakınsa "Geri al" sunulmaz (yetişmez). */
+  const MIN_UNDO_MS = 1500;
+
   let cards = $state<Card[]>([]);
   let overflow = $state(0);
   let stack = $state<HTMLDivElement>();
@@ -23,26 +60,36 @@
 
   const fromTop = $derived(settings.value.cardPosition.startsWith('top'));
   const visible = $derived(fromTop ? [...cards].reverse() : cards);
+  const actions = $derived(shownNotifyActions(settings.value.notifyActions));
 
   onMount(() => {
     document.documentElement.dataset.window = 'notify';
     const off = on(EVENTS.notify, (e) => add(e));
     const clock = setInterval(() => (now = Date.now()), 30_000);
+    // Yanıt kutusu büyüdükçe pencere de büyür.
+    const ro = new ResizeObserver(() => sync(false));
+    if (stack) ro.observe(stack);
     // Pencere açılırken kuyruğa düşen kartları al; tarayıcıda örnek kartla başla.
     if (isTauri) void call('notify_pending').then((list) => list.forEach(add));
     else void call('demo_notify');
     return () => {
       off();
+      ro.disconnect();
       clearInterval(clock);
     };
   });
 
   function add(e: NotifyEvent) {
     if (cards.some((c) => c.message.id === e.message.id)) return;
-    const next = [...cards, { ...e, key: ++seq, at: Date.now() }];
-    if (next.length > MAX) {
-      overflow += next.length - MAX;
-      next.splice(0, next.length - MAX);
+    const next: Card[] = [
+      ...cards,
+      { ...e, key: ++seq, at: Date.now(), mode: 'idle', draft: '', to: displayName(e.message.from), busy: false, error: null, done: null },
+    ];
+    // Fazlası özete düşer; yanıt yazılan ya da geri alma bekleyen kart düşmez.
+    while (next.length > MAX) {
+      const i = next.findIndex((c) => c.mode === 'idle' && !c.busy && !c.error);
+      next.splice(i < 0 ? next.length - 1 : i, 1);
+      overflow += 1;
     }
     cards = next;
   }
@@ -52,15 +99,34 @@
     if (!cards.length) overflow = 0;
   }
 
-  // Pencereyi içeriğe göre boyutlandır; kart kalmayınca gizle.
-  $effect(() => {
-    void cards.length;
-    void overflow;
+  // Pencereyi içeriğe göre boyutlandır; kart kalmayınca gizle. Görünmeyen
+  // pencerede boyut gözlemcisi çalışmayabilir: kart sayısı ve hali değişince
+  // doğrudan ölçülür.
+  let lastHeight = 0;
+  function sync(force: boolean) {
     void tick().then(() => {
       if (!isTauri) return;
-      if (!cards.length) void call('notify_hide');
-      else if (stack) void call('notify_layout', { height: Math.ceil(stack.getBoundingClientRect().height) });
+      if (!cards.length) {
+        lastHeight = 0;
+        void call('notify_hide');
+        return;
+      }
+      if (!stack) return;
+      const height = Math.ceil(stack.getBoundingClientRect().height);
+      if (!force && height === lastHeight) return;
+      lastHeight = height;
+      void call('notify_layout', { height });
     });
+  }
+
+  $effect(() => {
+    void overflow;
+    for (const c of cards) {
+      void c.mode;
+      void c.error;
+      void c.done;
+    }
+    sync(true);
   });
 
   function ago(at: number) {
@@ -68,19 +134,129 @@
     return min < 1 ? t('notify.now') : t('notify.minutesAgo', { n: min });
   }
 
+  function about(c: Card) {
+    return `${displayName(c.message.from)} · ${c.message.subject}`;
+  }
+
+  /** Klavye odağı kartın içindeyse (düğme kaybolacaksa) yeni hale taşır. */
+  function keepFocus(key: number, selector: string) {
+    const el = stack?.querySelector(`[data-card="${key}"]`);
+    if (!el?.contains(document.activeElement)) return;
+    void tick().then(() => el.querySelector<HTMLElement>(selector)?.focus());
+  }
+
   async function open(c: Card) {
     remove(c.key);
     await call('open_quick', { id: c.message.id });
   }
 
-  async function markRead(c: Card) {
-    remove(c.key);
-    await call('messages_flag', { ids: [c.message.id], unread: false, starred: null });
+  function run(c: Card, a: NotifyAction) {
+    if (a === 'reply') startReply(c);
+    else void act(c, a);
   }
 
-  async function archive(c: Card) {
-    remove(c.key);
-    await call('messages_move', { ids: [c.message.id], target: 'archive' });
+  async function act(c: Card, a: Exclude<NotifyAction, 'reply'>) {
+    if (c.busy) return;
+    c.busy = true;
+    c.error = null;
+    try {
+      await call('notify_action', { id: c.message.id, action: a });
+      keepFocus(c.key, '.undo');
+      c.done = { text: t(NOTIFY_ACTION_INFO[a].done!), sub: about(c), icon: 'check', undo: () => revert(c, a), ms: UNDO_MS };
+      c.mode = 'done';
+    } catch (e) {
+      c.error = t('toast.error', { message: toAppError(e).message });
+    } finally {
+      c.busy = false;
+    }
+  }
+
+  /** Eylemi geri alır: okundu → okunmadı, taşınan → gelen kutusu. */
+  async function revert(c: Card, a: Exclude<NotifyAction, 'reply'>) {
+    if (a === 'markRead') await call('messages_flag', { ids: [c.message.id], unread: true, starred: null });
+    else await call('messages_move', { ids: [c.message.id], target: 'inbox' });
+    keepFocus(c.key, '.btn-primary');
+    c.done = null;
+    c.mode = 'idle';
+  }
+
+  async function undo(c: Card) {
+    const u = c.done?.undo;
+    if (!u || c.busy) return;
+    c.busy = true;
+    try {
+      await u();
+    } catch (e) {
+      keepFocus(c.key, '.btn-primary');
+      c.done = null;
+      c.mode = 'idle';
+      c.error = t('toast.error', { message: toAppError(e).message });
+    } finally {
+      c.busy = false;
+    }
+  }
+
+  function startReply(c: Card) {
+    c.error = null;
+    c.mode = 'reply';
+    // Kart penceresi odak çalmadan açılır; yazabilmek için odak istenir.
+    if (isTauri) void call('notify_focus').catch(() => {});
+    void loadTargets(c);
+  }
+
+  /** Reply-To varsa "Kime" onu gösterir; gövde de bu arada iner (alıntı için). */
+  async function loadTargets(c: Card) {
+    try {
+      const d = await call('message_get', { id: c.message.id });
+      // Hatırlatma kartında gönderen yerine beklenen kişi yazar; ona dokunulmaz.
+      const sameSender = d.from.email.toLowerCase() === c.message.from.email.toLowerCase();
+      if (sameSender && d.replyTo.length) c.to = d.replyTo.map(displayName).join(', ');
+    } catch {
+      // Kime satırı gönderenle kalır; yanıtın alıcısını arka uç belirler.
+    }
+  }
+
+  function cancelReply(c: Card) {
+    keepFocus(c.key, '[data-action="reply"]');
+    c.error = null;
+    c.mode = 'idle';
+  }
+
+  async function sendReply(c: Card) {
+    if (!c.draft.trim() || c.busy) return;
+    c.busy = true;
+    c.error = null;
+    try {
+      const item = await call('notify_reply', { id: c.message.id, text: c.draft });
+      const left = item.sendAt - Date.now();
+      const canUndo = left >= MIN_UNDO_MS;
+      keepFocus(c.key, canUndo ? '.undo' : '.close');
+      c.done = {
+        text: t('notify.replyQueued'),
+        sub: canUndo ? `${t('notify.replyGoes', { n: Math.round(left / 1000) })} · ${c.to}` : c.to,
+        icon: 'send',
+        undo: canUndo ? () => unsend(c, item.id) : null,
+        ms: canUndo ? left : INFO_MS,
+        fixed: canUndo,
+      };
+      c.mode = 'done';
+    } catch (e) {
+      // Metin kutuda kalır; hata altında yazar.
+      c.error = t('toast.error', { message: toAppError(e).message });
+    } finally {
+      c.busy = false;
+    }
+  }
+
+  /** Gönderimi geri alır; metin kutuya geri gelir. Yetişmezse söyler. */
+  async function unsend(c: Card, outboxId: string) {
+    if (await call('send_cancel', { id: outboxId })) {
+      c.done = null;
+      c.mode = 'reply';
+      return;
+    }
+    keepFocus(c.key, '.close');
+    c.done = { text: t('notify.undoLate'), sub: c.to, icon: 'send', undo: null, ms: INFO_MS };
   }
 
   /** Kodu kopyalanan kart: düğme kısa süre "Kod kopyalandı" der. */
@@ -115,36 +291,66 @@
   {/if}
 
   {#each visible as c (c.key)}
-    <div class="card" role="alertdialog" aria-label={t('notify.label', { name: displayName(c.message.from) })}>
-      <div class="head">
-        <Logo size={16} dot={false} />
-        <span class="meta trunc">{t('app.name')} · {c.accountName} · {ago(c.at)}</span>
-        <span class="grow"></span>
-        <button class="btn-icon small" aria-label={t('act.muteHour')} title={t('act.muteHour')} onclick={mute}><Icon name="bellOff" size={16} /></button>
-        <button class="btn-icon small" aria-label={t('act.close')} title={t('act.close')} onclick={() => remove(c.key)}><Icon name="x" size={16} /></button>
-      </div>
-      <div class="content">
-        <Avatar address={c.message.from} size={40} />
-        <div class="text">
-          <span class="sender trunc">{displayName(c.message.from)}</span>
-          <span class="subject trunc">{c.message.subject}</span>
-          <span class="snippet">{c.message.snippet}</span>
+    <div class="card" data-card={c.key} data-mode={c.mode} role="alertdialog" aria-label={t('notify.label', { name: displayName(c.message.from) })}>
+      {#if c.mode === 'done' && c.done}
+        {#key c.done}
+          <div class="done" role="status">
+            <span class="done-icon"><Icon name={c.done.icon} size={18} /></span>
+            <span class="done-text">
+              <span class="done-title">{c.done.text}</span>
+              <span class="meta trunc">{c.done.sub}</span>
+            </span>
+            {#if c.done.undo}
+              <button class="btn-soft small undo" disabled={c.busy} onclick={() => undo(c)}>{t('act.undo')}</button>
+            {/if}
+            <button class="btn-icon small close" aria-label={t('act.close')} title={t('act.close')} onclick={() => remove(c.key)}><Icon name="x" size={16} /></button>
+          </div>
+          <span class="bar now" class:fixed={c.done.fixed} style:--count="{c.done.ms}ms" onanimationend={() => remove(c.key)} aria-hidden="true"></span>
+        {/key}
+      {:else}
+        <div class="head">
+          <Logo size={16} dot={false} />
+          <span class="meta trunc">{t('app.name')} · {c.accountName} · {ago(c.at)}</span>
+          <span class="grow"></span>
+          <button class="btn-icon small" aria-label={t('act.muteHour')} title={t('act.muteHour')} onclick={mute}><Icon name="bellOff" size={16} /></button>
+          <button class="btn-icon small close" aria-label={t('act.close')} title={t('act.close')} onclick={() => remove(c.key)}><Icon name="x" size={16} /></button>
         </div>
-      </div>
-      <div class="acts">
-        {#if c.otp}
-          <!-- Doğrulama kodu postası: birincil eylem kodu kopyalamak; arşivle yerine açmak kalır. -->
-          <button class="btn-primary small" onclick={() => copyCode(c)}>{copied === c.key ? t('notify.codeCopied') : t('notify.copyCode')}</button>
-          <button class="btn-soft small" onclick={() => open(c)}>{t('act.open')}</button>
+        <div class="content">
+          <Avatar address={c.message.from} size={40} />
+          <div class="text">
+            <span class="sender trunc">{displayName(c.message.from)}</span>
+            <span class="subject trunc">{c.message.subject}</span>
+            <span class="snippet">{c.message.snippet}</span>
+          </div>
+        </div>
+        {#if c.mode === 'reply'}
+          <NotifyReply
+            to={c.to}
+            bind:value={c.draft}
+            busy={c.busy}
+            error={c.error}
+            onsend={() => void sendReply(c)}
+            oncancel={() => cancelReply(c)}
+          />
         {:else}
-          <button class="btn-primary small" onclick={() => open(c)}>{t('act.open')}</button>
+          {#if c.error}
+            <p class="err" role="alert"><Icon name="alert" size={16} />{c.error}</p>
+          {/if}
+          <NotifyActs
+            {actions}
+            otp={c.otp}
+            copied={copied === c.key}
+            busy={c.busy}
+            onopen={() => void open(c)}
+            oncopy={() => void copyCode(c)}
+            onaction={(a) => run(c, a)}
+          />
+          <!-- Hata yazan kart kendiliğinden kapanmaz. -->
+          {#if !c.error}
+            <span class="bar" style:--count="{settings.value.cardSeconds}s" onanimationend={() => remove(c.key)} aria-hidden="true"></span>
+          {/if}
         {/if}
-        <button class="btn-soft small" onclick={() => markRead(c)}>{t('act.markRead')}</button>
-        {#if !c.otp}
-          <button class="btn-soft small" onclick={() => archive(c)}>{t('act.archive')}</button>
-        {/if}
-      </div>
-      <span class="bar" style:--count="{settings.value.cardSeconds}s" onanimationend={() => remove(c.key)} aria-hidden="true"></span>
+      {/if}
     </div>
   {/each}
 
@@ -224,11 +430,51 @@
     overflow: hidden;
   }
 
-  .acts {
+  /* Hata: ne oldu + ne yapılabilir (arka ucun metni); kart kalır. */
+  .err {
     display: flex;
-    gap: 8px;
-    margin-top: 14px;
-    padding-left: 52px;
+    align-items: flex-start;
+    gap: 6px;
+    margin: 12px 0 0;
+    font-size: var(--fs-meta);
+    line-height: 16px;
+    color: var(--ink-2);
+  }
+
+  .err :global(.icon) {
+    flex: none;
+    color: var(--danger);
+  }
+
+  /* Onay satırı: ne oldu, hangi posta, Geri al ve Kapat. */
+  .done {
+    display: grid;
+    grid-template-columns: 20px minmax(0, 1fr) auto auto;
+    align-items: center;
+    column-gap: 10px;
+    min-height: 40px;
+    animation: fade var(--t-state) var(--ease) both;
+  }
+
+  .done-icon {
+    display: grid;
+    place-items: center;
+    color: var(--ok);
+  }
+
+  .done-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    line-height: 20px;
+  }
+
+  .done-title {
+    font-weight: 500;
+  }
+
+  .done .close {
+    margin-right: -2px;
   }
 
   .bar {
@@ -246,8 +492,18 @@
     animation-fill-mode: both;
   }
 
-  .card:hover .bar,
-  .card:focus-within .bar {
+  /* Onay satırının süresi hemen başlar. */
+  .bar.now {
+    animation-delay: 0s;
+  }
+
+  /*
+   * Üzerine gelince geri sayım durur; kartın posta halinde klavye odağı da
+   * durdurur. Onay satırında odak ("Geri al"a taşınır) durdurmaz: kart
+   * süresi bitince kapanır. Giden kutusu süresi hiç durmaz.
+   */
+  .card:hover .bar:not(.fixed),
+  .card:has(:focus-visible) .bar:not(.now) {
     animation-play-state: paused;
   }
 
@@ -294,6 +550,12 @@
       opacity: 1;
       transform: none;
       filter: blur(0);
+    }
+  }
+
+  @keyframes fade {
+    from {
+      opacity: 0;
     }
   }
 
