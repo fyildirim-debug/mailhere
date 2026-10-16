@@ -12,7 +12,8 @@ Mailhere; Windows ve Linux için hızlı, sakin, klavyeyle yönetilen bir masaü
 
 Tam kurallar: [`docs/TASARIM.md`](docs/TASARIM.md). Tek doğruluk kaynağı: `app/src/styles/tokens.css`. Özet:
 
-- Renk yalnız jetonla: `var(--ground|surface|paper|raised|line|line-strong|ink|ink-2|ink-3|accent|accent-ink|accent-soft|accent-text|sel|hover|amber|ok|danger)`. Bileşende ham hex yazılmaz.
+- Renk yalnız jetonla: `var(--ground|surface|paper|raised|line|line-strong|ink|ink-2|ink-3|accent|accent-ink|accent-soft|accent-text|sel|hover|amber|amber-text|ok|ok-text|danger)`. Bileşende ham hex yazılmaz. Uyarı ve başarı **metni** `--amber-text` / `--ok-text` ile (her zeminde ≥ 4.5:1); `--amber` / `--ok` yalnız ikon, nokta ve yıldızda.
+- Devre dışı öğe yalnız `opacity: var(--dim-disabled)` ile soluklaşır; başka saydamlık değeri yazılmaz.
 - Tek vurgu rengi; yalnız birincil eylem, seçim, odak ve okunmamış işareti.
 - Yazı: yalnız Geist, yalnız **12 / 15 / 19 / 24 / 30** px. Ara boyut yok.
 - Boşluk 4 px tabanlı; köşe 5–16, etiket 999; derinlik ya kenar ya gölge.
