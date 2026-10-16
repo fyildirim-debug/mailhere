@@ -111,6 +111,11 @@ body {
   padding: 8px 0;
 }
 
+/* Masaüstündeki görünmez kenar mobilde dokunma hedefini 44'ün üstüne taşır. */
+.m-shell .link::before {
+  inset: -10px -6px;
+}
+
 /* Anahtar 40×24 kalır; dokunma alanı görünmez kenarla 56×44'e çıkar. */
 .m-shell .switch::before {
   content: '';

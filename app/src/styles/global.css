@@ -275,12 +275,21 @@ textarea {
 }
 
 .link {
+  position: relative;
   padding: 0;
   border: 0;
   background: transparent;
   color: var(--accent-text);
   font-weight: 500;
   text-decoration: none;
+}
+
+/* Metin bağlantı düğmesi satır yüksekliğinde (≈ 17 px) kalır; tık hedefi
+   görünmez kenarla ≈ 29 px'e çıkar (TASARIM §10: en az 28). */
+.link::before {
+  content: '';
+  position: absolute;
+  inset: -6px -4px;
 }
 
 .link:hover {

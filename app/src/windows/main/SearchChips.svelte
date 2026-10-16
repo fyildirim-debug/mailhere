@@ -187,11 +187,14 @@
     font: inherit;
   }
 
+  /* Kaldır düğmesi 28×28 (tık hedefi); negatif kenar boşluğuyla çipin 28 px
+     yüksekliğini büyütmez. */
   .chip-x {
     display: grid;
     place-items: center;
-    width: 22px;
-    height: 22px;
+    width: 28px;
+    height: 28px;
+    margin: -3px -3px -3px 0;
     padding: 0;
     border: 0;
     border-radius: 50%;

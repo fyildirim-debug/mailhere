@@ -321,14 +321,16 @@
     color: var(--accent-text);
   }
 
-  /* Şerit metni açıklamayı açan düğmedir; tüm satır yüksekliğini kaplar. */
+  /* Şerit metni açıklamayı açan düğmedir; şeridin iç boşluğu dahil tüm
+     yüksekliği kaplar (tık hedefi ≥ 28). */
   .remote-toggle {
     flex: 1;
     min-width: 0;
     align-self: stretch;
     display: flex;
     align-items: center;
-    padding: 0;
+    margin: -10px 0;
+    padding: 10px 0;
     border: 0;
     border-radius: var(--r-sm);
     background: transparent;
