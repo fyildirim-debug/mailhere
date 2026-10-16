@@ -233,6 +233,7 @@ export const en: Record<MessageKey, string> = {
   'compose.to': 'To',
   'compose.cc': 'Cc',
   'compose.bcc': 'Bcc',
+  'compose.ccBcc': 'Add Cc and Bcc',
   'compose.subject': 'Subject',
   'compose.addRecipient': 'Add people',
   'compose.removeRecipient': 'Remove {name}',

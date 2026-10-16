@@ -25,6 +25,7 @@
   import WindowControls from '../../lib/ui/WindowControls.svelte';
   import FollowUpMenu from '../../lib/mail/FollowUpMenu.svelte';
   import { settings } from '../../lib/stores/settings.svelte';
+  import { isMobileShell } from '../../lib/shell';
   import { baseSubject, displayName, fileSize, snoozeOptions } from '../../lib/util/format';
   import { fillVariables } from '../../lib/util/variables';
 
@@ -377,10 +378,17 @@
     const list = field === 'to' ? to : field === 'cc' ? cc : bcc;
     for (const p of parts) {
       const a = parse(p);
-      if (a && !list.some((x) => same(x, a))) list.push(a);
-      else if (!a) bad.push(p);
+      if (a && !list.some((x) => same(x, a))) {
+        list.push(a);
+        recipientAdded();
+      } else if (!a) bad.push(p);
     }
     drafts[field] = bad.join(', ');
+  }
+
+  /** Alıcı eklenince "En az bir alıcı ekle." uyarısı kalkar (başka hata kalır). */
+  function recipientAdded() {
+    if (error === t('compose.needRecipient')) error = null;
   }
 
   function onRecipientKey(field: 'to' | 'cc' | 'bcc', e: KeyboardEvent) {
@@ -470,7 +478,10 @@
 
   function pick(field: 'to' | 'cc' | 'bcc', a: Address) {
     const list = field === 'to' ? to : field === 'cc' ? cc : bcc;
-    if (!list.some((x) => same(x, a))) list.push(a);
+    if (!list.some((x) => same(x, a))) {
+      list.push(a);
+      recipientAdded();
+    }
     drafts[field] = '';
     suggest = null;
     document.getElementById(`compose-${field}`)?.focus();
@@ -670,8 +681,17 @@
             </div>
           {/if}
           {#if field === 'to'}
-            {#if !showCc}<button class="btn-ghost" onclick={() => (showCc = true)}>{t('compose.cc')}</button>{/if}
-            {#if !showBcc}<button class="btn-ghost" onclick={() => (showBcc = true)}>{t('compose.bcc')}</button>{/if}
+            {#if isMobileShell}
+              <!-- Mobilde tek ikon düğme: çip gelince ikinci satır açmaz. -->
+              {#if !showCc || !showBcc}
+                <button class="btn-icon ccbcc" aria-label={t('compose.ccBcc')} title={t('compose.ccBcc')} onclick={() => ((showCc = true), (showBcc = true))}>
+                  <Icon name="chevronDown" />
+                </button>
+              {/if}
+            {:else}
+              {#if !showCc}<button class="btn-ghost" onclick={() => (showCc = true)}>{t('compose.cc')}</button>{/if}
+              {#if !showBcc}<button class="btn-ghost" onclick={() => (showBcc = true)}>{t('compose.bcc')}</button>{/if}
+            {/if}
           {/if}
         </div>
         {#if field === 'to' && showRecent}
@@ -704,8 +724,9 @@
     <button class="btn-icon small" aria-label={t('tpl.insert')} title={t('tpl.insert')} aria-haspopup="menu" onclick={templateMenu} disabled={locked}><Icon name="template" size={16} /></button>
     <span class="grow"></span>
     {#if from?.signatures.length}
-      <button class="btn-ghost sig-pick" aria-haspopup="menu" disabled={locked} onclick={signatureMenu}>
-        <Icon name="pen" size={14} />{t('compose.signature', { name: signature ? signature.name || t('sig.unnamed') : t('sig.noneOption') })}<Icon name="chevronDown" size={14} />
+      {@const sigLabel = t('compose.signature', { name: signature ? signature.name || t('sig.unnamed') : t('sig.noneOption') })}
+      <button class="btn-ghost sig-pick" aria-haspopup="menu" aria-label={sigLabel} title={sigLabel} disabled={locked} onclick={signatureMenu}>
+        <Icon name="pen" size={14} /><span class="sig-lbl">{sigLabel}</span><Icon name="chevronDown" size={14} />
       </button>
     {/if}
   </div>
@@ -748,8 +769,6 @@
       <span class="meta" role="status">{t('compose.draftSaved')}</span>
     {:else if draftState === 'error'}
       <span class="status err" role="alert">{t('compose.draftFailed', { message: draftError ?? '' })}</span>
-    {:else if !embedded}
-      <span class="meta">{t('read.sendHint')}</span>
     {/if}
     {#if followUpAt != null && !queued}
       <span class="status follow" role="status"><Icon name="followUp" size={14} />{t('follow.composeStatus', { when: when(followUpAt) })}<button class="link" onclick={() => (followUpAt = null)}>{t('act.cancel')}</button></span>
@@ -945,6 +964,13 @@
     color: var(--ink);
   }
 
+  /* Mobil: Bilgi ve Gizli'yi birlikte açan düğme satırın sağ üstünde durur. */
+  .ccbcc {
+    margin-left: auto;
+    align-self: flex-start;
+  }
+
+  /* Taşma güvenlik ağı: sığmayan araç çubuğu kırpılmaz, yatay kayar. */
   .tools {
     flex: none;
     display: flex;
@@ -952,6 +978,8 @@
     gap: 2px;
     padding: 6px 14px;
     border-bottom: 1px solid var(--line);
+    overflow-x: auto;
+    scrollbar-width: none;
   }
 
   .sig-pick {
@@ -1166,6 +1194,20 @@
     .status {
       flex: 1 1 100%;
       min-width: 0;
+    }
+  }
+
+  /* Telefon genişliğinde imza seçici yalnız ikon: etiketle çubuk 415 px ister,
+     393 ve 360 px'te kırpılırdı. Tam ad title ve erişilebilir adda. */
+  @media (max-width: 420px) {
+    .tools .sig-lbl {
+      display: none;
+    }
+
+    .sig-pick {
+      width: 40px;
+      justify-content: center;
+      padding: 0;
     }
   }
 </style>

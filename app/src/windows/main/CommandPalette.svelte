@@ -486,7 +486,7 @@
     align-items: flex-start;
     padding: 64px 16px 16px;
     background: color-mix(in srgb, var(--ground) 55%, transparent);
-    animation: fade 120ms ease-out;
+    animation: fade var(--t-fast) var(--ease);
   }
 
   .palette {
@@ -523,7 +523,7 @@
     background: transparent;
     color: var(--ink);
     font-size: var(--fs-section);
-    letter-spacing: -0.01em;
+    letter-spacing: -0.015em;
   }
 
   .results {

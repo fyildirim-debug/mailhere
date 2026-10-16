@@ -15,6 +15,7 @@
   import InviteCard from './InviteCard.svelte';
   import MailBody from './MailBody.svelte';
   import { copyText, groupCode } from './otp';
+  import { isMobileShell } from '../shell';
 
   interface Props {
     detail: MessageDetail;
@@ -121,7 +122,11 @@
   <button class="who-btn" aria-label={t('contact.open', { name: displayName(d.from) })} aria-haspopup="dialog" aria-expanded={card != null} onclick={openCard}>
     <Avatar address={d.from} size={40} />
     <span class="who">
-      <span class="trunc"><span class="name">{displayName(d.from)}</span><span class="meta addr">{d.from.email}</span></span>
+      <span class="trunc"
+        ><span class="name">{displayName(d.from)}</span>{#if displayName(d.from).toLowerCase() !== d.from.email.toLowerCase()}<span class="meta addr"
+            >{d.from.email}</span
+          >{/if}</span
+      >
       <span class="meta trunc"><span class="when-inline num">{`${when(d.date)} · `}</span>{t('read.to', { list: recipients })}</span>
     </span>
   </button>
@@ -181,15 +186,15 @@
   <InviteCard detail={d} />
 {/if}
 
-{#if d.unsubscribe}
+{#snippet unsubStrip()}
   <div class="unsub">
     <Icon name="unsubscribe" size={16} />
     <span class="grow">{t('read.listMail')}</span>
     <button class="link small" onclick={() => unsubscribe(d)}>{t('read.unsubscribe')}</button>
   </div>
-{/if}
+{/snippet}
 
-{#if remoteStrip}
+{#snippet remoteBar()}
   <div class="remote">
     <Icon name="shield" />
     <!-- Metin açıklamayı açar; dar ekranda kısa metin (sayı ya da "Görseller engellendi."). -->
@@ -202,9 +207,22 @@
     >
     <button class="link small" onclick={allow}>{t('read.remoteAllow')}</button>
   </div>
-  {#if why}
-    <p class="why">{explain(d.trackers > 0 ? t('read.trackersWhy') : t('read.remoteExplain'))}</p>
-  {/if}
+{/snippet}
+
+<!-- Toplu gönderim ve uzak içerik şeritleri birlikteyse tek kutuda, aralarında
+     1 px çizgi. Mobil kabuk şeritleri kendisi düzenler (abonelik şeridi açık
+     iletide "Diğer eylemler"e taşınır); orada ayrı kalırlar. -->
+{#if d.unsubscribe && remoteStrip && !isMobileShell}
+  <div class="notices">
+    {@render unsubStrip()}
+    {@render remoteBar()}
+  </div>
+{:else}
+  {#if d.unsubscribe}{@render unsubStrip()}{/if}
+  {#if remoteStrip}{@render remoteBar()}{/if}
+{/if}
+{#if remoteStrip && why}
+  <p class="why">{explain(d.trackers > 0 ? t('read.trackersWhy') : t('read.remoteExplain'))}</p>
 {/if}
 
 <div class="body">
@@ -305,8 +323,24 @@
     font-size: var(--fs-meta);
   }
 
-  .unsub + .remote {
-    margin-top: 8px;
+  /* İki şerit tek kutuda: dış kenar ve köşe kutunun, aradaki çizgi şeritlerin. */
+  .notices {
+    margin-top: 18px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-row);
+    background: var(--surface);
+  }
+
+  .notices > .unsub,
+  .notices > .remote {
+    margin-top: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .notices > .unsub + .remote {
+    border-top: 1px solid var(--line);
   }
 
   .remote {

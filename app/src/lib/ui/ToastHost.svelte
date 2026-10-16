@@ -87,7 +87,7 @@
   }
 
   button:hover {
-    background: rgba(127, 127, 127, 0.16);
+    background: color-mix(in srgb, var(--toast-ink) 12%, transparent);
   }
 
   @keyframes toast-in {

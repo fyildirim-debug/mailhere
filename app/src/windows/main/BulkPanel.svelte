@@ -142,7 +142,7 @@
     width: 100%;
     margin: 0 auto;
     padding: 36px 40px 32px;
-    animation: fade-up var(--t-state) ease-out;
+    animation: fade-up var(--t-state) var(--ease);
   }
 
   .head {

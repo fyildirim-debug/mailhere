@@ -535,7 +535,7 @@
               {#if progress}<span class="meta num step-count">{progress.done}/{progress.total}</span>{/if}
             </div>
             <div class="bar indent">
-              <div class="fill" style:width={progress ? `${Math.max(6, (progress.done / progress.total) * 100)}%` : undefined} class:indeterminate={!progress}></div>
+              <div class="fill" style:transform={progress ? `scaleX(${Math.max(0.06, progress.done / progress.total)})` : undefined} class:indeterminate={!progress}></div>
             </div>
           {/if}
           <div class:pending={!downloaded}>
@@ -885,11 +885,14 @@
     margin-left: 26px;
   }
 
+  /* İlerleme genişlikle değil ölçekle (TASARIM §6: yalnız transform canlandırılır). */
   .fill {
+    width: 100%;
     height: 100%;
     border-radius: 3px;
     background: var(--accent);
-    transition: width var(--t-panel) var(--ease);
+    transform-origin: left;
+    transition: transform var(--t-panel) var(--ease);
   }
 
   .fill.indeterminate {
@@ -949,7 +952,6 @@
       gap: 10px;
       margin-bottom: 28px;
       font-weight: 600;
-      letter-spacing: -0.01em;
     }
 
     .step {

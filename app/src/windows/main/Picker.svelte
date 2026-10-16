@@ -176,7 +176,7 @@
     align-items: flex-start;
     padding: 96px 16px 16px;
     background: color-mix(in srgb, var(--ground) 55%, transparent);
-    animation: fade var(--t-fast) ease-out;
+    animation: fade var(--t-fast) var(--ease);
   }
 
   .picker {

@@ -70,7 +70,7 @@
     align-items: flex-start;
     padding: 56px 16px 16px;
     background: color-mix(in srgb, var(--ground) 55%, transparent);
-    animation: fade var(--t-fast) ease-out;
+    animation: fade var(--t-fast) var(--ease);
   }
 
   .sheet {

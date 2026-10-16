@@ -104,7 +104,8 @@
     height: 48px;
     border-radius: 50%;
     background: color-mix(in srgb, var(--c) 18%, transparent);
-    color: var(--c);
+    /* Harf hesap renginin mürekkeple koyulaşmışı: iki temada ≥ 4.5:1. */
+    color: color-mix(in srgb, var(--c) 60%, var(--ink));
     font-size: var(--fs-section);
     font-weight: 600;
   }
@@ -168,7 +169,7 @@
 
   .panel {
     padding-top: 8px;
-    animation: fade-up var(--t-state) ease-out;
+    animation: fade-up var(--t-state) var(--ease);
   }
 
   /* Mobil: uygulama çubuğu geri düğmesini ve hesap adını taşır; sekme şeridi

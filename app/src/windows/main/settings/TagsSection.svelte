@@ -183,7 +183,7 @@
     border-radius: var(--r-card);
     background: var(--surface);
     border: 1px solid var(--line);
-    animation: fade-up var(--t-state) ease-out;
+    animation: fade-up var(--t-state) var(--ease);
   }
 
   .span {

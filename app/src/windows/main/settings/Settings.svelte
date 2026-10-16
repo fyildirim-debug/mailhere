@@ -157,12 +157,11 @@
     background: var(--paper);
     color: var(--ink);
     font-weight: 500;
-    box-shadow: 0 1px 2px rgba(20, 24, 40, 0.08);
+    box-shadow: var(--seg-on-shadow);
   }
 
   :global(:root[data-theme='dark']) .sitem.on {
     background: var(--raised);
-    box-shadow: none;
   }
 
   .sitem.sub {
@@ -208,7 +207,7 @@
     max-width: 780px;
     margin: 0 auto;
     padding: 32px 40px 64px;
-    animation: fade-up var(--t-state) ease-out;
+    animation: fade-up var(--t-state) var(--ease);
   }
 
   @media (max-width: 900px) {

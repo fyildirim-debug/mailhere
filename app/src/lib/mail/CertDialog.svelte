@@ -136,7 +136,7 @@
     place-items: center;
     padding: 24px;
     background: color-mix(in srgb, var(--ground) 60%, transparent);
-    animation: fade-up var(--t-fast) ease-out;
+    animation: fade-up var(--t-fast) var(--ease);
   }
 
   .dialog {
@@ -190,7 +190,7 @@
   h2 {
     font-size: var(--fs-section);
     font-weight: 600;
-    letter-spacing: -0.01em;
+    letter-spacing: -0.015em;
   }
 
   .lead {

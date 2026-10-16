@@ -244,6 +244,7 @@ export const tr = {
   'compose.to': 'Kime',
   'compose.cc': 'Bilgi',
   'compose.bcc': 'Gizli',
+  'compose.ccBcc': 'Bilgi ve Gizli alanlarını ekle',
   'compose.subject': 'Konu',
   'compose.addRecipient': 'Kişi ekle',
   'compose.removeRecipient': '{name} alıcısını kaldır',

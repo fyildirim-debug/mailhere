@@ -281,6 +281,8 @@
         >
           <Icon name="trash" />
         </button>
+        <!-- Ayraç: listeden çıkaran eylemler (arşivle, ertele, sil) ile düzenleyenler arasında. -->
+        <span class="tsep" aria-hidden="true"></span>
         <button class="btn-icon" aria-label={t('read.moveTo')} title="{t('read.moveTo')} · V" aria-haspopup="menu" onclick={moveMenu}>
           <Icon name="folder" />
         </button>
@@ -438,6 +440,14 @@
     margin-right: 6px;
   }
 
+  .tsep {
+    flex: none;
+    width: 1px;
+    height: 18px;
+    margin: 0 6px;
+    background: var(--line);
+  }
+
   /* Okuma alanı genişliği kap sorgusuyla ölçülür (dar düzen dosyanın sonunda). */
   .reader {
     container: reader / inline-size;
@@ -472,7 +482,7 @@
     max-width: 760px;
     margin: 0 auto;
     padding: 22px 40px 24px;
-    animation: fade-up var(--t-state) ease-out;
+    animation: fade-up var(--t-state) var(--ease);
   }
 
   .subject-row {
@@ -553,6 +563,10 @@
       display: none;
     }
 
+    .tsep {
+      margin: 0 2px;
+    }
+
     .toolbar .btn-soft,
     .toolbar .btn-primary {
       width: 34px;
@@ -580,7 +594,7 @@
     h2 {
       font-size: var(--fs-section);
       line-height: 1.3;
-      letter-spacing: -0.01em;
+      letter-spacing: -0.015em;
     }
 
     .article :global(.sender .when-inline) {

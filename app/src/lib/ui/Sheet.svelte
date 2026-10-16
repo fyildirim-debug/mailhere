@@ -205,7 +205,6 @@
   .title {
     padding: 0 20px 10px;
     font-weight: 600;
-    letter-spacing: -0.01em;
   }
 
   .content {

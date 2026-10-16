@@ -171,8 +171,9 @@
 <div class="win">
   <header class="titlebar" data-tauri-drag-region>
     <Logo size={18} dot={false} />
-    <span class="title" data-tauri-drag-region>{t('quick.title')}</span>
-    {#if account}<span class="meta" data-tauri-drag-region>· {account.name}</span>{/if}
+    <span class="title" data-tauri-drag-region
+      >{t('quick.title')}{#if account}{' '}<span class="meta" data-tauri-drag-region>· {account.name}</span>{/if}</span
+    >
     <span class="grow" data-tauri-drag-region></span>
     {#if canToggleColors}
       <button class="btn-icon small" class:on={original} aria-pressed={original} aria-label={t('read.originalColors')} title={t('read.originalColors')} onclick={() => (original = !original)}>
@@ -254,10 +255,15 @@
             <QuickRepliesEditor compact />
           </div>
         {:else}
-          <div class="chips">
-            {#each chips as c (c)}
-              <button class="chip" onclick={() => useChip(c)}>{c}</button>
-            {/each}
+          <!-- Çipler kendi içinde kayar; düzenle düğmesi kaydırıcının dışında hep görünür. -->
+          <div class="chips-row">
+            {#if chips.length}
+              <div class="chips">
+                {#each chips as c (c)}
+                  <button class="chip" onclick={() => useChip(c)}>{c}</button>
+                {/each}
+              </div>
+            {/if}
             <button class="chip edit" aria-label={t('qr.edit')} title={t('qr.edit')} onclick={() => (editingChips = true)}>
               <Icon name={chips.length ? 'pen' : 'plus'} size={14} />{#if !chips.length}{t('qr.add')}{/if}
             </button>
@@ -324,7 +330,7 @@
     min-height: 0;
     overflow-y: auto;
     padding: 18px 20px 8px;
-    animation: fade-up var(--t-state) ease-out;
+    animation: fade-up var(--t-state) var(--ease);
   }
 
   .sender {
@@ -423,10 +429,19 @@
     padding: 4px 16px 16px;
   }
 
+  .chips-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
   .chips {
+    flex: 1;
+    min-width: 0;
     display: flex;
     gap: 6px;
     overflow-x: auto;
+    scrollbar-width: none;
   }
 
   .chip {
@@ -464,7 +479,7 @@
     border-radius: var(--r-card);
     background: var(--surface);
     border: 1px solid var(--line);
-    animation: fade-up var(--t-state) ease-out;
+    animation: fade-up var(--t-state) var(--ease);
   }
 
   .chip-editor-head {
