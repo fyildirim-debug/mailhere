@@ -98,7 +98,7 @@
       <span class="kbd">Esc</span>
     </div>
     {#if !items.length && empty}
-      <div class="empty">
+      <div class="empty quiet">
         <p class="empty-title">{empty.title}</p>
         <p class="empty-body">{empty.body}</p>
         {#if empty.action}
@@ -295,20 +295,16 @@
     text-align: center;
   }
 
+  /* Boş durum global.css'te (sessiz); seçicide sola yaslı ve sıkı. */
   .empty {
-    display: flex;
-    flex-direction: column;
     align-items: flex-start;
     gap: 6px;
     padding: 8px 16px 18px;
-  }
-
-  .empty-title {
-    font-weight: 600;
+    text-align: left;
   }
 
   .empty-body {
-    color: var(--ink-3);
+    max-width: none;
     margin-bottom: 6px;
   }
 

@@ -107,7 +107,7 @@
         {/each}
       </ul>
     {:else if loaded && !error}
-      <div class="empty">
+      <div class="empty quiet">
         <Icon name="calendarClock" size={28} />
         <span class="empty-title">{t('sched.emptyTitle')}</span>
         <span class="meta">{t('sched.emptyBody')}</span>
@@ -201,19 +201,11 @@
     gap: 4px;
   }
 
+  /* Sessiz boş durum (global.css `.empty.quiet`); simge vurgu renginde. */
   .empty {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
     gap: 10px;
     padding: 72px 24px;
     color: var(--accent);
-    text-align: center;
-  }
-
-  .empty-title {
-    color: var(--ink);
-    font-weight: 600;
   }
 
   @media (max-width: 980px) {

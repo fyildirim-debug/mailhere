@@ -193,7 +193,7 @@
     {/if}
   {:else}
     {#if loaded && !editing}
-      <li class="empty">
+      <li class="empty quiet">
         <Icon name="rules" size={28} />
         <span class="empty-title">{t('rule.emptyTitle')}</span>
         <span class="meta">{t('rule.emptyBody')}</span>
@@ -275,19 +275,10 @@
     background: transparent;
   }
 
+  /* Sessiz boş durum (global.css `.empty.quiet`); simge vurgu renginde. */
   .empty {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 8px;
     padding: 40px 16px;
     color: var(--accent);
-    text-align: center;
-  }
-
-  .empty-title {
-    color: var(--ink);
-    font-weight: 600;
   }
 
   .add {

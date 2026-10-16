@@ -374,15 +374,15 @@
 
     {#if !isDraft}<div class="reply-wrap"><QuickReply bind:this={quick} detail={d} /></div>{/if}
   {:else if mail.detailError}
-    <div class="empty">
+    <div class="empty quiet">
       <Icon name="mail" size={28} />
       <div class="empty-title">{t('read.loadError')}</div>
       <div class="meta">{mail.detailError}</div>
     </div>
   {:else if mail.detailLoading}
-    <div class="empty"><div class="meta">{t('read.loading')}</div></div>
+    <div class="empty quiet"><div class="meta">{t('read.loading')}</div></div>
   {:else}
-    <div class="empty">
+    <div class="empty quiet">
       <Icon name="inbox" size={28} />
       <div class="empty-title">{t('read.empty')}</div>
       <div class="meta">{t('read.emptyHint')}</div>
@@ -539,21 +539,11 @@
     padding: 10px 40px 16px;
   }
 
+  /* Sessiz yer tutucu (global.css `.empty.quiet`): alanın ortasında. */
   .empty {
     flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
     justify-content: center;
-    gap: 8px;
-    padding: 40px;
     color: var(--ink-3);
-    text-align: center;
-  }
-
-  .empty-title {
-    color: var(--ink);
-    font-weight: 600;
   }
 
   /* Dar okuma alanı (ray ve yığın kipleri): yanıt düğmeleri yalnız ikon. Kap

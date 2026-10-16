@@ -486,8 +486,17 @@ textarea::placeholder {
   height: 18px;
   border-radius: 50%;
   background: var(--paper);
+  /* Bilerek jeton dışı: 18 px'lik topuzda --shadow-sm (14 px bulanıklık)
+     anahtarın dışına taşar; yalnız topuzu kaldıran 2 px'lik gölge yeter. */
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
   transition: transform var(--t-state) var(--ease);
+}
+
+/* Anahtar 40×24 kalır; tık hedefi görünmez kenarla 56×44'e çıkar. */
+.switch::before {
+  content: '';
+  position: absolute;
+  inset: -10px -8px;
 }
 
 .switch:checked {
@@ -547,6 +556,58 @@ textarea.input {
 
 select.input {
   padding-right: 10px;
+}
+
+/* ------------------------------------------------------------- boş durum */
+/* TASARIM §5: simge 56 px yumuşak vurgu diskinde, başlık 19/600, gövde
+   `--ink-3` en çok 32ch. Liste, odak kipi ve seçiciler aynı tanımı kullanır. */
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 72px 32px;
+  text-align: center;
+}
+
+.empty-icon {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  margin-bottom: 10px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.empty-title {
+  color: var(--ink);
+  font-size: var(--fs-section);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.3;
+  text-wrap: balance;
+}
+
+.empty-body {
+  max-width: 32ch;
+  color: var(--ink-3);
+  text-wrap: pretty;
+}
+
+/* Sessiz yer tutucu (okuma alanı, kural listesi, planlananlar, seçici):
+   disksiz simge, 15 px başlık; liste boş durumundan bilerek sakin. */
+.empty.quiet {
+  gap: 8px;
+  padding: 40px;
+}
+
+.empty.quiet .empty-title {
+  font-size: var(--fs-body);
+  letter-spacing: normal;
+  line-height: inherit;
 }
 
 /* -------------------------------------------------------------- yüzeyler */

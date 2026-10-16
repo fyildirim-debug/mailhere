@@ -304,27 +304,9 @@
     animation: fade-up var(--t-state) var(--ease);
   }
 
-  .empty-icon {
-    display: grid;
-    place-items: center;
-    width: 56px;
-    height: 56px;
-    margin-bottom: 10px;
-    border-radius: 50%;
-    background: var(--accent-soft);
-    color: var(--accent-text);
-  }
-
-  .empty-title {
-    font-size: var(--fs-section);
-    font-weight: 600;
-    letter-spacing: -0.015em;
-    line-height: 1.3;
-  }
-
+  /* Boş durum global.css'te; odak kipinin bitiş metni biraz daha geniş. */
   .empty-body {
     max-width: 40ch;
-    color: var(--ink-3);
   }
 
   .done-acts {

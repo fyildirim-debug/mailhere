@@ -391,37 +391,4 @@
     color: var(--ink-3);
   }
 
-  .empty {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 6px;
-    padding: 72px 32px;
-    text-align: center;
-  }
-
-  /* Simge yumuşak vurgu diskinde: boş liste sakin bir varış noktasıdır. */
-  .empty-icon {
-    display: grid;
-    place-items: center;
-    width: 56px;
-    height: 56px;
-    margin-bottom: 10px;
-    border-radius: 50%;
-    background: var(--accent-soft);
-    color: var(--accent-text);
-  }
-
-  .empty-title {
-    color: var(--ink);
-    font-size: var(--fs-section);
-    font-weight: 600;
-    letter-spacing: -0.015em;
-    line-height: 1.3;
-  }
-
-  .empty-body {
-    max-width: 30ch;
-    color: var(--ink-3);
-  }
 </style>
