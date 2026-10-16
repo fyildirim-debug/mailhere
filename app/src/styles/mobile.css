@@ -153,10 +153,13 @@ body {
     color var(--t-fast);
 }
 
+/* Görünmez kenar çip satırının iç boşluğunda durur (satır yatay kaydırıcıdır,
+   taşanı kırpar): üstte 2, altta 10 px → 2 + 32 + 10 = 44. Konum çipin 1 px
+   kenarının içinden ölçülür: -3 / -11. */
 .m-chip::before {
   content: '';
   position: absolute;
-  inset: -6px 0;
+  inset: -3px 0 -11px;
 }
 
 .m-chip:active {

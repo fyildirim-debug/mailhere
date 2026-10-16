@@ -232,3 +232,19 @@ test('C-M7: yüzen düğme etiketi belgelenen tek istisna (200 ms max-width)', a
   expect(tr.prop.split(', ')).toContain('max-width');
   expect(tr.dur.split(', ')[tr.prop.split(', ').indexOf('max-width')]).toBe('0.2s');
 });
+
+test('doğrulama turu: kategori çipi görünmez kenarla gerçekten 44 px (çip satırı kırpsa da)', async ({ page }) => {
+  // Kenar önce -6 px idi; satır yatay kaydırıcı olduğu için üstte 2 px'e
+  // kırpılıyor, 1 px çip kenarı da düşünce hedef 40 px kalıyordu.
+  const chips = list(page).getByRole('group', { name: 'Akıllı süzgeç' }).getByRole('button');
+  const n = await chips.count();
+  expect(n).toBeGreaterThan(2);
+  for (let i = 0; i < 3; i++) {
+    const chip = chips.nth(i);
+    const b = (await chip.boundingBox())!;
+    expect(Math.round(b.height)).toBe(32);
+    const cx = b.x + b.width / 2;
+    expect(await hitsAt(chip, cx, b.y - 1.5), `çip ${i} üstü`).toBe(true);
+    expect(await hitsAt(chip, cx, b.y + b.height + 9.5), `çip ${i} altı`).toBe(true);
+  }
+});
