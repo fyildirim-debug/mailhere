@@ -155,4 +155,8 @@ impl Platform for DesktopPlatform {
             .buttons(MessageDialogButtons::OkCustom("Kapat".into()))
             .show(move |_| exit.exit(1));
     }
+
+    fn restart(&self, app: &AppHandle) {
+        app.restart();
+    }
 }

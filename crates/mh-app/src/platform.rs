@@ -85,7 +85,8 @@ pub trait Platform: Send + Sync + 'static {
 
     /// Uygulamayı yeniden başlatır (yerel veri sıfırlanınca). Masaüstü
     /// süreci yeniden açar; Android'de süreç kapanır, kullanıcı yeniden açar.
-    fn restart(&self, app: &AppHandle) {
-        app.restart();
-    }
+    /// Varsayılanı yok: `AppHandle::restart`/`exit` tepsi ve menü kodunu
+    /// bağlar; ortak katmanın test ikilisinde (Windows'ta Common Controls v6
+    /// manifesti olmadan) bu kod açılışta yüklenemez.
+    fn restart(&self, app: &AppHandle);
 }

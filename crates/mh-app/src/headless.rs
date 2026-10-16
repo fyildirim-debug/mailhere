@@ -98,6 +98,8 @@ impl crate::Platform for NoopPlatform {
     fn fatal(&self, _: &tauri::AppHandle, e: &AppError) {
         tracing::error!(code = %e.code, error = %e.message, "penceresiz çekirdek açılamadı");
     }
+    // Penceresiz çekirdek yerel veri sıfırlamaz (kilit komutları arayüzden gelir).
+    fn restart(&self, _: &tauri::AppHandle) {}
 }
 
 /// Hesapların eşitleme durumu: tek seferlik çalıştırma "ilk eşitleme bitti
