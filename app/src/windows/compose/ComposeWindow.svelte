@@ -1166,13 +1166,30 @@
       width: auto;
     }
 
+    /* Tek alıcı satırı ikiye bölmesin: çip, sabit öğelere (etiket 44, yazma
+       alanı 72, Bilgi/Gizli düğmesi 44, üç aralık 24) yer bırakacak kadar
+       kısalır; ad üç noktayla biter, tam adres `title`da. */
     .chip {
       height: 32px;
+      min-width: 0;
+      max-width: calc(100% - 184px);
+    }
+
+    .chip > span {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .chip button {
+      flex: none;
       width: 28px;
       height: 28px;
+    }
+
+    .rinput {
+      min-width: 72px;
     }
 
     .tools {

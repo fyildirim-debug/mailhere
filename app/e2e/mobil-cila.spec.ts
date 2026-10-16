@@ -248,3 +248,27 @@ test('doğrulama turu: kategori çipi görünmez kenarla gerçekten 44 px (çip 
     expect(await hitsAt(chip, cx, b.y + b.height + 9.5), `çip ${i} altı`).toBe(true);
   }
 });
+
+test('C-12 artığı: tek alıcı çipi (yalnız adres) Kime satırını ikiye bölmez; uzun ad üç noktayla kısalır', async ({ page }) => {
+  for (const width of [393, 360]) {
+    await page.setViewportSize({ width, height: 800 });
+    await page.goto('#/main');
+    await page.getByRole('button', { name: 'Yeni posta' }).click();
+    await expect(h1(page, 'Yeni posta')).toBeVisible();
+    const to = page.locator('#compose-to');
+    await to.fill('kerem.aydin.uzun.adres@ornek-sirket.com.tr');
+    await to.press('Enter');
+    await expect(page.getByRole('button', { name: 'kerem.aydin.uzun.adres@ornek-sirket.com.tr alıcısını kaldır' })).toBeVisible();
+    const field = page.locator('.field.wrap').first();
+    // Tek satır: 56 px satır + 1 px alt çizgi.
+    expect(await height(field)).toBeLessThanOrEqual(57);
+    // Yazma alanı satırda kalır ve ikinci alıcı için yer bırakır.
+    const chip = (await field.locator('.chip').boundingBox())!;
+    const input = (await to.boundingBox())!;
+    expect(Math.abs(input.y + input.height / 2 - (chip.y + chip.height / 2))).toBeLessThan(3);
+    expect(input.width).toBeGreaterThanOrEqual(72);
+    // Ad kırpılır, sağ kenara taşma yok.
+    expect(chip.x + chip.width).toBeLessThanOrEqual(width);
+    await page.keyboard.press('Escape');
+  }
+});
