@@ -2,6 +2,13 @@
 
 Mailhere; Windows ve Linux için hızlı, sakin, klavyeyle yönetilen bir masaüstü e-posta istemcisidir; Android sürümü aynı çekirdekten ayrı bir depoda derlenir. Bu dosya projede çalışan herkes (insan ya da ajan) için bağlayıcıdır.
 
+## Ürün ilkeleri (bozulmaz)
+
+- **Posta hızlı gelir.** Telefonda Mailhere arka planda postaları sürekli denetler, yeni posta gelince hemen bildirir; bilgisayarda arka planda (pencere kapalıyken de) çalışır ve hemen bildirir. En hızlı yol kullanılır: IMAP IDLE, JMAP anlık akış, Android ön plan hizmeti; yoklama yalnız yedektir.
+- **Açılışta başlar.** Bilgisayar ve telefon açılınca Mailhere kendiliğinden başlar. Bilgisayarda pencere açılmaz, yalnız sistem tepsisinde ikon olarak görünür; telefonda görünmez, arka planda başlayıp posta denetler. Kullanıcı ayardan kapatabilir.
+- **Parola kilidi isteğe bağlıdır.** Posta kutusu kullanıcı isterse parolayla kilitlenir ve şifrelenir; açıkken girişte parola sorulur. Varsayılan kapalıdır; kapalıyken hiçbir akışta parola sorulmaz.
+- Yeni her özellik bu üç ilkeyle uyumlu tasarlanır; birini zayıflatan değişiklik yapılmaz.
+
 ## Temiz oda
 
 - Thunderbird, Outlook, Spark ya da başka bir istemciden **kod, görsel, ikon, metin, şablon, veri listesi** alınmaz; tersine mühendislik yapılmaz.
