@@ -386,6 +386,8 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
   /** Android bildirim sağlığı: pil kısıtlaması ve anlık bildirim (sürekli bağlantı; kabukta varsayılan açık). */
   let battery: CommandResult<'battery_status'> = 'optimized';
   let backgroundMode = true;
+  /** Açılışta başlama (iki kabuk; kabukta varsayılan açık). */
+  let autostart = true;
   let nextId = 1000;
 
   function emit<E extends keyof EventPayloads>(event: E, payload: EventPayloads[E]) {
@@ -1486,6 +1488,12 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       }
       emit(EVENTS.changed, { mailboxIds: [] });
       return report;
+    },
+    // İki kabuk: açılışta başlama.
+    autostart_get: () => autostart,
+    autostart_set: ({ on }) => {
+      autostart = on;
+      return autostart;
     },
     // Yalnız mobil kabuk: bildirim sağlığı. Kısıtlamayı kaldırma isteği onaylanmış sayılır.
     battery_status: () => battery,

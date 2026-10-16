@@ -31,6 +31,18 @@ tauri-plugin-opener.workspace = true
 tauri-plugin-dialog.workspace = true
 tauri-plugin-updater.workspace = true
 keyring = { workspace = true, features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
+serde.workspace = true
+
+# Açılışta başlama (Windows: HKCU Run anahtarı) ve tepsi denetimi (Linux:
+# AppIndicator kitaplığı, StatusNotifier izleyicisi, X11 tepsisi). Hepsi
+# bağımlılık ağacında zaten var (MIT / Apache-2.0).
+[target.'cfg(windows)'.dependencies]
+windows-registry = "0.6.1"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+dbus = "0.9.12"
+libc = "0.2"
+x11rb.workspace = true
 
 [features]
 # `pnpm tauri build` bunu açar; geliştirmede devUrl kullanılır.

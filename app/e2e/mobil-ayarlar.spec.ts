@@ -326,3 +326,30 @@ test('planlananlar: çekmecede yalnız bekleyen varsa, ekranda iptal edilir', as
   await page.getByRole('button', { name: 'Geri', exact: true }).click();
   await expect(h1(page, 'Gelen Kutusu')).toBeVisible();
 });
+
+test('açılışta başlat: Genel’de varsayılan açık, telefon açıklaması; kapatılıp açılır, 44 px dokunma alanı', async ({ page }) => {
+  await page.goto('#/main');
+  await openSettings(page, 'Genel');
+  const sw = page.getByRole('switch', { name: 'Açılışta başlat' });
+  const row = page.locator('.set-row', { has: sw });
+  await expect(page.getByRole('heading', { level: 3, name: 'Başlangıç' })).toBeVisible();
+  await expect(sw).toBeChecked();
+  await expect(row).toContainText('Telefon açılınca Mailhere arka planda başlar ve postaları denetler.');
+  await expect(row).not.toContainText('tepside');
+  // Anahtar 40×24; dokunma alanı görünmez kenarla 44 px'e çıkar.
+  const hit = await sw.evaluate((el) => {
+    const before = getComputedStyle(el, '::before');
+    return el.getBoundingClientRect().height - parseFloat(before.top) - parseFloat(before.bottom);
+  });
+  expect(hit).toBeGreaterThanOrEqual(44);
+  await sw.click();
+  await expect(sw).not.toBeChecked();
+  expect(await page.evaluate(() => window.__mh.call('autostart_get'))).toBe(false);
+  await sw.click();
+  await expect(sw).toBeChecked();
+  // Anahtar sağ kenarda, sayfa yatay taşmaz.
+  const box = await sw.boundingBox();
+  expect(box!.x + box!.width).toBeGreaterThan(page.viewportSize()!.width - 40);
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
+  expect(overflow).toBe(false);
+});

@@ -669,6 +669,10 @@ export const en: Record<MessageKey, string> = {
   'toast.scale': 'Interface scale {n}%',
   'set.teach': 'Shortcut tips',
   'set.teachHint': 'After you do something with the mouse, the shortcut is mentioned once; at most three times per action.',
+  'set.startup': 'Startup',
+  'set.autostart': 'Start automatically',
+  'set.autostartHint': 'When the computer starts, Mailhere starts in the tray and checks mail; no window opens.',
+  'mob.settings.autostartHint': 'When the phone starts, Mailhere starts in the background and checks mail.',
   'teach.key': 'Shortcut',
 
   // desktop: focus (one by one) mode
@@ -980,7 +984,7 @@ export const en: Record<MessageKey, string> = {
   'mob.notify.openSettings': 'Open settings',
   'mob.notify.instant': 'Instant notifications',
   'mob.notify.instantOffHint': "While off, Mailhere doesn't stay connected in the background; new mail arrives while the app is on screen or with a check every 15 minutes. Turn it on to stay connected to your inboxes.",
-  'mob.notify.instantOnHint': 'Connected in the background too; new mail arrives within seconds, even while the app is closed or after the phone restarts. A silent "Instant notifications on" line stays in the shade; battery use goes up a little.',
+  'mob.notify.instantOnHint': 'Connected in the background too; new mail arrives within seconds, even while the app is closed or after the phone restarts (General › Start automatically). A collapsed "Instant notifications on" line without a status bar icon stays at the bottom of the shade; battery use goes up a little.',
   'mob.notify.battery': 'Battery restriction',
   'mob.notify.batteryNone': 'None',
   'mob.notify.batteryLift': 'Remove restriction',

@@ -499,3 +499,39 @@ test('arayüz ölçeği: Ctrl+= büyütür, Ctrl+- küçültür, Ctrl+0 sıfırl
   await expect(group.getByRole('radio', { name: '%100' })).toHaveAttribute('aria-checked', 'true');
   expect(await page.evaluate(() => localStorage.getItem('mh.desk.scale'))).toBeNull();
 });
+
+// ------------------------------------------------------------ açılışta başlama
+
+type Mock = { call: (name: string, args?: unknown) => Promise<unknown> };
+
+test('açılışta başlat: Ayarlar › Genel’de varsayılan açık, tepside başlama açıklaması; kapatılıp açılır, hata nedeni yazılır', async ({ page }) => {
+  await page.keyboard.press('Control+,');
+  await expect(page.getByRole('heading', { level: 3, name: 'Başlangıç' })).toBeVisible();
+  const sw = page.getByRole('switch', { name: 'Açılışta başlat' });
+  const row = page.locator('.set-row', { has: sw });
+  await expect(sw).toBeChecked();
+  await expect(row).toContainText('Bilgisayar açılınca Mailhere tepside başlar ve postaları denetler; pencere açılmaz.');
+  // Klavyeyle de değişir; odak halkası görünür.
+  await sw.focus();
+  await page.keyboard.press('Space');
+  await expect(sw).not.toBeChecked();
+  expect(await sw.evaluate((el) => getComputedStyle(el).outlineStyle)).not.toBe('none');
+  const get = () => page.evaluate(() => (window as unknown as { __mh: Mock }).__mh.call('autostart_get'));
+  expect(await get()).toBe(false);
+  await sw.click();
+  await expect(sw).toBeChecked();
+  expect(await get()).toBe(true);
+
+  // Kayıt yazılamazsa anahtar son duruma döner, neden ve çözüm toast'ta.
+  await page.evaluate(() => {
+    const mh = (window as unknown as { __mh: Mock }).__mh;
+    const orig = mh.call.bind(mh);
+    mh.call = (name, args) =>
+      name === 'autostart_set'
+        ? Promise.reject({ code: 'storage', message: 'Açılış kaydı değiştirilemedi. Yeniden dene.' })
+        : orig(name, args);
+  });
+  await sw.click();
+  await expect(page.getByRole('status').filter({ hasText: 'Açılış kaydı değiştirilemedi. Yeniden dene.' })).toBeVisible();
+  await expect(sw).toBeChecked();
+});

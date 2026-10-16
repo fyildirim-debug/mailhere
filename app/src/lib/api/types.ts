@@ -947,6 +947,16 @@ export interface Commands {
   /** Bekleyen paketi seçime göre uygular, sonucu bilgisayara bildirir ve raporu döner. */
   transfer_apply: [{ previewId: string; choice: TransferChoice }, TransferReport];
 
+  // İki kabukta aynı adla, kabuğa özgü gövdeyle (ortak listede değil)
+  /**
+   * Açılışta başlama açık mı. Masaüstü: oturum açılınca Mailhere pencere açmadan tepside başlar
+   * (Windows `Run` kaydı, Linux XDG autostart); sistemin başlangıç ayarlarından kapatılmışsa `false`.
+   * Android: telefon açılınca arka plan hizmeti başlar. Kullanıcı hiç seçmediyse açık.
+   */
+  autostart_get: [Record<string, never>, boolean];
+  /** Açılışta başlamayı açar ya da kapatır; seçim kaydedilir (kapalıysa bir daha kendiliğinden açılmaz). Son durumu döner. */
+  autostart_set: [{ on: boolean }, boolean];
+
   // Yalnız mobil kabuk (Android; masaüstü kabukta tanımlı değil)
   /**
    * Android: pil kısıtlaması. `unrestricted` pil optimizasyonundan muaf; `optimized` varsayılan

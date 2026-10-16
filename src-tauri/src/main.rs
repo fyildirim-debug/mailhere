@@ -4,9 +4,11 @@
 // Windows'ta sürüm derlemesinde konsol penceresi açılmasın.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod autostart;
 mod files;
 mod notify_card;
 mod platform;
+mod prefs;
 mod secrets;
 mod tray;
 mod updater;
@@ -42,6 +44,9 @@ fn os_dirs(app: &AppHandle) -> Result<Dirs, Box<dyn std::error::Error>> {
 
 fn setup(app: &mut App, rt: tokio::runtime::Handle) -> Result<(), Box<dyn std::error::Error>> {
     let handle = app.handle().clone();
+    // Açılışta başlama kaydı (ilk çalıştırma varsayılanı, yol tazeleme);
+    // veritabanından bağımsız, çekirdekten önce.
+    autostart::init(&handle);
     // Tanıtım ve deneme kipi: parolalar ve veritabanı anahtarı bellekte.
     let memory = memory_mode();
     let secrets: Arc<dyn SecretStore> = if memory {
@@ -57,9 +62,16 @@ fn setup(app: &mut App, rt: tokio::runtime::Handle) -> Result<(), Box<dyn std::e
         return Ok(());
     }
 
-    windows::create_main(&handle)?;
+    // Açılış kaydından (`--tepside`) gelindiyse pencere açılmaz, yalnız tepsi.
+    let hidden = autostart::hidden_start();
+    if !hidden {
+        windows::create_main(&handle)?;
+    }
     if let Err(e) = tray::create(&handle) {
         tracing::warn!(error = %e, "tepsi simgesi oluşturulamadı");
+    }
+    if hidden {
+        tray::started_hidden(&handle);
     }
     updater::start(&handle, &rt);
     tray::refresh(&handle);
@@ -84,9 +96,12 @@ fn main() {
     let rt = runtime.handle().clone();
 
     let app = tauri::Builder::default()
-        // İkinci açılış yeni süreç başlatmaz; ana pencereyi öne getirir.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            windows::show_main(app);
+        // İkinci açılış yeni süreç başlatmaz; ana pencereyi öne getirir
+        // (açılış kaydından gelen `--tepside` getirmez).
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if !autostart::is_hidden_args(args.iter().skip(1)) {
+                windows::show_main(app);
+            }
         }))
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
@@ -105,6 +120,8 @@ fn main() {
             notify_card::demo_notify,
             updater::update_check,
             updater::update_install,
+            autostart::autostart_get,
+            autostart::autostart_set,
         ])
         .build(tauri::generate_context!())
         .expect("Mailhere başlatılamadı");

@@ -10,3 +10,5 @@ notify_pending
 demo_notify
 update_check
 update_install
+autostart_get
+autostart_set

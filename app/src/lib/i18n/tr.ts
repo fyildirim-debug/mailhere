@@ -683,6 +683,10 @@ export const tr = {
   'toast.scale': 'Arayüz ölçeği %{n}',
   'set.teach': 'Kısayol ipuçları',
   'set.teachHint': 'Fareyle yaptığın bir eylemden sonra kısayolunu söyler; her eylem için en çok üç kez.',
+  'set.startup': 'Başlangıç',
+  'set.autostart': 'Açılışta başlat',
+  'set.autostartHint': 'Bilgisayar açılınca Mailhere tepside başlar ve postaları denetler; pencere açılmaz.',
+  'mob.settings.autostartHint': 'Telefon açılınca Mailhere arka planda başlar ve postaları denetler.',
   'teach.key': 'Kısayol',
 
   // masaüstü: odak (tek tek işleme) kipi
@@ -996,7 +1000,7 @@ export const tr = {
   'mob.notify.openSettings': 'Ayarları aç',
   'mob.notify.instant': 'Anlık bildirim',
   'mob.notify.instantOffHint': 'Kapalıyken Mailhere arka planda bağlı kalmaz; yeni posta uygulama ekrandayken ya da 15 dakikada bir yapılan denetimde gelir. Açınca gelen kutularına sürekli bağlı kalır.',
-  'mob.notify.instantOnHint': 'Arka planda da bağlı; yeni posta uygulama kapalıyken ve telefon yeniden başladıktan sonra da saniyeler içinde gelir. Bildirim çubuğunda sessiz bir "Anlık bildirim açık" satırı durur; pil biraz daha çok harcanır.',
+  'mob.notify.instantOnHint': 'Arka planda da bağlı; yeni posta uygulama kapalıyken ve telefon yeniden başladıktan sonra da (Genel › Açılışta başlat) saniyeler içinde gelir. Bildirim panelinin en altında simgesiz, katlı bir "Anlık bildirim açık" satırı durur; pil biraz daha çok harcanır.',
   'mob.notify.battery': 'Pil kısıtlaması',
   'mob.notify.batteryNone': 'Yok',
   'mob.notify.batteryLift': 'Kısıtlamayı kaldır',

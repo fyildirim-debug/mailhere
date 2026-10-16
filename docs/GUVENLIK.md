@@ -20,6 +20,7 @@ Son denetim: 2026-10-13 (beş alanda kod denetimi; bulgular doğrulanıp düzelt
 - Eski şifresiz veritabanı ilk açılışta, yarıda kesilmeye dayanıklı biçimde şifreliye çevrilir.
 - Veri klasörü 0700, veritabanı ve açılan ekler 0600. `secure_delete` ve FTS güvenli silme açık. Açılan ekler bir günde ve hesap kaldırılınca silinir.
 - Windows'ta veritabanı dolaşan profilde değil, yerel klasörde (`LocalAppData`).
+- Açılışta başlama kaydı yalnız kullanıcıya ait yerlere yazılır (Windows `HKCU\…\Run`, Linux `~/.config/autostart/mailhere.desktop`; yönetici izni istemez) ve yalnız `--tepside` argümanını taşır; yol tırnaklanır ve masaüstü girdisinde kaçışlanır, satır sonu taşıyan yol yazılmaz. AppImage yolu yalnız ikili gerçekten o AppImage'ın bağlama noktasındaysa kullanılır (ortamdan miras kalmış `APPIMAGE` başka bir dosyayı kaydettiremez). Kabuk seçimleri (`kabuk.json`: açılış seçimi, tepsi bilgisi) gizli bilgi taşımaz, veri klasöründedir.
 - Parola, jeton ve anahtar günlüğe ve hata mesajına yazılmaz. IMAP/SMTP/HTTP kitaplıklarının ayrıntılı günlüğü kapalı.
 
 **Posta içeriği**

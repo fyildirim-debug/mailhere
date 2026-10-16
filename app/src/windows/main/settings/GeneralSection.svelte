@@ -1,7 +1,9 @@
 <script lang="ts">
-  import type { Density, Language, Theme } from '../../../lib/api';
+  import { toAppError, type Density, type Language, type Theme } from '../../../lib/api';
+  import { autostart, setAutostart } from '../../../lib/autostart';
   import { t, type MessageKey } from '../../../lib/i18n/index.svelte';
   import { isMobileShell } from '../../../lib/shell';
+  import { showToast } from '../../../lib/ui/toast.svelte';
   import { settings, updateSettings } from '../../../lib/stores/settings.svelte';
   import { percent, scale, SCALES, setScale } from '../scale.svelte';
   import { setTeach, teachPref } from '../teach.svelte';
@@ -21,6 +23,36 @@
     ['comfortable', 'set.density.comfortable'],
     ['compact', 'set.density.compact'],
   ];
+
+  // Açılışta başlama: masaüstünde tepside (pencere açmadan), telefonda arka
+  // planda. Komut yoksa satır gizli; anahtar hemen döner, yazılamazsa son
+  // durum okunur ve neden yazılır. Beklerken devre dışı bırakılmaz (odak
+  // kaybolmasın); o arada gelen dokunuş geri alınır.
+  let auto = $state<boolean | null>(null);
+  let autoBusy = $state(false);
+  $effect(() => {
+    void autostart().then((on) => {
+      if (!autoBusy) auto = on;
+    });
+  });
+
+  async function toggleAuto(input: HTMLInputElement) {
+    if (autoBusy) {
+      input.checked = auto ?? false;
+      return;
+    }
+    const on = input.checked;
+    auto = on;
+    autoBusy = true;
+    try {
+      auto = await setAutostart(on);
+    } catch (e) {
+      auto = await autostart();
+      showToast({ text: t('toast.error', { message: toAppError(e).message }) });
+    } finally {
+      autoBusy = false;
+    }
+  }
 </script>
 
 <h2 class="page">{t('set.nav.general')}</h2>
@@ -97,6 +129,24 @@
     {/each}
   </div>
 </div>
+
+{#if auto !== null}
+  <h3 class="set-h">{t('set.startup')}</h3>
+  <div class="set-row top">
+    <span class="set-name"
+      >{t('set.autostart')}<span class="set-hint">{t(isMobileShell ? 'mob.settings.autostartHint' : 'set.autostartHint')}</span></span
+    >
+    <input
+      type="checkbox"
+      role="switch"
+      class="switch"
+      aria-label={t('set.autostart')}
+      checked={auto}
+      aria-busy={autoBusy}
+      onchange={(e) => toggleAuto(e.currentTarget as HTMLInputElement)}
+    />
+  </div>
+{/if}
 
 <style>
   .page {

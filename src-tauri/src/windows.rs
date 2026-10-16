@@ -53,6 +53,10 @@ fn guard(app: &AppHandle) -> impl Fn(&tauri::Url) -> bool + Send + 'static {
 }
 
 pub fn create_main(app: &AppHandle) -> tauri::Result<WebviewWindow> {
+    build_main(app, true)
+}
+
+fn build_main(app: &AppHandle, visible: bool) -> tauri::Result<WebviewWindow> {
     if let Some(w) = app.get_webview_window(MAIN) {
         return Ok(w);
     }
@@ -65,7 +69,20 @@ pub fn create_main(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         .min_inner_size(640.0, 560.0)
         .center()
         .decorations(false)
+        .visible(visible)
         .build()
+}
+
+/// Ana pencere simge durumunda (görev çubuğunda) açılır: tepside başlandı
+/// ama simgeyi gösterecek tepsi yok (`tray::started_hidden`). Pencere zaten
+/// varsa dokunulmaz.
+pub fn create_main_minimized(app: &AppHandle) -> tauri::Result<()> {
+    if app.get_webview_window(MAIN).is_some() {
+        return Ok(());
+    }
+    let w = build_main(app, false)?;
+    w.minimize()?;
+    w.show()
 }
 
 /// Ana pencereyi gösterir ve öne alır (gerekirse yeniden oluşturur).
@@ -99,14 +116,18 @@ fn quitting(app: &AppHandle) -> bool {
         .is_some_and(|s| s.quitting.load(Ordering::SeqCst))
 }
 
-/// Ana pencere kapatılınca tepsiye gizlenir (tepsiden "Çık" hariç); bildirim
-/// penceresi de kapanmaz, gizlenir.
+/// Ana pencere kapatılınca tepsiye gizlenir (tepsiden "Çık" hariç; tepsi
+/// yoksa küçülür, bkz. `tray::main_closed`); bildirim penceresi de kapanmaz,
+/// gizlenir.
 pub fn on_window_event(window: &Window, event: &WindowEvent) {
     if let WindowEvent::CloseRequested { api, .. } = event {
         if quitting(window.app_handle()) {
             return;
         }
-        if window.label() == MAIN || window.label() == NOTIFY {
+        if window.label() == MAIN {
+            api.prevent_close();
+            crate::tray::main_closed(window);
+        } else if window.label() == NOTIFY {
             api.prevent_close();
             let _ = window.hide();
         }
