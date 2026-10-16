@@ -221,7 +221,7 @@
       </div>
     {:else if !mail.loading}
       <div class="empty">
-        <span class="empty-icon"><Icon name="check" size={26} /></span>
+        <span class="empty-icon"><Icon name={empty.icon} size={26} /></span>
         <div class="empty-title">{t(empty.title)}</div>
         <div class="empty-body">{t(empty.body)}</div>
       </div>

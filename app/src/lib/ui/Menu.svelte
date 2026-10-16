@@ -6,8 +6,10 @@
     key?: string;
     label: string;
     icon?: IconName;
-    /** Sağda soluk ek bilgi (kısayol, sayı). */
+    /** Sağda soluk ek bilgi (sayı, adres, tarih). */
     hint?: string;
+    /** Sağda kısayol çipi (palet ve odak kipindeki gibi). */
+    kbd?: string;
     danger?: boolean;
     disabled?: boolean;
     /** İşaretli seçenek (süzgeç gibi). */
@@ -42,11 +44,15 @@
   $effect(() => {
     if (!menu || isMobileShell) return;
     if (at) {
-      // Pencereden taşmasın.
-      const r = menu.getBoundingClientRect();
+      // Pencereden taşmasın. Hesaplanmış boyut giriş animasyonunun ölçeğinden
+      // etkilenmez (getBoundingClientRect menüyü %2 dar ölçerdi); kesirli
+      // genişlik yukarı yuvarlanır.
+      const cs = getComputedStyle(menu);
+      const w = Math.ceil(parseFloat(cs.width));
+      const h = Math.ceil(parseFloat(cs.height));
       pos = {
-        left: Math.max(8, Math.min(at.x, window.innerWidth - r.width - 8)),
-        top: Math.max(8, Math.min(at.y, window.innerHeight - r.height - 8)),
+        left: Math.max(8, Math.min(at.x, window.innerWidth - w - 8)),
+        top: Math.max(8, Math.min(at.y, window.innerHeight - h - 8)),
       };
     }
     menu.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
@@ -100,7 +106,7 @@
     >
       {#if item.icon}<Icon name={item.icon} size={iconSize} />{/if}
       <span class="grow trunc">{item.label}</span>
-      {#if item.checked}<Icon name="check" size={iconSize} class="tick" />{:else if item.hint}<span class="meta num">{item.hint}</span>{/if}
+      {#if item.checked}<Icon name="check" size={iconSize} class="tick" />{:else if item.kbd}<kbd class="kbd">{item.kbd}</kbd>{:else if item.hint}<span class="meta num">{item.hint}</span>{/if}
     </button>
   {/each}
 {/snippet}
@@ -128,8 +134,12 @@
 {/if}
 
 <style>
+  /* Menü etiketine göre genişler (kırpılmaz); konum zaten görünür alana
+     sıkıştırıldığı için pencereden taşmaz. */
   .menu {
-    max-width: 320px;
+    width: max-content;
+    min-width: 220px;
+    max-width: min(440px, calc(100vw - 16px));
   }
 
   .fixed {

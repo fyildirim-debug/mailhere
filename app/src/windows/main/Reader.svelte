@@ -190,7 +190,7 @@
     menu = {
       at,
       items: [
-        { label: t('act.markUnread'), icon: 'mail', hint: 'U', onclick: () => void setUnread([msg.id], true) },
+        { label: t('act.markUnread'), icon: 'mail', kbd: 'U', onclick: () => void setUnread([msg.id], true) },
         { label: t('read.openQuick'), icon: 'external', onclick: () => void call('open_quick', { id: msg.id }) },
         { label: t('print.action'), icon: 'print', onclick: () => void print() },
         { label: t('print.saveEml'), icon: 'download', onclick: () => void saveEml() },

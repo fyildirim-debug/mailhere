@@ -5,6 +5,7 @@ import type { Account, Category, ListOnly, Mailbox, MessageSummary, Tag, View } 
 import { t, type MessageKey } from '../i18n/index.svelte';
 import { followUpDue } from '../util/followup';
 import { dateGroup, type DateGroup } from '../util/format';
+import type { IconName } from '../ui/icons';
 import { folderLabel } from './folders';
 
 export type ListGroup = DateGroup | 'due' | 'pinned';
@@ -100,12 +101,42 @@ export function listTitle(c: TitleContext): string {
   return acc ? `${base} · ${acc.name}` : base;
 }
 
-/** Boş durum metni: görünüme özel, yoksa genel (ne oldu + ne yapılabilir). */
-export function emptyState(c: { view: View; search: string | null; category: Category | null; only: ListOnly | null }): { title: MessageKey; body: MessageKey } {
-  if (c.search == null && !c.category && !c.only) {
-    if (c.view.kind === 'followups') return { title: 'follow.emptyTitle', body: 'follow.emptyBody' };
-    if (c.view.kind === 'screener') return { title: 'screen.emptyTitle', body: 'screen.emptyBody' };
-    if (c.view.kind === 'tag') return { title: 'list.emptyTitle', body: 'tag.emptyBody' };
+/** Boş durumun metni ve simgesi. */
+export interface EmptyState {
+  title: MessageKey;
+  body: MessageKey;
+  icon: IconName;
+}
+
+/**
+ * Boş durum: görünümün ne olduğunu söyler (ne oldu + ne yapılabilir). Arama
+ * sonucu her görünümde aramaya göre konuşur; süzgeçli liste süzgece göre.
+ */
+export function emptyState(c: { view: View; search: string | null; category: Category | null; only: ListOnly | null }): EmptyState {
+  if (c.search != null) return { title: 'list.emptySearchTitle', body: 'list.emptySearchBody', icon: 'search' };
+  if (!c.category && !c.only) {
+    switch (c.view.kind) {
+      case 'followups':
+        return { title: 'follow.emptyTitle', body: 'follow.emptyBody', icon: 'check' };
+      case 'screener':
+        return { title: 'screen.emptyTitle', body: 'screen.emptyBody', icon: 'check' };
+      case 'tag':
+        return { title: 'list.emptyTitle', body: 'tag.emptyBody', icon: 'check' };
+      case 'snoozed':
+        return { title: 'list.emptySnoozedTitle', body: 'list.emptySnoozedBody', icon: 'check' };
+      case 'starred':
+        return { title: 'list.emptyStarredTitle', body: 'list.emptyStarredBody', icon: 'check' };
+      case 'drafts':
+        return { title: 'list.emptyDraftsTitle', body: 'list.emptyDraftsBody', icon: 'check' };
+      case 'sent':
+        return { title: 'list.emptySentTitle', body: 'list.emptySentBody', icon: 'check' };
+      case 'archive':
+        return { title: 'list.emptyArchiveTitle', body: 'list.emptyArchiveBody', icon: 'check' };
+      case 'trash':
+        return { title: 'list.emptyTrashTitle', body: 'list.emptyTrashBody', icon: 'trash' };
+      case 'mailbox':
+        return { title: 'list.emptyMailboxTitle', body: 'list.emptyMailboxBody', icon: 'check' };
+    }
   }
-  return { title: 'list.emptyTitle', body: c.category || c.only ? 'list.emptyFilteredBody' : 'list.emptyBody' };
+  return { title: 'list.emptyTitle', body: c.category || c.only ? 'list.emptyFilteredBody' : 'list.emptyBody', icon: 'check' };
 }
