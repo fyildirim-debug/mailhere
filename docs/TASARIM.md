@@ -28,15 +28,17 @@ Bileşenler **asla** ham renk yazmaz; yalnız aşağıdaki jetonları (`var(--�
 | `--line-strong` | girdi ve düğme kenarı | `#D2D6DE` |
 | `--ink` | birincil metin | `#15171C` |
 | `--ink-2` | ikincil metin, ikonlar | `#4F5562` |
-| `--ink-3` | üst bilgi, saat, sayaç, yer tutucu | `#636A76` |
+| `--ink-3` | üst bilgi, saat, sayaç, yer tutucu | `#5E6572` |
 | `--accent` | birincil eylem, okunmamış noktası, odak | `#4655D4` |
 | `--accent-ink` | vurgu üstündeki metin | `#FFFFFF` |
 | `--accent-soft` | etiket zemini, odak gölgesi, seçili metin | `#E6E8FB` |
 | `--accent-text` | vurgu renkli metin ve bağlantı | `#3A47B8` |
 | `--sel` | seçili liste satırı | `#E4E7FA` |
 | `--hover` | üzerine gelme katmanı | `rgba(21,23,28,.045)` |
-| `--amber` | yıldız, erteleme | `#C27D12` |
-| `--ok` | başarı | `#2E8A57` |
+| `--amber` | yıldız, erteleme, uyarı ikonu | `#C27D12` |
+| `--amber-text` | amber uyarı metni | `#8F5A05` |
+| `--ok` | başarı ikonu ve noktası | `#2E8A57` |
+| `--ok-text` | başarı metni | `#237347` |
 | `--danger` | hata, silme onayı | `#C2372E` |
 | `--brand` | marka bölgesi (karşılama paneli); üstünde her temada beyaz metin | `#4655D4` (koyu: `#3440B0`) |
 | `--signal` | logodaki "burada" noktası | `#F2B544` |
@@ -63,7 +65,9 @@ Bileşenler **asla** ham renk yazmaz; yalnız aşağıdaki jetonları (`var(--�
 | `--sel` | `#242945` |
 | `--hover` | `rgba(230,232,237,.05)` |
 | `--amber` | `#E2A84A` |
+| `--amber-text` | `#E2A84A` |
 | `--ok` | `#5CC48A` |
+| `--ok-text` | `#5CC48A` |
 | `--danger` | `#EF7A70` |
 
 Kurallar:
@@ -72,6 +76,8 @@ Kurallar:
 - QR kodu (cihazlar arası aktarım) koyu temada da beyaz kart (`--qr-paper`, köşe 12, `--line` kenar) üstünde `--qr-ink` modüllerle çizilir; 4 modüllük sessiz bölge kartın içindedir. Okunabilirlik temadan önce gelir; QR'ın kendisi hiçbir zaman tema rengine boyanmaz.
 - Zemin katmanı sırası: `ground` → `surface` → `paper` → `raised`. Bir katman kendinden alttakinin üstüne oturur; tersi olmaz.
 - `--ink-3` yalnız `surface`, `paper` ve `sel` üstünde kullanılır. `ground` üstünde üst bilgi için `--ink-2` kullanılır (karşıtlık).
+- Uyarı ve başarı **metni** `--amber-text` / `--ok-text` ile yazılır (her zeminde ≥ 4.5:1); `--amber` / `--ok` yalnız ikon, nokta ve yıldızdadır (3:1 yeter). Koyu temada ikisi aynı tondur.
+- Hesap rozetindeki harf hesap renginin mürekkeple koyulaşmışıdır: `color-mix(in srgb, var(--c) 60%, var(--ink))`, zemin aynı rengin %18'i; `--ink` temayla döndüğü için iki temada AA.
 - Metin çiftleri her iki temada en az **4.5:1**, büyük metin ve ikonlar en az **3:1** karşıtlık sağlar.
 - Tema varsayılan olarak sistemi izler; kullanıcı Açık / Koyu / Sistem seçebilir. Kök elemanda `data-theme="light|dark"`.
 
@@ -125,17 +131,19 @@ Avatar; gönderici adresinden deterministik seçilen 9 tonlu paletten gelir (zem
 | Arama çipleri | arama sonuçlarının başlığı altında: Kimden, Tarih ve Hesap (çok hesapta) menülü; Ekli ve Okunmamış aç-kapa. 28 px, köşe 999, 12/500, `--line-strong` kenar; seçili `--accent-soft` + `--accent-text`, değerli çipte değer ve kaldır (×) düğmesi. Seçim sorgu metnine işleç olarak yazılır (`from:`, `after:`, `has:ek`, `is:okunmamış`, `hesap:`); çipin durumu metinden okunur. Arama başlığına basınca sorgu palette düzenlenir. |
 | Kenar çubuğu öğesi | 34 px, köşe 8; etkin öğe `--paper` zemin (koyuda `--raised`). Sayaç 12/500 sağda, `tabular-nums`, tek sütunda hizalı. |
 | Liste satırı | 3 satır (gönderen+saat, konu, önizleme), 8 px okunmamış noktası, 34 px avatar; seçili `--sel`; üzerine gelince sağ üstte Arşivle / Ertele / Sil eylemleri saati örter. |
-| Okuma alanı | araç çubuğu 52 px; konu 24/600 (alan 680 px'ten darsa 19/600, tarih alıcı satırında); önceki iletiler tek satıra katlanır, tek iletide "1 ileti" satırı yoktur; seçili iletinin yanıtla / ilet düğmeleri yalnız araç çubuğundadır; gövde 68ch; ekler 252 px kartlar; altta hızlı yanıt kutusu: boş ve odaksızken tek satır, hazır yanıt çipleri, alıcılar ve Gönder odakla açılır. |
-| Uzak içerik şeridi | koruma ikonu + "Uzak görseller ve izleme pikselleri engellendi" + "Bu göndericiye izin ver". |
+| Okuma alanı | araç çubuğu 52 px (Arşivle · Ertele · Sil, 1×18 `--line` ayraç, Klasöre taşı · Okunmadı say · Sabitle · Etiketle); konu 24/600 (alan 680 px'ten darsa 19/600, tarih alıcı satırında); önceki iletiler tek satıra katlanır, tek iletide "1 ileti" satırı yoktur; seçili iletinin yanıtla / ilet düğmeleri yalnız araç çubuğundadır; gövde 68ch; ekler 252 px kartlar; altta hızlı yanıt kutusu: boş ve odaksızken tek satır, hazır yanıt çipleri, alıcılar ve Gönder odakla açılır. |
+| Uzak içerik şeridi | koruma ikonu + "Uzak görseller ve izleme pikselleri engellendi" + "Bu göndericiye izin ver". Toplu gönderim şeridiyle ("Abonelikten çık") birlikteyse ikisi tek kutuda (`--surface`, `--line` kenar, köşe 10), aralarında 1 px `--line` çizgi. Gönderen satırında ad adresin kendisiyse adres yinelenmez. |
 | Özgün renkler geçişi | gönderen satırında (hızlı okumada başlık çubuğunda) `contrast` ikonlu düğme; yalnız koyu temada ve HTML postada, `aria-pressed`; basılıyken `--accent-soft` zemin + `--accent-text`. Çerçeve yeniden yüklenmez, yalnız renkler değişir. |
 | Toast | ters renk (`--ink` zemin), alt ortada, "Geri al" eylemi, 5 sn. Kısayol ipucu (masaüstü): metnin yanında soluk "Kısayol" + ters renkli kısayol çipi. |
 | Bildirim kartı | 372 px, köşe 14, `--shadow-lg`; başlık satırı (logo, hesap, zaman, sessize al, kapat), avatar 40, gönderen / konu / 2 satır önizleme, eylemler Aç + seçilen en çok üç bildirim düğmesi (varsayılan Yanıtla · Sil · İstenmeyen), altta 2 px geri sayım çizgisi (üzerine gelince durur). Yerinde yanıt alanı, onay satırı ve hata: §5.1. En çok 3 kart, fazlası "N posta daha" özeti. |
 | Hızlı okuma | 440×700 pencere; başlık çubuğunda Üstte tut, Uygulamada aç, Kapat; altta hazır yanıt çipleri ve yanıt kutusu. |
-| Yazma | Kimden / Kime (çipler) / Konu alanları, sade biçim çubuğu, "Gönder" + "Sonra gönder" bölünmüş düğmesi, gönderdikten sonra 10 sn geri alma. |
+| Yazma | Kimden / Kime (çipler) / Konu alanları, sade biçim çubuğu, "Gönder" + "Sonra gönder" bölünmüş düğmesi (kısayol yalnız düğmedeki "Ctrl Enter" çipinde), gönderdikten sonra 10 sn geri alma. Mobilde Bilgi ve Gizli tek ikon düğmede (`chevronDown`, 44 px) birlikte açılır; telefon genişliğinde (≤ 420 px) imza seçici yalnız ikon, tam ad erişilebilir adda. Alıcı eklenince "En az bir alıcı ekle." kalkar. |
 | Komut paleti | 620 px, üstte 19 px arama girdisi; bölümler Arama · Eylemler · Postalar · Kişiler; ok tuşları + Enter. Her komutun kısayolu sağda çip olarak yazar. Komutlar iki dilin adlarıyla ve eşanlamlılarla bulanık eşleşir (Türkçe harf ve aksan katlanır); boş palette sık kullanılanlar üstte. Eşleşen parça renkle değil 600 + alt çizgiyle. İşleç tamamlama: `from:` kişi, `after:` / `before:` hazır tarih (bugün, bu hafta, bu ay, son 30 gün), `hesap:` hesap önerir; değer boşken öneriler, yazılınca Enter arar, Tab ilk öneriyi yazar. |
 | Girdi | 44 px (form) / 32 px (satır içi), `--line-strong` kenar; odakta `--accent` kenar + 3 px `--accent-soft` halka. |
 | Kısayol çipi | 20–22 px, köşe 5, `--line-strong` kenar, 12/500. |
-| Boş durum | ikon 56 px `--accent-soft` disk içinde (`--accent-text`, 26 px), başlık 19/600, gövde `--ink-3` en çok 32ch; liste ve mobil ekranlarda aynı. |
+| Menü | `--raised`, köşe 12, `--shadow`, 36 px satırlar; etiket kadar genişler (220–440 px, kırpılmaz), konum pencereye 8 px payla sıkıştırılır. Kısayol sağda kısayol çipiyle, sayı / adres / tarih soluk 12 px metinle. Mobilde alt sayfa. |
+| Devre dışı | saydamlık tek değer: `--dim-disabled` (0.45); menü satırında saydamlık yerine `--ink-3` metin. |
+| Boş durum | ikon 56 px `--accent-soft` disk içinde (`--accent-text`, 26 px), başlık 19/600, gövde `--ink-3` en çok 32ch; liste ve mobil ekranlarda aynı. Tek tanım `global.css` (`.empty`, `.empty-icon`, `.empty-title`, `.empty-body`). Sessiz yer tutucu (`.empty.quiet`: okuma alanı "Okumak için bir posta seç", kurallar, planlananlar, seçici) disksiz simge ve 15 px başlık taşır. Metin görünüme göre konuşur: arama sonucu "Sonuç yok", Ertelenenler, Yıldızlılar, Taslaklar, Gönderilenler, Arşiv, Çöp ve klasörün kendi metni var; gelen kutusu "Burası sakin". |
 
 Boş durumlar ve hatalar her zaman iki şey söyler: **ne oldu** ve **ne yapılabilir**.
 
@@ -218,7 +226,7 @@ Sabitleme ve etiketler yalnız bu bilgisayarda tutulur; sunucuya bayrak ya da kl
 - Tüm etkileşimli öğeler gerçek `<button>`, `<a>`, `<input>`; tıklanabilir `div` yok.
 - Görünür odak halkası: 2 px `--accent`, 2 px ofset (`:focus-visible`).
 - Yalnız renkle bilgi verilmez (okunmamış: nokta + kalın yazı; yıldız: ikon + etiket).
-- Dokunma/tıklama hedefi en az 28 px, birincil hedefler 34 px+.
+- Dokunma/tıklama hedefi en az 28 px, birincil hedefler 34 px+. Görünüşü küçük kalması gereken denetimler hedefini görünmez kenarla (`::before`) büyütür: metin bağlantı düğmesi (`.link`, ≈ 29 px; mobilde ≥ 44), anahtar (56×44); arama çipinin kaldır düğmesi 28×28, renk seçici 28 px.
 - Seçim, imleç, kaydırma çubuğu ve odak halkası paletten temalandırılır.
 
 ## 11. Platform
