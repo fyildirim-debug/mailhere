@@ -45,14 +45,14 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 uuid = { version = "1.28.0", features = ["v4"] }
-base64 = "0.22.1"
+base64 = "0.23.1"
 
 # Depo ve posta biçimi
 # SQLCipher: veritabanı diskte şifreli (AES-256). OpenSSL yalnız SQLCipher'in
 # libcrypto'su için kaynaktan derlenir ve statik bağlanır; TLS yine rustls.
 rusqlite = { version = "0.40.2", features = ["bundled-sqlcipher-vendored-openssl"] }
 mail-parser = "0.11.9"
-mail-builder = "0.4.4"
+mail-builder = "1.0.0"
 ammonia = "4.1.7"
 # Uluslararası alan adı (punycode) çözümü: benzetilmiş gönderen alan adı denetimi.
 idna = "1.1.0"
@@ -69,7 +69,7 @@ ring = "0.17.14"
 zeroize = "1.9.1"
 # Parola kilidi: veritabanı anahtarını saran anahtar parola + tuzdan
 # Argon2id ile türetilir (yalnız KDF; PHC dizgisi ve rastgele özellikleri kapalı).
-argon2 = { version = "0.5.3", default-features = false, features = ["alloc", "zeroize"] }
+argon2 = { version = "0.6.0", default-features = false, features = ["alloc", "zeroize"] }
 # QR ile ayar aktarımı: yerel arayüz adresleri ve QR matrisi (görsel özellikleri kapalı).
 if-addrs = "0.15.0"
 qrcode = { version = "0.14.1", default-features = false }
