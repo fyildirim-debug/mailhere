@@ -219,17 +219,15 @@ impl Headless {
     /// Depoyu açar ve yöneticileri kurar; hiçbir şeyi başlatmaz
     /// ([`Headless::start`]). Veritabanı anahtarı kasada yoksa açmaz ve yeni
     /// anahtar üretmez: ilk açılış uygulamadan yapılmalıdır (bellek kipi
-    /// hariç).
+    /// hariç). Parola kilidi açıksa (anahtar parolayla sarılı) `Locked`
+    /// hatası döner: çekirdek parola girilene kadar açılmaz.
     pub fn open(
         dirs: &Dirs,
         secrets: Arc<dyn SecretStore>,
         shell: Arc<dyn HeadlessShell>,
     ) -> AppResult<Arc<Self>> {
-        if !memory_mode() && secrets.get(mh_store::DB_KEY_SECRET)?.is_none() {
-            return Err(AppError::new(
-                ErrorCode::Keyring,
-                "Veritabanı anahtarı yok; Mailhere önce uygulamadan açılmalı.",
-            ));
+        if !memory_mode() {
+            crate::lock::headless_check(dirs, secrets.as_ref())?;
         }
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
@@ -245,7 +243,7 @@ impl Headless {
             status: Mutex::new(Status::default()),
         });
         tracing::info!(dir = %dirs.data.display(), "penceresiz çekirdek: veri klasörü");
-        let core = Core::open(dirs, secrets, sink.clone(), &handle)?;
+        let core = Core::open(dirs, secrets, sink.clone(), &handle, None)?;
         let state = Arc::new(AppState::new(
             &core,
             dirs.cache.clone(),
@@ -436,6 +434,41 @@ mod tests {
         ));
         assert!(s.quiet(2));
         assert!(s.quiet(0), "hesapsız çekirdek hemen sessizdir");
+    }
+
+    struct SessizKabuk;
+
+    impl HeadlessShell for SessizKabuk {
+        fn notify(&self, _: NotifyEvent, _: &Settings) {}
+        fn counts_changed(&self) {}
+    }
+
+    /// Parola kilidi açıkken (anahtar sarılı, düz anahtar yok) penceresiz
+    /// çekirdek açılmaz: veritabanı, eşitleyiciler ve çalışma ortamı
+    /// kurulmaz; `Locked` döner. Anahtar hiç yoksa `Keyring` (ilk açılış).
+    #[test]
+    fn kilitliyken_penceresiz_cekirdek_acilmaz() {
+        let root =
+            std::env::temp_dir().join(format!("mailhere-headless-kilit-{}", uuid::Uuid::new_v4()));
+        let dirs = Dirs::under(root.clone());
+        let secrets = Arc::new(mh_sync::MemorySecrets::new());
+        secrets
+            .set(mh_store::LOCK_RECORD_SECRET, r#"{"v":1}"#)
+            .unwrap();
+        let e = Headless::open(&dirs, secrets.clone(), Arc::new(SessizKabuk))
+            .err()
+            .expect("kilitliyken açılmamalı");
+        assert_eq!(e.code, ErrorCode::Locked);
+        assert!(
+            !root.join("mailhere.db").exists(),
+            "veritabanı dosyası yaratılmaz"
+        );
+        secrets.delete(mh_store::LOCK_RECORD_SECRET).unwrap();
+        let e = Headless::open(&dirs, secrets, Arc::new(SessizKabuk))
+            .err()
+            .expect("anahtarsız açılmamalı");
+        assert_eq!(e.code, ErrorCode::Keyring);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

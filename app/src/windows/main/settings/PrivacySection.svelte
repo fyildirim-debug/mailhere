@@ -3,6 +3,7 @@
   import Icon from '../../../lib/ui/Icon.svelte';
   import { isMobileShell } from '../../../lib/shell';
   import { settings, updateSettings } from '../../../lib/stores/settings.svelte';
+  import LockSettings from './LockSettings.svelte';
 
   const s = $derived(settings.value);
   // Android'de anahtar zinciri yerine Keystore vardır; açıklama ona göre.
@@ -21,6 +22,8 @@
   <li><Icon name="key" size={18} /><span>{t(mobile ? 'mob.settings.keystore' : 'priv.keyring')}</span></li>
   <li><Icon name="eyeOff" size={18} /><span>{t('priv.remote')}</span></li>
 </ul>
+
+<LockSettings />
 
 <h3 class="set-h">{t('set.remoteAllow')}</h3>
 <p class="set-lead">{t('priv.remoteLead')}</p>

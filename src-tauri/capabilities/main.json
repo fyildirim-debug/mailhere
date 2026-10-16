@@ -89,6 +89,14 @@
     "allow-transfer-begin",
     "allow-transfer-cancel",
     "allow-transfer-receive",
-    "allow-transfer-apply"
+    "allow-transfer-apply",
+    "allow-lock-status",
+    "allow-lock-enable",
+    "allow-lock-disable",
+    "allow-lock-change",
+    "allow-lock-unlock",
+    "allow-lock-ui-lock",
+    "allow-lock-set-relock",
+    "allow-lock-reset-local"
   ]
 }

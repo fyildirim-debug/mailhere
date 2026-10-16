@@ -21,6 +21,8 @@
     "allow-send-cancel",
     "allow-draft-save",
     "allow-draft-delete",
-    "allow-attachments-pick"
+    "allow-attachments-pick",
+    "allow-lock-status",
+    "allow-lock-unlock"
   ]
 }

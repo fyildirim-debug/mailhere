@@ -271,6 +271,7 @@ async fn add(
         return Err(e);
     }
     state.sync.start(account.clone());
+    crate::lock::accounts_changed(app);
     crate::sink::changed(app, Vec::new());
     Ok(account)
 }

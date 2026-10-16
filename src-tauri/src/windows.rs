@@ -88,8 +88,9 @@ pub fn create_main_minimized(app: &AppHandle) -> tauri::Result<()> {
 /// Ana pencereyi gösterir ve öne alır (gerekirse yeniden oluşturur).
 pub fn show_main(app: &AppHandle) {
     // Açılış başarısız (yalnız hata iletişim kutusu açık): ikinci açılış
-    // durumsuz bir ana pencere yaratmasın.
-    if app.try_state::<AppState>().is_none() {
+    // durumsuz bir ana pencere yaratmasın. Parola kilidi beklerken çekirdek
+    // yoktur ama pencere (kilit ekranı) açılır.
+    if app.try_state::<AppState>().is_none() && !mh_app::lock::is_locked(app) {
         return;
     }
     match create_main(app) {
@@ -127,6 +128,9 @@ pub fn on_window_event(window: &Window, event: &WindowEvent) {
         if window.label() == MAIN {
             api.prevent_close();
             crate::tray::main_closed(window);
+            // Parola kilidi "her açışta sor" ise gizlenen pencere kilitlenir;
+            // çekirdek ve bildirimler sürer.
+            mh_app::lock::window_hidden(window.app_handle());
         } else if window.label() == NOTIFY {
             api.prevent_close();
             let _ = window.hide();

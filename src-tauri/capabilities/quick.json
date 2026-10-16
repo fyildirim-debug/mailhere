@@ -24,6 +24,8 @@
     "allow-send",
     "allow-send-cancel",
     "allow-open-main",
-    "allow-attachment-open"
+    "allow-attachment-open",
+    "allow-lock-status",
+    "allow-lock-unlock"
   ]
 }

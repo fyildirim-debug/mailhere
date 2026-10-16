@@ -67,6 +67,9 @@ webpki-roots = "1.0.9"
 ring = "0.17.14"
 # Bellekteki anahtar kopyalarını düşerken sıfırlamak için.
 zeroize = "1.9.1"
+# Parola kilidi: veritabanı anahtarını saran anahtar parola + tuzdan
+# Argon2id ile türetilir (yalnız KDF; PHC dizgisi ve rastgele özellikleri kapalı).
+argon2 = { version = "0.5.3", default-features = false, features = ["alloc", "zeroize"] }
 # QR ile ayar aktarımı: yerel arayüz adresleri ve QR matrisi (görsel özellikleri kapalı).
 if-addrs = "0.15.0"
 qrcode = { version = "0.14.1", default-features = false }

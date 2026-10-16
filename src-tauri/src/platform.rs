@@ -26,9 +26,46 @@ pub struct DesktopState {
 
 pub struct DesktopPlatform;
 
+/// Arayüz kilitliyken kartın yerine geçen içeriksiz sistem bildirimi.
+fn locked_notification(app: &AppHandle, ev: &NotifyEvent) {
+    mh_app::notify::native_text(
+        app,
+        &format!("Mailhere · {}", ev.account_name),
+        "Yeni posta geldi. Görmek için kilidi aç.",
+    );
+}
+
+/// Kilitli açılış: tepsi ipucu "kilitli" der; pencere gizli açıldıysa
+/// (açılışta tepside) bir kez sistem bildirimiyle söylenir, tıklanan tepsi
+/// simgesi kilit ekranını açar. Çekirdek parola girilene kadar kapalıdır.
+pub fn locked_start(app: &AppHandle, hidden: bool) {
+    // Tepsi kimliği `tray.rs` ile aynı ("main"); `tray::refresh` çekirdek
+    // yokken ipucuna dokunmaz.
+    if let Some(tray) = app.tray_by_id("main") {
+        let _ = tray.set_tooltip(Some("Mailhere · Kilitli"));
+    }
+    if hidden {
+        mh_app::notify::native_text(
+            app,
+            "Mailhere kilitli",
+            "Postaları almak için Mailhere'yi açıp parolanı gir.",
+        );
+    }
+}
+
 impl Platform for DesktopPlatform {
     fn notify(&self, app: &AppHandle, ev: NotifyEvent, settings: &Settings) {
+        // Arayüz kilitliyken (pencere gizlenip "her açışta sor" açıkken)
+        // kart gönderen, konu ve önizleme göstermez: içeriksiz bildirim.
+        if mh_app::lock::ui_locked(app) {
+            return locked_notification(app, &ev);
+        }
         crate::notify_card::show_card(app, ev, settings.native_notifications);
+    }
+
+    /// Çekirdek açıldı (olağan açılış ya da kilit açıldı): tepsi sayacı.
+    fn core_ready(&self, app: &AppHandle) {
+        crate::tray::refresh(app);
     }
 
     fn counts_changed(&self, app: &AppHandle) {

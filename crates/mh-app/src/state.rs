@@ -12,10 +12,11 @@ use mh_core::{AppError, AppResult, ErrorCode, Millis};
 use mh_jmap::JmapManager;
 use mh_notify::Mute;
 use mh_send::Outbox;
-use mh_store::Store;
+use mh_store::{DbKey, Store};
 use mh_sync::{EventSink, SecretStore, SyncManager};
-use tauri::{App, Manager};
+use tauri::{AppHandle, Manager};
 
+use crate::lock::Boot;
 use crate::platform::Platform;
 use crate::sink::TauriSink;
 
@@ -97,9 +98,10 @@ pub fn memory_mode() -> bool {
     demo_mode() || dev_flag("MAILHERE_SECRETS", "memory")
 }
 
-const DB_FILE: &str = "mailhere.db";
+pub(crate) const DB_FILE: &str = "mailhere.db";
 
 /// Veritabanı ve önbellek klasörleri.
+#[derive(Clone, Debug)]
 pub struct Dirs {
     pub data: PathBuf,
     pub cache: PathBuf,
@@ -163,9 +165,36 @@ impl mh_store::KeyVault for DbKeyVault<'_> {
     }
 }
 
+/// Parola kilidi açılınca anahtar anahtar zincirinde değil bellektedir: depo
+/// bu kasadan okur, hiçbir şey yazmaz (kayıt yoksa üretim gerekmez).
+struct UnlockedVault<'a>(&'a DbKey);
+
+impl mh_store::KeyVault for UnlockedVault<'_> {
+    fn load(&self) -> AppResult<Option<String>> {
+        Ok(Some(self.0.to_secret().to_string()))
+    }
+
+    fn save(&self, _secret: &str) -> AppResult<()> {
+        Err(AppError::new(
+            ErrorCode::Internal,
+            "Kilitli açılışta veritabanı anahtarı yeniden yazılmaz.",
+        ))
+    }
+
+    fn persistent(&self) -> bool {
+        true
+    }
+}
+
 /// Veri klasörünü hazırlar, eski konumdaki veritabanını taşır ve şifreli
 /// veritabanını açar (gerekirse eski şifresiz veritabanını dönüştürür).
-fn open_store(dirs: &Dirs, secrets: &dyn SecretStore, memory: bool) -> AppResult<Store> {
+/// `key` verilmişse (parola kilidi açıldı) anahtar zincirine bakılmaz.
+fn open_store(
+    dirs: &Dirs,
+    secrets: &dyn SecretStore,
+    memory: bool,
+    key: Option<&DbKey>,
+) -> AppResult<Store> {
     mh_store::private_dir(&dirs.data).map_err(|e| {
         tracing::error!(error = %e, "veri klasörü oluşturulamadı");
         AppError::new(
@@ -184,7 +213,10 @@ fn open_store(dirs: &Dirs, secrets: &dyn SecretStore, memory: bool) -> AppResult
     if let Some(legacy) = &dirs.legacy_db {
         mh_store::relocate(legacy, &db)?;
     }
-    Store::open_with_vault(&db, &DbKeyVault::new(secrets, !memory))
+    match key {
+        Some(key) => Store::open_with_vault(&db, &UnlockedVault(key)),
+        None => Store::open_with_vault(&db, &DbKeyVault::new(secrets, !memory)),
+    }
 }
 
 /// Tauri'siz çekirdek: depo, eşitleyiciler ve giden kutusu. Olaylar verilen
@@ -199,15 +231,18 @@ pub struct Core {
 
 impl Core {
     /// Depoyu açar, onaylı sertifikaları yükler, tanıtım verisini (varsa)
-    /// yazar ve yöneticileri kurar; hiçbir şeyi başlatmaz.
+    /// yazar ve yöneticileri kurar; hiçbir şeyi başlatmaz. `key` parola
+    /// kilidi açılınca elde edilen veritabanı anahtarıdır; yoksa anahtar
+    /// zincirinden okunur (ilk açılışta üretilir).
     pub fn open(
         dirs: &Dirs,
         secrets: Arc<dyn SecretStore>,
         sink: Arc<dyn EventSink>,
         rt: &tokio::runtime::Handle,
+        key: Option<&DbKey>,
     ) -> AppResult<Self> {
         let memory = memory_mode();
-        let store = Arc::new(open_store(dirs, secrets.as_ref(), memory)?);
+        let store = Arc::new(open_store(dirs, secrets.as_ref(), memory, key)?);
         // Kullanıcının onayladığı sertifikalar ilk bağlantıdan önce yüklenir.
         mh_sync::tls::set_trusted(&store.settings()?.trusted_certs);
         if demo_mode() && mh_store::seed_demo(&store, chrono::Local::now().fixed_offset())? {
@@ -265,28 +300,38 @@ impl Core {
 /// Çekirdeği açar, `AppState` olarak Tauri durumuna bağlar ve
 /// zamanlayıcıları (erteleme, hatırlatma, elek, önizleme onarımı) başlatır.
 /// Kabuk bundan sonra pencerelerini açar; duruma `app.state::<AppState>()`
-/// ile erişir.
+/// ile erişir. Kabuğa özgü ön ve son işler `Platform::core_starting` /
+/// `core_ready` ile çağrılır (iki açılış yolu da: olağan açılış ve parola
+/// kilidinin açılması, `crate::lock`).
+///
+/// `key` parola kilidi açılınca elde edilen veritabanı anahtarıdır; kilit
+/// kapalıyken `None` (anahtar zincirinden okunur ya da ilk açılışta
+/// üretilir).
 ///
 /// Açılış başarısızsa `Platform::fatal` çağrılmıştır (hata iletişim kutusu
 /// gösterilir, kapatılınca uygulama çıkar); kabuk `Err` alınca pencere
 /// açmadan `Ok(())` dönmelidir — hiçbir dosya silinmez.
-pub fn setup_core(
-    app: &mut App,
-    rt: tokio::runtime::Handle,
-    dirs: Dirs,
-    secrets: Arc<dyn SecretStore>,
-    platform: Arc<dyn Platform>,
-) -> AppResult<()> {
-    let handle = app.handle().clone();
-    // Ortak komutların yan durumları; açılış başarısız olsa da yönetilir.
+pub fn setup_core(app: &AppHandle, boot: Boot, key: Option<&DbKey>) -> AppResult<()> {
+    let handle = app.clone();
+    let Boot {
+        rt,
+        dirs,
+        secrets,
+        platform,
+        ..
+    } = boot;
+    // Ortak komutların yan durumları; açılış başarısız olsa da yönetilir
+    // (ikinci çağrıda `manage` bir şey yapmaz).
     app.manage(crate::cmd_oauth::OAuthState::default());
     app.manage(crate::files::Picked::default());
+    platform.core_starting(&handle);
     tracing::info!(dir = %dirs.data.display(), "veri klasörü");
     let sink = Arc::new(TauriSink::new(handle.clone()));
-    let core = match Core::open(&dirs, secrets, sink, &rt) {
+    let core = match Core::open(&dirs, secrets, sink, &rt, key) {
         Ok(core) => core,
         Err(e) => {
             tracing::error!(code = %e.code, error = %e.message, "Mailhere açılamadı");
+            platform.core_failed(&handle);
             platform.fatal(&handle, &e);
             return Err(e);
         }
@@ -294,6 +339,7 @@ pub fn setup_core(
     app.manage(AppState::new(&core, dirs.cache, platform.clone()));
     if let Err(e) = core.start(&rt) {
         tracing::error!(code = %e.code, error = %e.message, "eşitleme başlatılamadı");
+        platform.core_failed(&handle);
         platform.fatal(&handle, &e);
         return Err(e);
     }
@@ -316,5 +362,7 @@ pub fn setup_core(
             Err(e) => tracing::warn!(error = %e.message, "önizlemeler onarılamadı"),
         });
     }
+    crate::lock::core_opened(&handle);
+    platform.core_ready(&handle);
     Ok(())
 }

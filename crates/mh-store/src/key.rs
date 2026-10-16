@@ -18,7 +18,7 @@ use crate::Store;
 /// Anahtarın anahtar zincirindeki kullanıcı adı (hizmet adı parolalarla aynı).
 pub const DB_KEY_SECRET: &str = "db-key";
 
-const KEY_LEN: usize = 32;
+pub(crate) const KEY_LEN: usize = 32;
 
 /// 256 bitlik ham veritabanı anahtarı.
 #[derive(Clone)]
@@ -60,6 +60,16 @@ impl DbKey {
             out.push(hex_digit(b & 0x0f));
         }
         out
+    }
+
+    /// Ham baytlar (parola kilidi anahtarı sarar; `lock.rs`).
+    pub(crate) fn as_bytes(&self) -> &[u8; KEY_LEN] {
+        &self.0
+    }
+
+    /// Ham baytlardan anahtar (parola kilidi açılınca; `lock.rs`).
+    pub(crate) fn from_bytes(bytes: Zeroizing<[u8; KEY_LEN]>) -> Self {
+        Self(bytes)
     }
 
     /// SQLCipher'in ham anahtar biçimi: `x'<64 onaltılık>'` (PBKDF2 uygulanmaz).

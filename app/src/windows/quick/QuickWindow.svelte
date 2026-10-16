@@ -5,6 +5,7 @@
   import Avatar from '../../lib/ui/Avatar.svelte';
   import FileBadge from '../../lib/ui/FileBadge.svelte';
   import Icon from '../../lib/ui/Icon.svelte';
+  import LockScreen from '../../lib/ui/LockScreen.svelte';
   import Logo from '../../lib/ui/Logo.svelte';
   import WindowControls from '../../lib/ui/WindowControls.svelte';
   import MailBody from '../../lib/mail/MailBody.svelte';
@@ -15,6 +16,7 @@
   import { locale } from '../../lib/i18n/index.svelte';
   import { quickReplyTargets, quoteFor, signatureFor } from '../../lib/stores/mail.svelte';
   import { darkMailWanted, quickReplies, settings } from '../../lib/stores/settings.svelte';
+  import { initLock, isLocked, lock } from '../../lib/stores/lock.svelte';
 
   interface Props {
     id: number;
@@ -51,7 +53,12 @@
     });
   }
 
+  // Arayüz kilitliyken (ana pencere gizlendi, "her açışta sor" açık) posta
+  // yerine kilit ekranı; açılınca posta yeniden yüklenir.
+  const lockShown = $derived(isLocked(lock.status));
+
   onMount(() => {
+    void initLock();
     void load();
     // Gönderilen yanıt giden kutusundan çıkınca pencere kapanır.
     const off = on(EVENTS.outbox, (e) => {
@@ -169,6 +176,15 @@
 <svelte:window onkeydown={onKey} />
 
 <div class="win">
+  {#if lockShown}
+    <header class="titlebar" data-tauri-drag-region>
+      <Logo size={18} dot={false} />
+      <span class="title" data-tauri-drag-region>{t('quick.title')}</span>
+      <span class="grow" data-tauri-drag-region></span>
+      <WindowControls maximize={false} minimize={false} height={42} />
+    </header>
+    <LockScreen compact onunlocked={() => void load()} />
+  {:else}
   <header class="titlebar" data-tauri-drag-region>
     <Logo size={18} dot={false} />
     <span class="title" data-tauri-drag-region
@@ -289,6 +305,7 @@
       {/if}
     </div>
   {/if}
+{/if}
 </div>
 
 <style>

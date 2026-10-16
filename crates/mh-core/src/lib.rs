@@ -1140,6 +1140,32 @@ pub struct UpdateInfo {
     pub date: Option<String>,
 }
 
+// --------------------------------------------------------- parola kilidi
+
+/// Parola kilidinin durumu (`lock_status`; `mh:lock` olayı aynı yapıyı taşır).
+///
+/// - `enabled`: veritabanı anahtarı parolayla sarılı (kilit açık).
+/// - `locked`: çekirdek (veritabanı, eşitleyiciler) kapalı; parola girilene
+///   kadar `lock_*` dışındaki komutlar `locked` hatası döner.
+/// - `ui_locked`: çekirdek çalışıyor, yalnız arayüz kilitli (pencere yeniden
+///   açıldı / uygulama arka plandan döndü); arka planda bildirim sürer.
+/// - `relock_on_open`: "pencereyi her açışta parola sor" tercihi.
+/// - `retry_after_ms`: yanlış parolalardan sonra bekleme; 0 ise denenebilir.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LockStatus {
+    pub enabled: bool,
+    pub locked: bool,
+    pub ui_locked: bool,
+    pub relock_on_open: bool,
+    pub retry_after_ms: u64,
+}
+
+/// Parolanın en az uzunluğu (karakter); arayüz de aynı sınırı uygular.
+pub const LOCK_PASSWORD_MIN: usize = 8;
+/// Parolanın en çok uzunluğu (bayt).
+pub const LOCK_PASSWORD_MAX: usize = 256;
+
 // ------------------------------------------------------- aktarım (QR ile)
 
 /// QR kodun modül matrisi. `rows` tam `size` satırdır; her satır `size`
@@ -1356,6 +1382,9 @@ pub mod events {
     /// `NavigateEvent`: tek pencereli kabuk (Android) bu rotayı yığına itmeli
     /// (`index.html#/<rota>`; ör. yazma: `compose/reply/7`).
     pub const NAVIGATE: &str = "mh:navigate";
+    /// `LockStatus`: parola kilidinin durumu değişti (kilitlendi, açıldı,
+    /// ayar değişti); tüm pencereler kilit ekranını buna göre gösterir.
+    pub const LOCK: &str = "mh:lock";
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -1424,6 +1453,9 @@ pub enum ErrorCode {
     Storage,
     Invalid,
     Internal,
+    /// Parola kilidi kapalı değil: çekirdek parola girilene kadar açılmaz ya
+    /// da arayüz kilitli; `lock_unlock` ile açılır.
+    Locked,
 }
 
 impl std::fmt::Display for ErrorCode {

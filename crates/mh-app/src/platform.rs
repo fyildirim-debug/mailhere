@@ -71,4 +71,21 @@ pub trait Platform: Send + Sync + 'static {
 
     /// Açılış başarısız: sorunu ve çözümü gösterir, uygulamayı kapatır.
     fn fatal(&self, app: &AppHandle, e: &AppError);
+
+    /// Çekirdek açılmak üzere (`setup_core` başı): olağan açılışta ve parola
+    /// kilidi açılınca. Android bu anda etkinliksiz çekirdeği durdurur.
+    fn core_starting(&self, _app: &AppHandle) {}
+
+    /// Çekirdek açıldı ve eşitleme başladı (`setup_core` sonu): kabuk tepsi
+    /// sayacını yeniler, bekleyen bildirim eylemlerini uygular vb.
+    fn core_ready(&self, _app: &AppHandle) {}
+
+    /// Çekirdek açılamadı (`fatal`dan hemen önce): kabuk tuttuğu kapıyı bırakır.
+    fn core_failed(&self, _app: &AppHandle) {}
+
+    /// Uygulamayı yeniden başlatır (yerel veri sıfırlanınca). Masaüstü
+    /// süreci yeniden açar; Android'de süreç kapanır, kullanıcı yeniden açar.
+    fn restart(&self, app: &AppHandle) {
+        app.restart();
+    }
 }

@@ -76,3 +76,11 @@ transfer_cancel
 transfer_receive
 transfer_apply
 remote_images
+lock_status
+lock_enable
+lock_disable
+lock_change
+lock_unlock
+lock_ui_lock
+lock_set_relock
+lock_reset_local

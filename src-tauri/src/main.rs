@@ -18,7 +18,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use mh_app::state::{demo_mode, dev_env, memory_mode};
-use mh_app::Dirs;
+use mh_app::{Dirs, Platform};
 use mh_sync::{MemorySecrets, SecretStore};
 use tauri::{App, AppHandle, Manager, RunEvent};
 
@@ -57,9 +57,27 @@ fn setup(app: &mut App, rt: tokio::runtime::Handle) -> Result<(), Box<dyn std::e
     };
     let dirs = Dirs::resolve(memory, || os_dirs(&handle))?;
     let platform = Arc::new(DesktopPlatform);
-    // Hata iletişim kutusu gösterildi; pencere açılmaz, kutu kapanınca çıkılır.
-    if mh_app::setup_core(app, rt.clone(), dirs, secrets, platform).is_err() {
-        return Ok(());
+    let boot = mh_app::lock::Boot {
+        rt: rt.clone(),
+        dirs,
+        secrets,
+        platform: platform.clone(),
+        kdf: mh_app::lock::KdfParams::DESKTOP,
+    };
+    // Parola kilidi açıksa çekirdek parola girilene kadar açılmaz; pencere
+    // kilit ekranını gösterir, `lock_unlock` çekirdeği başlatır.
+    match mh_app::lock::prepare(&handle, boot) {
+        Ok(Some(boot)) => {
+            // Hata iletişim kutusu gösterildi; pencere açılmaz, kutu kapanınca çıkılır.
+            if mh_app::setup_core(&handle, boot, None).is_err() {
+                return Ok(());
+            }
+        }
+        Ok(None) => {}
+        Err(e) => {
+            platform.fatal(&handle, &e);
+            return Ok(());
+        }
     }
 
     // Açılış kaydından (`--tepside`) gelindiyse pencere açılmaz, yalnız tepsi.
@@ -75,6 +93,9 @@ fn setup(app: &mut App, rt: tokio::runtime::Handle) -> Result<(), Box<dyn std::e
     }
     updater::start(&handle, &rt);
     tray::refresh(&handle);
+    if mh_app::lock::is_locked(&handle) {
+        platform::locked_start(&handle, hidden);
+    }
 
     // Tanıtım kipinde ekran görüntüsü otomasyonu: N saniye sonra örnek kart.
     let demo_card = dev_env("MAILHERE_DEMO_NOTIFY").and_then(|v| v.trim().parse::<u64>().ok());
@@ -110,8 +131,9 @@ fn main() {
         .manage(DesktopState::default())
         .setup(move |app| setup(app, rt.clone()))
         .on_window_event(windows::on_window_event)
-        // Ortak komutlar + yalnız masaüstü komutları (`commands.txt`).
-        .invoke_handler(mh_app::shared_commands![
+        // Ortak komutlar + yalnız masaüstü komutları (`commands.txt`);
+        // kilitliyken `lock_*` dışındakiler kapıda reddedilir.
+        .invoke_handler(mh_app::lock::gate(mh_app::shared_commands![
             windows::open_quick,
             notify_card::notify_layout,
             notify_card::notify_hide,
@@ -122,7 +144,7 @@ fn main() {
             updater::update_install,
             autostart::autostart_get,
             autostart::autostart_set,
-        ])
+        ]))
         .build(tauri::generate_context!())
         .expect("Mailhere başlatılamadı");
 

@@ -65,6 +65,14 @@
   onMount(() => {
     document.documentElement.dataset.window = 'notify';
     const off = on(EVENTS.notify, (e) => add(e));
+    // Arayüz kilitlenince ekrandaki kartlar da kapanır: gönderen ve konu
+    // kilitli pencerenin yanında görünmez (yeni posta içeriksiz sistem bildirimiyle gelir).
+    const offLock = on(EVENTS.lock, (s) => {
+      if (s.uiLocked || s.locked) {
+        cards = [];
+        overflow = 0;
+      }
+    });
     const clock = setInterval(() => (now = Date.now()), 30_000);
     // Yanıt kutusu büyüdükçe pencere de büyür.
     const ro = new ResizeObserver(() => sync(false));
@@ -74,6 +82,7 @@
     else void call('demo_notify');
     return () => {
       off();
+      offLock();
       ro.disconnect();
       clearInterval(clock);
     };

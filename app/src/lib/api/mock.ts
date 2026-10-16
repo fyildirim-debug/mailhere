@@ -18,6 +18,7 @@ import {
   type EventPayloads,
   type FollowUp,
   type HapticKind,
+  type LockStatus,
   type Mailbox,
   type MailboxRole,
   type MessageDetail,
@@ -41,6 +42,7 @@ import {
   type TransferStateKind,
   type Vacation,
   type View,
+  LOCK_PASSWORD_MIN,
   QUICK_REPLIES_MAX,
   QUICK_REPLY_CHARS,
   SAVED_SEARCHES_MAX,
@@ -81,7 +83,74 @@ export interface MockBackend {
     tags: Tag[];
     /** Mobil kabuğun istediği titreşimler (yalnız kayıt; sahte arka uçta titreşim yok). */
     haptics: HapticKind[];
+    /** Parola kilidi (testler kilitli açılışı buradan ve `persist` ile benzetir). */
+    lock: MockLock;
   };
+}
+
+/**
+ * Sahte parola kilidi. Gerçek arka uçta parola hiçbir yere yazılmaz; burada
+ * yalnız tanıtım ve testler için düz metin tutulur (`persist` ile tarayıcı
+ * deposunda, yeniden yükleme = yeniden başlatma: kilit açıksa kilitli açılır).
+ */
+export interface MockLock {
+  enabled: boolean;
+  locked: boolean;
+  uiLocked: boolean;
+  relockOnOpen: boolean;
+  failures: number;
+  /** Bekleme biter (ms); 0 ise yok. */
+  retryAfter: number;
+  password: string | null;
+}
+
+const LOCK_KEY = 'mailhere.mock.lock';
+/** "Parolamı unuttum" yerel veriyi sildi: bir sonraki yükleme boş başlar (gerçek arka uçta veritabanı boştur). */
+const WIPED_KEY = 'mailhere.mock.wiped';
+
+function consumeWiped(persist: boolean): boolean {
+  if (!persist) return false;
+  try {
+    const wiped = localStorage.getItem(WIPED_KEY) === '1';
+    if (wiped) localStorage.removeItem(WIPED_KEY);
+    return wiped;
+  } catch {
+    return false;
+  }
+}
+
+/** Arka uçtaki `retry_delay` ile aynı: beş hatadan sonra 2, 4, 8 … sn, en çok 300. */
+export function lockRetryDelayMs(failures: number): number {
+  if (failures <= 5) return 0;
+  return Math.min(2 ** Math.min(failures - 5, 20), 300) * 1000;
+}
+
+/** Arka uçtaki `allows` ile aynı: kilitliyken hangi komut geçer. */
+export function lockAllows(cmd: string, coreOpen: boolean, uiLocked: boolean): boolean {
+  if (cmd.startsWith('lock_')) return true;
+  if (!coreOpen) return false;
+  if (uiLocked) {
+    return [
+      'notify_hide', 'notify_layout', 'notify_focus', 'open_main', 'sync_now', 'sync_reconnect',
+      'system_bars', 'haptic', 'notification_status', 'notification_permission', 'background_mode_get', 'battery_status',
+    ].includes(cmd);
+  }
+  return true;
+}
+
+function loadLock(persist: boolean): MockLock {
+  const fresh: MockLock = { enabled: false, locked: false, uiLocked: false, relockOnOpen: true, failures: 0, retryAfter: 0, password: null };
+  if (!persist) return fresh;
+  try {
+    const raw = localStorage.getItem(LOCK_KEY);
+    if (!raw) return fresh;
+    const saved = JSON.parse(raw) as Partial<MockLock>;
+    const enabled = !!saved.enabled && typeof saved.password === 'string';
+    // Yeniden yükleme yeniden başlatma gibidir: kilit açıksa çekirdek kapalı başlar.
+    return { ...fresh, enabled, locked: enabled, relockOnOpen: saved.relockOnOpen ?? true, password: enabled ? saved.password! : null };
+  } catch {
+    return fresh;
+  }
 }
 
 const SETTINGS_KEY = 'mailhere.mock.settings';
@@ -352,12 +421,13 @@ function loadSettings(persist: boolean): Settings {
 export function createMockBackend(opts: MockOptions = {}): MockBackend {
   const now = () => (opts.now ? opts.now.getTime() : Date.now());
   const data = createDemoData(opts.now ?? new Date());
+  const empty = !!opts.empty || consumeWiped(!!opts.persist);
   const state = {
-    accounts: opts.empty ? [] : data.accounts,
-    mailboxes: opts.empty ? [] : data.mailboxes,
-    messages: opts.empty ? [] : data.messages,
+    accounts: empty ? [] : data.accounts,
+    mailboxes: empty ? [] : data.mailboxes,
+    messages: empty ? [] : data.messages,
     settings: loadSettings(!!opts.persist),
-    rules: opts.empty
+    rules: empty
       ? []
       : ([
           {
@@ -373,8 +443,9 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     followUps: {} as Record<number, { at: number; createdAt: number }>,
     screened: [] as MessageId[],
     known: [] as string[],
-    tags: opts.empty ? [] : data.tags,
+    tags: empty ? [] : data.tags,
     haptics: [] as HapticKind[],
+    lock: loadLock(!!opts.persist),
   };
   const scheduled = new Map<string, { item: ScheduledItem; msg: OutgoingMessage; timer: ReturnType<typeof setTimeout> }>();
   const vacations = new Map<string, Vacation>();
@@ -1521,7 +1592,122 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       state.haptics.push(kind);
       return null;
     },
+    // Parola kilidi: davranış arka uçla aynı (uzunluk, yanlış parola sayacı,
+    // üstel bekleme, sıfırlama); parola yalnız bu sahte arka uçta saklanır.
+    lock_status: () => lockStatus(),
+    lock_enable: ({ password }) => {
+      checkPassword(password);
+      if (state.lock.enabled) fail('invalid', 'Parola kilidi zaten açık. Parolayı değiştirmek için "Parolayı değiştir"i kullan.');
+      state.lock = { ...state.lock, enabled: true, locked: false, uiLocked: false, relockOnOpen: true, failures: 0, retryAfter: 0, password };
+      saveLock();
+      emit(EVENTS.lock, lockStatus());
+      return lockStatus();
+    },
+    lock_disable: ({ password }) => {
+      requireEnabled();
+      verifyPassword(password);
+      state.lock = { ...state.lock, enabled: false, locked: false, uiLocked: false, relockOnOpen: true, password: null };
+      saveLock();
+      emit(EVENTS.lock, lockStatus());
+      return lockStatus();
+    },
+    lock_change: ({ current, next }) => {
+      requireEnabled();
+      checkPassword(next);
+      verifyPassword(current);
+      state.lock.password = next;
+      saveLock();
+      return lockStatus();
+    },
+    lock_unlock: ({ password }) => {
+      requireEnabled();
+      verifyPassword(password);
+      state.lock.locked = false;
+      state.lock.uiLocked = false;
+      emit(EVENTS.lock, lockStatus());
+      return lockStatus();
+    },
+    lock_ui_lock: () => {
+      if (state.lock.enabled && !state.lock.locked && !state.lock.uiLocked) {
+        state.lock.uiLocked = true;
+        emit(EVENTS.lock, lockStatus());
+      }
+      return lockStatus();
+    },
+    lock_set_relock: ({ on }) => {
+      requireEnabled();
+      state.lock.relockOnOpen = on;
+      saveLock();
+      emit(EVENTS.lock, lockStatus());
+      return lockStatus();
+    },
+    lock_reset_local: () => {
+      requireEnabled();
+      // Yerel veri gider: hesaplar, kutular, postalar, kurallar, etiketler; ayarlar varsayılana döner.
+      state.accounts = [];
+      state.mailboxes = [];
+      state.messages = [];
+      state.rules = [];
+      state.tags = [];
+      state.followUps = {};
+      state.screened = [];
+      state.known = [];
+      state.settings = { ...defaultSettings };
+      state.lock = { enabled: false, locked: false, uiLocked: false, relockOnOpen: true, failures: 0, retryAfter: 0, password: null };
+      saveLock();
+      if (opts.persist) {
+        try {
+          localStorage.removeItem(SETTINGS_KEY);
+          localStorage.setItem(WIPED_KEY, '1');
+        } catch {
+          /* depolama kapalı olabilir */
+        }
+      }
+      emit(EVENTS.lock, lockStatus());
+      emit(EVENTS.changed, { mailboxIds: [] });
+      return lockStatus();
+    },
   };
+
+  function lockStatus(): LockStatus {
+    const l = state.lock;
+    return { enabled: l.enabled, locked: l.locked, uiLocked: l.uiLocked, relockOnOpen: l.relockOnOpen, retryAfterMs: Math.max(0, l.retryAfter - now()) };
+  }
+
+  function saveLock() {
+    if (!opts.persist) return;
+    try {
+      const { enabled, relockOnOpen, password } = state.lock;
+      if (enabled) localStorage.setItem(LOCK_KEY, JSON.stringify({ enabled, relockOnOpen, password }));
+      else localStorage.removeItem(LOCK_KEY);
+    } catch {
+      /* özel pencerede depolama kapalı olabilir */
+    }
+  }
+
+  function checkPassword(p: string) {
+    if ([...p].length < LOCK_PASSWORD_MIN) fail('invalid', `Parola en az ${LOCK_PASSWORD_MIN} karakter olmalı.`);
+    if (new TextEncoder().encode(p).length > 256) fail('invalid', 'Parola en çok 256 bayt olabilir.');
+  }
+
+  function requireEnabled() {
+    if (!state.lock.enabled) fail('invalid', 'Parola kilidi açık değil.');
+  }
+
+  /** Yanlış parola sayılır; beş hatadan sonra bekleme kurulur (arka uçla aynı metinler). */
+  function verifyPassword(p: string) {
+    const left = state.lock.retryAfter - now();
+    if (left > 0) fail('locked', `Çok sayıda yanlış deneme. ${Math.max(1, Math.ceil(left / 1000))} saniye sonra yeniden deneyebilirsin.`);
+    if (p !== state.lock.password) {
+      state.lock.failures += 1;
+      const delay = lockRetryDelayMs(state.lock.failures);
+      state.lock.retryAfter = delay ? now() + delay : 0;
+      emit(EVENTS.lock, lockStatus());
+      fail('auth', delay ? `Parola yanlış. Yeniden dene. Sonraki deneme için ${delay / 1000} saniye bekle.` : 'Parola yanlış. Yeniden dene.');
+    }
+    state.lock.failures = 0;
+    state.lock.retryAfter = 0;
+  }
 
   return {
     state,
@@ -1529,6 +1715,8 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     async call(name, args) {
       // Gerçek arka uç gibi eşzamansız dön.
       await Promise.resolve();
+      // Komut kapısı (arka uçtaki `lock::gate`): kilitliyken içerik komutları reddedilir.
+      if (!lockAllows(name, !state.lock.locked, state.lock.uiLocked)) fail('locked', 'Mailhere kilitli. Devam etmek için parolanı gir.');
       const fn = commands[name] as (a: unknown) => unknown;
       // Gerçek IPC gibi argümanları ve sonucu JSON üzerinden kopyala.
       const result = await fn(JSON.parse(JSON.stringify(args ?? {})));

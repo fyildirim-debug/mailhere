@@ -25,6 +25,7 @@ import { t, when } from '../i18n/index.svelte';
 import { accountScope } from '../mail/query';
 import { showToast } from '../ui/toast.svelte';
 import { baseSubject, displayName, replyTargets } from '../util/format';
+import { isLockedError, isOpen, lock } from './lock.svelte';
 import { settings } from './settings.svelte';
 import { loadTags } from './tags.svelte';
 
@@ -128,7 +129,14 @@ let listToken = 0;
 let detailToken = 0;
 
 function errorToast(e: unknown) {
+  // Kilit ekranı açıkken reddedilen istek beklenen durumdur; toast çıkmaz.
+  if (isLockedError(e)) return;
   showToast({ text: t('toast.error', { message: toAppError(e).message }) });
+}
+
+/** Kilitliyken liste ve sayaç yenilenmez; kilit açılınca `pullMail` toplar. */
+function lockedNow(): boolean {
+  return lock.status != null && !isOpen(lock.status);
 }
 
 // ------------------------------------------------------------ yükleme
@@ -170,6 +178,7 @@ export async function refreshCounts() {
 }
 
 export async function refreshList(keepSelection = true) {
+  if (lockedNow()) return;
   const token = ++listToken;
   mail.loading = true;
   try {
@@ -231,6 +240,7 @@ let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 function scheduleRefresh() {
   if (refreshTimer) clearTimeout(refreshTimer);
   refreshTimer = setTimeout(() => {
+    if (lockedNow()) return;
     void refreshList();
     void refreshCounts();
     void reloadMailboxes();

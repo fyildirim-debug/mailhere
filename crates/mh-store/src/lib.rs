@@ -13,6 +13,7 @@ mod encryption;
 mod followups;
 mod jmap;
 mod key;
+pub mod lock;
 mod mailboxes;
 mod messages;
 mod outbox;
@@ -35,9 +36,10 @@ pub use actions::{Action, QueuedAction, ServerFlag, ServerRef};
 pub use contacts::CONTACT_RECENT;
 pub use demo::{seed_demo, DEMO_HOST};
 pub use drafts::DraftPut;
-pub use encryption::{private_dir, probe, relocate, DbFile};
+pub use encryption::{private_dir, probe, relocate, remove_database, DbFile};
 pub use jmap::{JmapAccountState, JmapLocation, JmapUpsert};
 pub use key::{DbKey, KeyVault, DB_KEY_SECRET};
+pub use lock::{KdfParams, LockRecord, UnwrapError, LOCK_RECORD_SECRET};
 pub use mailboxes::{mailbox_id, MailboxInfo, Namespace};
 pub use messages::{
     is_full_address, is_remote_entry, MessageLocation, NewMessage, PendingMove, UpsertOutcome,

@@ -91,6 +91,8 @@ pub async fn account_add(
     };
     state.store.insert_account(&account)?;
     state.sync.start(account.clone());
+    // Parola kilidi açıksa kayıttaki gizli değer adları yenilenir.
+    crate::lock::accounts_changed(&app);
     crate::sink::changed(&app, Vec::new());
     Ok(account)
 }
@@ -124,6 +126,7 @@ pub async fn account_remove(app: AppHandle, state: State<'_, AppState>, id: Stri
             "Hesap bulunamadı; zaten kaldırılmış olabilir.",
         ));
     }
+    crate::lock::accounts_changed(&app);
     crate::sink::changed(&app, Vec::new());
     Ok(())
 }

@@ -4,8 +4,9 @@
 //!
 //! Kabuğa özgü iş (pencere, tepsi, bildirim kartı, dosya penceresi, anahtar
 //! zinciri) burada yoktur; [`Platform`] üzerinden kabuğa bırakılır. Kabuk
-//! açılışta [`setup_core`] çağırır ve komutları [`shared_commands!`] ile
-//! kendi komutlarına ekler.
+//! açılışta [`lock::prepare`] ile parola kilidini sorar, kilit yoksa
+//! [`setup_core`] çağırır ve komutları [`shared_commands!`] ile kendi
+//! komutlarına ekler ([`lock::gate`] kilitliyken öteki komutları reddeder).
 
 pub mod cmd_account;
 pub mod cmd_cert;
@@ -24,6 +25,7 @@ pub mod commands;
 pub mod files;
 pub mod followups;
 pub mod headless;
+pub mod lock;
 pub mod logging;
 pub mod notify;
 pub mod notify_actions;
@@ -140,6 +142,14 @@ define_shared_commands! { $
     transfer::transfer_receive,
     transfer::transfer_apply,
     cmd_images::remote_images,
+    lock::lock_status,
+    lock::lock_enable,
+    lock::lock_disable,
+    lock::lock_change,
+    lock::lock_unlock,
+    lock::lock_ui_lock,
+    lock::lock_set_relock,
+    lock::lock_reset_local,
 }
 
 /// `commands.txt` içindeki adlar (yorum ve boş satırlar atılır).

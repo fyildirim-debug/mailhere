@@ -139,6 +139,26 @@ pub(crate) fn undecryptable_error(path: &Path) -> AppError {
     )
 }
 
+/// Veritabanını ve tüm yan dosyalarını (WAL, SHM, günlük, yarım kalmış
+/// dönüşüm kopyaları) siler. Yalnız kullanıcı yerel veriyi bilerek
+/// sıfırlayınca (parola unutuldu) çağrılır; olmayan dosya hata değildir.
+/// Şifreli dosyanın anahtarı da silindiğinden içerik anahtarsız okunamaz;
+/// diskteki blokların üzerine yazılmaz (SSD'de güvenilir değildir).
+pub fn remove_database(path: &Path) -> io::Result<()> {
+    let mut targets = vec![path.to_path_buf()];
+    targets.extend(SIDECARS.iter().map(|s| sidecar(path, s)));
+    targets.push(sidecar(path, TMP_SUFFIX));
+    targets.push(sidecar(path, OLD_SUFFIX));
+    for t in targets {
+        match fs::remove_file(&t) {
+            Ok(()) => {}
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(())
+}
+
 /// Yarıda kalmış bir dönüşümün izlerini toplar. Anahtar gerektirmez ve hiçbir
 /// durumda kullanıcı verisi içeren tek kopyayı silmez.
 ///

@@ -4,6 +4,7 @@
   import { t } from '../../lib/i18n/index.svelte';
   import { flatten, folderIcon, folderLabel, folderTree } from '../../lib/mail/folders';
   import Icon from '../../lib/ui/Icon.svelte';
+  import LockScreen from '../../lib/ui/LockScreen.svelte';
   import Logo from '../../lib/ui/Logo.svelte';
   import ToastHost from '../../lib/ui/ToastHost.svelte';
   import WindowControls from '../../lib/ui/WindowControls.svelte';
@@ -13,7 +14,8 @@
   import { currentRows, initMail, mail, move, moveTo, moveToFolder, openSettings, pullMail, select, selectedIds, setUnread, setView, toggleStar } from '../../lib/stores/mail.svelte';
   import { bulkMove, bulkMoveToFolder, bulkSetUnread, bulkSnooze, bulkStar, setTag, togglePin } from '../../lib/stores/bulk.svelte';
   import { checkAll, checkedIds, checkedRows, clearChecked, extendChecked, multi } from '../../lib/stores/selection.svelte';
-  import { resolvedTheme, toggleTheme } from '../../lib/stores/settings.svelte';
+  import { initLock, isLocked, isOpen, lock } from '../../lib/stores/lock.svelte';
+  import { refreshSettings, resolvedTheme, toggleTheme } from '../../lib/stores/settings.svelte';
   import { tagStore } from '../../lib/stores/tags.svelte';
   import { initUpdate } from '../../lib/stores/update.svelte';
   import { watchWake } from '../../lib/mail/wake';
@@ -62,6 +64,11 @@
   // Hesap ekleme sürerken (ilk hesap dahil) uygulamanın geri kalanı açılmaz:
   // kenar çubuğu, arama ve komut paleti "Gelen kutusunu aç" ile gelir.
   const setup = $derived(!mail.accounts.length || mail.screen === 'onboarding');
+  // Parola kilidi: çekirdek kapalı ya da arayüz kilitli → yalnız kilit ekranı,
+  // posta verisi DOM'a girmez. Kilit kapalıyken (varsayılan) hiç görünmez.
+  const locked = $derived(isLocked(lock.status));
+  let mailStarted = false;
+  let wasLocked = false;
   // Birden çok satır seçiliyken okuma alanı yerine toplu işlem paneli.
   const bulk = $derived(multi());
   const mode = $derived(deskMode());
@@ -71,7 +78,8 @@
   const listMax = $derived(Math.max(LIST.min, Math.min(LIST.max, desk.width - (full ? desk.sideW : RAIL_W) - READER_MIN)));
 
   onMount(() => {
-    void initMail();
+    // Önce kilit durumu: posta ancak kilit yokken (ya da açılınca) yüklenir.
+    void initLock();
     initUpdate();
     applyStoredScale();
     const offWidth = watchWidth(() => scale.css);
@@ -87,9 +95,25 @@
     };
   });
 
-  // Görev çubuğunda okunmamış sayısı.
+  // Kilit yokken ya da açılınca posta yüklenir; yeniden açılışta liste yenilenir.
   $effect(() => {
-    const n = mail.counts.inboxUnread;
+    const open = isOpen(lock.status);
+    const l = locked;
+    untrack(() => {
+      if (open && !mailStarted) {
+        mailStarted = true;
+        void refreshSettings();
+        void initMail();
+      } else if (open && wasLocked && mail.ready) {
+        void pullMail();
+      }
+      wasLocked = l;
+    });
+  });
+
+  // Görev çubuğunda okunmamış sayısı (kilitliyken yalnız ad).
+  $effect(() => {
+    const n = locked ? 0 : mail.counts.inboxUnread;
     document.title = n ? `(${n}) ${t('app.name')}` : t('app.name');
   });
 
@@ -213,7 +237,7 @@
   }
 
   function onKey(e: KeyboardEvent) {
-    if (e.defaultPrevented) return;
+    if (e.defaultPrevented || locked) return;
     // G zinciri: ikinci tuş görünümü seçer; başka tuş zinciri bitirir.
     if (chord) {
       if (e.key === 'Shift' || e.key === 'Control' || e.key === 'Alt' || e.key === 'Meta') return;
@@ -368,7 +392,7 @@
       <span class="name" data-tauri-drag-region>{t('app.name')}</span>
     </div>
     <div class="center" data-tauri-drag-region>
-      {#if !setup}
+      {#if !setup && !locked}
         <button class="search" onclick={() => (mail.paletteOpen = true)}>
           <Icon name="search" size={16} />
           <span class="trunc grow">{t('palette.placeholder')}</span>
@@ -385,7 +409,7 @@
   </header>
 
   <div class="body">
-    {#if !setup && !triage.on}
+    {#if !setup && !triage.on && !locked}
       {#if full}
         <Sidebar width={desk.sideW} />
         <Splitter label={t('desk.resizeSide')} value={desk.sideW} min={SIDE.min} max={SIDE.max} def={SIDE.def} onchange={setSideWidth} />
@@ -398,7 +422,9 @@
         {/if}
       {/if}
     {/if}
-    {#if setup}
+    {#if locked}
+      <LockScreen />
+    {:else if setup}
       <!-- Tek örnek: hesap eklenince de aynı bileşen "Hazırsın" adımında kalır. -->
       {#if mail.ready}<Onboarding />{/if}
     {:else if mail.screen === 'settings'}
@@ -424,7 +450,7 @@
     {/if}
   </div>
 
-  {#if mail.paletteOpen}
+  {#if mail.paletteOpen && !locked}
     <CommandPalette onclose={() => (mail.paletteOpen = false)} onopen={paletteAction} />
   {/if}
   {#if keysOpen}<KeysDialog onclose={() => (keysOpen = false)} />{/if}

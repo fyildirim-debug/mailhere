@@ -20,10 +20,13 @@
   import { bindComposeOpener } from '../../lib/mail/open';
   import { watchWake } from '../../lib/mail/wake';
   import Icon from '../../lib/ui/Icon.svelte';
+  import LockScreen from '../../lib/ui/LockScreen.svelte';
   import Menu, { type MenuItem } from '../../lib/ui/Menu.svelte';
   import { bindSheetLayer } from '../../lib/ui/sheet-layer';
   import ToastHost from '../../lib/ui/ToastHost.svelte';
-  import { initMail, mail, markAllRead, rowsOf, select, setOnly, setView, type Row } from '../../lib/stores/mail.svelte';
+  import { initMail, mail, markAllRead, pullMail, rowsOf, select, setOnly, setView, type Row } from '../../lib/stores/mail.svelte';
+  import { initLock, isLocked, isOpen, lock, watchRelock } from '../../lib/stores/lock.svelte';
+  import { refreshSettings } from '../../lib/stores/settings.svelte';
   import { parseRoute } from '../../lib/stores/route.svelte';
   import { checkAll, clearChecked } from '../../lib/stores/selection.svelte';
   import { settings } from '../../lib/stores/settings.svelte';
@@ -44,6 +47,10 @@
 
   // Hesap ekleme sürerken (ilk hesap dahil) uygulamanın geri kalanı açılmaz.
   const setup = $derived(!mail.accounts.length || mail.screen === 'onboarding');
+  // Parola kilidi: kilit ekranı tüm kabuğun yerine geçer; posta DOM'a girmez.
+  const locked = $derived(isLocked(lock.status));
+  let mailStarted = false;
+  let wasLocked = false;
   const screen = $derived(nav.current);
   const drawerOpen = $derived(nav.layer === 'drawer');
   // Mobilde tek işaret bile seçim kipidir (masaüstünde iki ve üstü panel açar).
@@ -60,7 +67,10 @@
   const allChecked = $derived(selecting && mail.checked.length >= rowsOf(mail.items, mail.search == null).length);
 
   onMount(() => {
-    void initMail();
+    // Önce kilit durumu; posta kilit yokken (ya da açılınca) yüklenir.
+    void initLock();
+    // Arka planda 1 dk'dan uzun kalınca dönüşte yeniden kilitlenir (tercih açıksa).
+    const offRelock = watchRelock();
     const onPop = (e: PopStateEvent) => nav.onPopState(e.state);
     window.addEventListener('popstate', onPop);
     // Alt sayfalar yığının katmanı olur: geri tuşu önce onları kapatır.
@@ -90,6 +100,7 @@
     // Liste başlığının altındaki çevrimdışı satırı.
     const offConnection = connection.watch();
     return () => {
+      offRelock();
       window.removeEventListener('popstate', onPop);
       bindSheetLayer(null);
       bindComposeOpener(null);
@@ -111,6 +122,20 @@
     if (nav.current.name === 'compose') nav.replace(screen);
     else nav.push(screen);
   }
+
+  // Kilit yokken ya da açılınca posta yüklenir; yeniden açılışta liste yenilenir.
+  $effect(() => {
+    const open = isOpen(lock.status);
+    const l = locked;
+    if (open && !mailStarted) {
+      mailStarted = true;
+      void refreshSettings();
+      void initMail();
+    } else if (open && wasLocked && mail.ready) {
+      void pullMail();
+    }
+    wasLocked = l;
+  });
 
   // Android 13+: ilk hesap olunca bildirim izni bir kez istenir (hesap elle
   // eklense de bilgisayardan alınsa da); sonrası Ayarlar › Bildirimler'de.
@@ -204,7 +229,9 @@
 </script>
 
 <div class="m-shell">
-  {#if setup}
+  {#if locked}
+    <div class="m-screen"><LockScreen /></div>
+  {:else if setup}
     {#if mail.ready}
       <div class="m-screen setup"><Onboarding /></div>
     {/if}

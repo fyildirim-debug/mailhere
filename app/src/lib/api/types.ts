@@ -583,6 +583,27 @@ export interface UpdateInfo {
   date: string | null;
 }
 
+// --------------------------------------------------------- parola kilidi
+
+/**
+ * Parola kilidinin durumu (`lock_status`; `mh:lock` olayı aynı yapıyı taşır).
+ * `enabled`: anahtar parolayla sarılı. `locked`: çekirdek kapalı, parola bekleniyor
+ * (`lock_*` dışındaki komutlar `locked` hatası döner). `uiLocked`: çekirdek çalışıyor,
+ * yalnız arayüz kilitli (bildirimler sürer). `relockOnOpen`: pencere yeniden açılınca /
+ * uygulama arka plandan dönünce yeniden kilitle. `retryAfterMs`: yanlış denemelerden
+ * sonra bekleme; 0 ise denenebilir.
+ */
+export interface LockStatus {
+  enabled: boolean;
+  locked: boolean;
+  uiLocked: boolean;
+  relockOnOpen: boolean;
+  retryAfterMs: number;
+}
+
+/** Parolanın en az uzunluğu (karakter); arka uç aynı sınırı uygular. */
+export const LOCK_PASSWORD_MIN = 8;
+
 // ------------------------------------------------------- aktarım (QR ile)
 
 /**
@@ -717,6 +738,7 @@ export const EVENTS = {
   update: 'mh:update',
   transfer: 'mh:transfer',
   navigate: 'mh:navigate',
+  lock: 'mh:lock',
 } as const;
 
 export interface NotifyEvent {
@@ -761,6 +783,7 @@ export interface EventPayloads {
   'mh:update': UpdateInfo;
   'mh:transfer': TransferState;
   'mh:navigate': NavigateEvent;
+  'mh:lock': LockStatus;
 }
 
 // -------------------------------------------------------------------- hatalar
@@ -775,7 +798,9 @@ export type ErrorCode =
   | 'keyring'
   | 'storage'
   | 'invalid'
-  | 'internal';
+  | 'internal'
+  /** Parola kilidi: çekirdek parola girilene kadar kapalı ya da arayüz kilitli; `lock_unlock` açar. */
+  | 'locked';
 
 export interface AppError {
   code: ErrorCode;
@@ -946,6 +971,29 @@ export interface Commands {
   transfer_receive: [{ code: string }, TransferPreview];
   /** Bekleyen paketi seçime göre uygular, sonucu bilgisayara bildirir ve raporu döner. */
   transfer_apply: [{ previewId: string; choice: TransferChoice }, TransferReport];
+
+  // Parola kilidi (isteğe bağlı; varsayılan kapalı). Bu komutlar çekirdek kapalıyken de çalışır.
+  lock_status: [Record<string, never>, LockStatus];
+  /** Kilidi kurar: veritabanı anahtarı parolayla sarılır (Argon2id + AES-256-GCM), düz anahtar silinir. */
+  lock_enable: [{ password: string }, LockStatus];
+  /** Kilidi kaldırır; mevcut parola gerekir. */
+  lock_disable: [{ password: string }, LockStatus];
+  /** Parolayı değiştirir; mevcut parola gerekir. */
+  lock_change: [{ current: string; next: string }, LockStatus];
+  /**
+   * Kilidi açar: doğru parolada çekirdek kapalıysa başlar, arayüz kilidi kalkar. Yanlış parola
+   * `auth` hatası; beş hatadan sonra üstel bekleme (`locked` hatası + `retryAfterMs`).
+   */
+  lock_unlock: [{ password: string }, LockStatus];
+  /** Yalnız arayüzü kilitler (telefon arka plandan 1 dk'dan uzun sürede döndü); çekirdek sürer. */
+  lock_ui_lock: [Record<string, never>, LockStatus];
+  /** "Pencereyi her açışta parola sor" tercihi. */
+  lock_set_relock: [{ on: boolean }, LockStatus];
+  /**
+   * Parola unutuldu: yerel veritabanı, kilit kaydı ve hesapların parolaları silinir; uygulama ilk
+   * açılış ekranına döner (çekirdek açıkken uygulama yeniden başlar). Sunucudaki postalar kalır.
+   */
+  lock_reset_local: [Record<string, never>, LockStatus];
 
   // İki kabukta aynı adla, kabuğa özgü gövdeyle (ortak listede değil)
   /**

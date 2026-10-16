@@ -32,6 +32,20 @@ pub fn native(app: &AppHandle, ev: &NotifyEvent) {
     }
 }
 
+/// İçeriksiz işletim sistemi bildirimi (kilitli açılış, arayüz kilitliyken
+/// gelen posta): yalnız verilen başlık ve gövde; posta verisi taşımaz.
+pub fn native_text(app: &AppHandle, title: &str, body: &str) {
+    if let Err(e) = app
+        .notification()
+        .builder()
+        .title(escape_markup(title))
+        .body(escape_markup(body))
+        .show()
+    {
+        tracing::warn!(error = %e, "sistem bildirimi gösterilemedi");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -19,12 +19,14 @@
   import Avatar from '../../lib/ui/Avatar.svelte';
   import FileBadge from '../../lib/ui/FileBadge.svelte';
   import Icon from '../../lib/ui/Icon.svelte';
+  import LockScreen from '../../lib/ui/LockScreen.svelte';
   import Menu, { type MenuItem } from '../../lib/ui/Menu.svelte';
   import Sheet from '../../lib/ui/Sheet.svelte';
   import { showToast } from '../../lib/ui/toast.svelte';
   import WindowControls from '../../lib/ui/WindowControls.svelte';
   import FollowUpMenu from '../../lib/mail/FollowUpMenu.svelte';
   import { settings } from '../../lib/stores/settings.svelte';
+  import { initLock, isLocked, lock } from '../../lib/stores/lock.svelte';
   import { isMobileShell } from '../../lib/shell';
   import { baseSubject, displayName, fileSize, snoozeOptions } from '../../lib/util/format';
   import { fillVariables } from '../../lib/util/variables';
@@ -166,7 +168,13 @@
     else await appWindow.close();
   }
 
+  // Ayrı yazma penceresi arayüz kilitlenince örtülür: taslak bellekte kalır,
+  // içerik görünmez ve etkileşimsizdir (`inert`); gömülü yazma (mobil) kabuğun
+  // kilit ekranının altında kalır.
+  const lockShown = $derived(!embedded && isLocked(lock.status));
+
   onMount(() => {
+    if (!embedded) void initLock();
     void init();
     const off = on(EVENTS.outbox, (e) => {
       if (!queued || e.id !== queued.id) return;
@@ -604,9 +612,19 @@
   />
 {/snippet}
 
-<div class="win" class:embedded>
+<div class="win" class:embedded class:veiled={lockShown}>
+  {#if lockShown}
+    <div class="lockveil">
+      <header class="titlebar" data-tauri-drag-region>
+        <span class="title trunc" data-tauri-drag-region>{t('compose.new')}</span>
+        <span class="grow" data-tauri-drag-region></span>
+        <WindowControls height={40} />
+      </header>
+      <LockScreen compact />
+    </div>
+  {/if}
   {#if !embedded}
-    <header class="titlebar" data-tauri-drag-region>
+    <header class="titlebar" data-tauri-drag-region inert={lockShown}>
       <span class="title trunc" data-tauri-drag-region>{title()}</span>
       <span class="grow" data-tauri-drag-region></span>
       <WindowControls height={40} />
@@ -813,6 +831,24 @@
     background: var(--paper);
     /* Dar kapsayıcıda (mobil ekran, dar pencere) alanlar tek sütuna yaklaşır. */
     container-type: inline-size;
+  }
+
+  /* Kilit örtüsü pencerenin tamamını kaplar; altındaki içerik görünmez ve etkileşimsiz. */
+  .win.veiled {
+    position: relative;
+  }
+
+  .win.veiled > :not(.lockveil) {
+    visibility: hidden;
+  }
+
+  .lockveil {
+    position: absolute;
+    inset: 0;
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    background: var(--paper);
   }
 
   .win.embedded {

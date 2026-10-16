@@ -18,3 +18,6 @@ chrono.workspace = true
 tracing.workspace = true
 ring.workspace = true
 zeroize.workspace = true
+# Parola kilidi (`lock.rs`): KDF ve kayıt alanlarının metin biçimi.
+argon2.workspace = true
+base64.workspace = true

@@ -1040,6 +1040,7 @@ pub async fn transfer_apply(
             }
         }
     }
+    crate::lock::accounts_changed(&app);
     crate::sink::changed(&app, Vec::new());
     tracing::info!(
         added = outcome.report.accounts_added,
