@@ -121,8 +121,9 @@
 </div>
 
 <style>
+  /* Ekranın birincil eylemi: 44 px dokunma hedefi, 56 px çubukta 6 px pay. */
   .send {
-    min-height: 40px;
+    min-height: var(--m-touch);
     margin-right: 6px;
     padding: 0 16px 0 14px;
     gap: 8px;

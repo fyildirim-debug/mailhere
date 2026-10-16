@@ -83,7 +83,7 @@
     buildLayout(rows, { rowH, groupH, tail: 104, groupOf: (m) => groupOf(m, ctx), groupLabel, rowKey: (m) => `m-${m.id}` }),
   );
   const visible = $derived(visibleEntries(layout.entries, scrollTop - headH, viewport, OVERSCAN));
-  /** Birleşik görünüm (birden çok hesap, hesap seçili değil): satırda hesap rengi noktası. */
+  /** Birleşik görünüm (birden çok hesap, hesap seçili değil): satırda hesap rengi karesi. */
   const unified = $derived(mail.accountId == null && mail.accounts.length > 1);
   const accountById = $derived(new Map(mail.accounts.map((a) => [a.id, a])));
 

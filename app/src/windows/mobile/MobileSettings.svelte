@@ -218,6 +218,8 @@
     left: 66px;
   }
 
+  /* Hesap rozeti: zemin hesap renginin %18'i; harf aynı ton mürekkeple
+     koyulaşır (--ink temayla döner, iki temada ≥ 4.5:1). */
   .badge {
     flex: none;
     display: grid;
@@ -226,7 +228,7 @@
     height: 36px;
     border-radius: 50%;
     background: color-mix(in srgb, var(--c) 18%, transparent);
-    color: var(--c);
+    color: color-mix(in srgb, var(--c) 60%, var(--ink));
     font-weight: 600;
   }
 

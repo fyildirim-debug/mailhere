@@ -158,7 +158,7 @@ Boş durumlar ve hatalar her zaman iki şey söyler: **ne oldu** ve **ne yapıla
 | 520 ms | **bildirim kartının gelişi** — uygulamanın tek "yazılmış anı" |
 
 - Eğri: `cubic-bezier(.16, 1, .3, 1)`. Çıkış girişten hızlıdır. Zıplama/elastik eğri yok.
-- Yalnız `transform`, `opacity`, `filter` ve gölge canlandırılır; genişlik/yükseklik/konum canlandırılmaz.
+- Yalnız `transform`, `opacity`, `filter` ve gölge canlandırılır; genişlik/yükseklik/konum canlandırılmaz. Tek istisna: mobilde yüzen "Yeni posta" düğmesinin etiketi (200 ms; etiketin `max-width`'i, düğmenin `padding` ve `gap`'i); 56 px'lik tek öğe, yerleşimi etkilemez.
 - `prefers-reduced-motion: reduce` iken kayma ve bulanıklık kalkar; renk ve saydamlık geçişi kalır.
 
 ## 7. İkonlar
@@ -237,7 +237,7 @@ Android sürümü aynı arayüz kodundan (`app/`) derlenir; kabuk `mobile` olunc
 | Öğe | Mobil |
 | --- | --- |
 | Dokunma hedefi | en az 44×44, birincil eylem 48 |
-| Liste satırı | 72 px (sıkı görünüm 60), sistem yazı ölçeğiyle orantılı büyür; sol oluk 8 px: okunmamış noktası (8 px) + 40 px avatar, metin 78 px'ten başlar. Avatar ayrı düğmedir (52 px hedef): dokunmak çoklu seçimi başlatır. Birleşik görünümde (birden çok hesap, hesap seçili değil) saatin solunda 8 px hesap rengi noktası; renkli kenar çizgisi yok |
+| Liste satırı | 72 px (sıkı görünüm 60), sistem yazı ölçeğiyle orantılı büyür; sol oluk 8 px: okunmamış noktası (8 px) + 40 px avatar, metin 78 px'ten başlar. Avatar ayrı düğmedir (52 px hedef): dokunmak çoklu seçimi başlatır. Birleşik görünümde (birden çok hesap, hesap seçili değil) saatin solunda 8 px, köşe 2 hesap rengi karesi (yuvarlak okunmamış noktasıyla karışmaz); renkli kenar çizgisi yok |
 | Uygulama çubuğu | 56 px; listede `--surface` zemin, başlık içerikte (aşağıda) |
 | Liste başlığı | **büyük başlık**: 24/600 görünüm adı + 12/500 `--ink-3` okunmamış sayısı, kaydırılan alanın başında; içerik akınca uygulama çubuğuna 19/600 kopyası belirir (120 ms saydamlık), alt çizgi o zaman çıkar. Çevrimdışıyken altında 12 `--ink-3` **durum satırı**: "Çevrimdışı · N gönderim bekliyor" (giden kutusunda zamanı gelmiş gönderimler) ya da "Çevrimdışı · değişiklikler bağlantı gelince eşitlenir"; bağlantı gelince 200 ms'de söner; engelleyen iletişim kutusu yok |
 | Kategori çipleri | gelen kutusunda büyük başlığın altında, 32 px (alt sınır), köşe 999, `--line-strong` kenar; seçili `--accent-soft` zemin + `--accent-text`; adın yanında okunmamış satır sayısı 12/500 `--ink-3` (seçilide `--accent-text`; sayı yoksa yazılmaz, 99+); satır yatay kayar ve içerik akınca üste **yapışır** (`position: sticky`, kaydırıcının doğrudan çocuğu); dokunma alanı görünmez kenarla 44 |

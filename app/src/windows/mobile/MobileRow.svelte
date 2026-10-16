@@ -3,7 +3,8 @@
   // gönderen + saat, konu, önizleme. Sol oluk: 8 px okunmamış noktası, 40 px
   // avatar; metin 15 px tek ölçekte, hiyerarşi ağırlık ve mürekkeple kurulur
   // (okunmamış: nokta + 600 + --ink). Birleşik görünümde saatin yanında 8 px
-  // hesap rengi noktası (renkli kenar çizgisi değil).
+  // köşesi 2 hesap rengi karesi (renkli kenar çizgisi değil; okunmamış
+  // noktası yuvarlak kalır).
   //
   // Avatar ayrı düğmedir (44 px hedef): dokunmak seçimi başlatır. Seçim
   // kipinde satırın tamamı işaretler, avatarın yerine işaret gelir. Hareket
@@ -24,7 +25,7 @@
     checked: boolean;
     /** Seçim kipi: dokunma işaretler, açmaz. */
     selecting: boolean;
-    /** Birleşik görünümde satırın hesabı (renk noktası); tek hesapta yok. */
+    /** Birleşik görünümde satırın hesabı (renk karesi); tek hesapta yok. */
     account?: Account;
     onopen: () => void;
     ontoggle: () => void;
@@ -143,6 +144,16 @@
     background: var(--hover);
   }
 
+  /* Sürüklenen satır basma tonu almaz: zemin nötr kalır, eşik rengi yalnız
+     alttaki panelde (SwipeRow sürüklerken sarmalayıcıya `dragging` verir). */
+  :global(.swipe.dragging) .row:active {
+    background: var(--surface);
+  }
+
+  :global(.swipe.dragging) .pick:active {
+    background: transparent;
+  }
+
   /* Okunmamış noktası ilk satırın ortasında; kanalı hep yerinde durur. */
   .dot {
     width: 8px;
@@ -249,11 +260,12 @@
     color: var(--ink-3);
   }
 
-  /* Hesap rengi: 8 px nokta, saatin solunda. */
+  /* Hesap rengi: 8 px köşesi 2 kare, saatin solunda; yuvarlak okunmamış
+     noktasıyla (vurgu rengine yakın hesap renklerinde de) karışmaz. */
   .acc {
     width: 8px;
     height: 8px;
-    border-radius: 50%;
+    border-radius: 2px;
   }
 
   .unread .time {

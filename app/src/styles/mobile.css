@@ -116,6 +116,13 @@ body {
   inset: -10px -6px;
 }
 
+/* Toast eylemi ("Geri al") 44 px hedef; negatif dış boşlukla toast'ın
+   yüksekliği (10 + 30 + 10) değişmez, hedef iç boşluğa taşar. */
+.m-shell .toast button {
+  min-height: var(--m-touch);
+  margin: -7px 0;
+}
+
 /* Anahtar 40×24 kalır; dokunma alanı görünmez kenarla 56×44'e çıkar. */
 .m-shell .switch::before {
   content: '';
@@ -171,6 +178,26 @@ body {
 
 .m-chip[aria-pressed='true'] .m-chip-n {
   color: inherit;
+}
+
+/* Yanıt alanındaki hazır yanıt çipleri (32 px) de görünmez kenarla 44'e
+   çıkar. Çip satırı yatay kaydırıcıdır ve taşanı kırpar: kenar satırın iç
+   boşluğunda durur. Başlıkla arası 4, kutuyla 8 px olduğundan hedef
+   4 + 32 + 8 = 44; komşu düğmelerin üstüne taşmaz, yerleşim değişmez.
+   Konum çipin 1 px kenarının içinden ölçülür: -5 / -9. */
+.m-shell .replying .quick .chips {
+  margin: -4px 0 0;
+  padding: 4px 2px 8px;
+}
+
+.m-shell .replying .chip {
+  position: relative;
+}
+
+.m-shell .replying .chip::before {
+  content: '';
+  position: absolute;
+  inset: -5px 0 -9px;
 }
 
 /* ------------------------------------------------------------ bölüm başlığı */
