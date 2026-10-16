@@ -271,7 +271,7 @@
   }
 
   .btn-icon:disabled {
-    opacity: 0.35;
+    opacity: var(--dim-disabled);
     background: transparent;
   }
 

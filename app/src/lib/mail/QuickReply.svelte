@@ -184,7 +184,7 @@
   .reply-warn {
     margin: 0 0 8px;
     font-size: var(--fs-meta);
-    color: var(--amber);
+    color: var(--amber-text);
   }
 
   .replybox {

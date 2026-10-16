@@ -343,7 +343,7 @@
   }
 
   .tools .btn-icon:disabled {
-    opacity: 0.4;
+    opacity: var(--dim-disabled);
     background: transparent;
   }
 

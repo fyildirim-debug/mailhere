@@ -718,7 +718,7 @@
   .sec {
     font-size: var(--fs-meta);
     font-weight: 500;
-    color: var(--ok);
+    color: var(--ok-text);
   }
 
   .link.small {
@@ -789,7 +789,7 @@
 
   .note.warn {
     margin: 10px 0 0;
-    color: var(--amber);
+    color: var(--amber-text);
   }
 
   .note.top {

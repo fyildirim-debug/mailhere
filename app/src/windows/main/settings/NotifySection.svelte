@@ -335,7 +335,7 @@
   .perm-on {
     flex: none;
     font-weight: 500;
-    color: var(--ok);
+    color: var(--ok-text);
   }
 
   /* Üretici notu pil satırının açıklamasıdır: satırla aynı çizgide biter. */

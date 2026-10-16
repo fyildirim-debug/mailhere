@@ -481,7 +481,7 @@
   }
 
   .check:disabled {
-    opacity: 0.5;
+    opacity: var(--dim-disabled);
     cursor: default;
   }
 
@@ -506,7 +506,7 @@
     align-items: center;
     gap: 4px;
     font-size: var(--fs-meta);
-    color: var(--amber);
+    color: var(--amber-text);
   }
 
   .ok-icon {

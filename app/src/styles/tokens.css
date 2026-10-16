@@ -14,7 +14,7 @@
   --line-strong: #d2d6de;
   --ink: #15171c;
   --ink-2: #4f5562;
-  --ink-3: #636a76;
+  --ink-3: #5e6572;
   --accent: #4655d4;
   --accent-ink: #ffffff;
   --accent-soft: #e6e8fb;
@@ -22,7 +22,10 @@
   --sel: #e4e7fa;
   --hover: rgba(21, 23, 28, 0.045);
   --amber: #c27d12;
+  /* Amber ve başarı metni: ikonlardaki tonun metin için koyulaştırılmışı (her zeminde ≥ 4.5:1). */
+  --amber-text: #8f5a05;
   --ok: #2e8a57;
+  --ok-text: #237347;
   --danger: #c2372e;
   --scroll: rgba(21, 23, 28, 0.18);
   --toast-bg: #15171c;
@@ -61,7 +64,9 @@
   --sel: #242945;
   --hover: rgba(230, 232, 237, 0.05);
   --amber: #e2a84a;
+  --amber-text: #e2a84a;
   --ok: #5cc48a;
+  --ok-text: #5cc48a;
   --danger: #ef7a70;
   --scroll: rgba(230, 232, 237, 0.16);
   --toast-bg: #e6e8ed;
@@ -94,6 +99,9 @@
   --t-state: 200ms;
   --t-panel: 280ms;
   --t-arrive: 520ms;
+
+  /* Devre dışı denetimlerin tek saydamlığı */
+  --dim-disabled: 0.45;
 
   /* Köşeler */
   --r-kbd: 5px;

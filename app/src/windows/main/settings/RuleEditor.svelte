@@ -260,7 +260,7 @@
   }
 
   .btn-icon:disabled {
-    opacity: 0.35;
+    opacity: var(--dim-disabled);
     background: transparent;
   }
 
@@ -270,7 +270,7 @@
   }
 
   .hint.warn {
-    color: var(--amber);
+    color: var(--amber-text);
   }
 
   .stop {

@@ -767,7 +767,7 @@
   }
 
   .foot-text.warn {
-    color: var(--amber);
+    color: var(--amber-text);
   }
 
   .state {

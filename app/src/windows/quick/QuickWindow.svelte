@@ -508,7 +508,7 @@
   .reply-warn {
     margin-bottom: 8px;
     font-size: var(--fs-meta);
-    color: var(--amber);
+    color: var(--amber-text);
   }
 
   .box-bar {

@@ -862,7 +862,7 @@
   .foot-text.warn {
     padding: 0 0 0 2px;
     text-align: left;
-    color: var(--amber);
+    color: var(--amber-text);
   }
 
   .state {

@@ -100,7 +100,7 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    color: var(--ok);
+    color: var(--ok-text);
   }
 
   .keys-h {

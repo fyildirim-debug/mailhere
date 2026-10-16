@@ -1087,7 +1087,7 @@
 
   .send:disabled,
   .more:disabled {
-    opacity: 0.45;
+    opacity: var(--dim-disabled);
   }
 
   .on-accent {

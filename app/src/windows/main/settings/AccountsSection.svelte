@@ -124,7 +124,7 @@
   }
 
   .warn {
-    color: var(--amber);
+    color: var(--amber-text);
   }
 
   .warn .pip {

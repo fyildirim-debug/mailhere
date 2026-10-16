@@ -214,7 +214,7 @@
   }
 
   .act:disabled {
-    opacity: 0.5;
+    opacity: var(--dim-disabled);
     background: var(--paper);
   }
 

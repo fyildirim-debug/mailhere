@@ -187,7 +187,7 @@ textarea {
 }
 
 .btn-primary:disabled {
-  opacity: 0.4;
+  opacity: var(--dim-disabled);
   filter: none;
   transform: none;
 }
@@ -219,7 +219,7 @@ textarea {
 }
 
 .btn-soft:disabled {
-  opacity: 0.5;
+  opacity: var(--dim-disabled);
 }
 
 .btn-soft.small {
@@ -490,7 +490,7 @@ textarea::placeholder {
 }
 
 .switch:disabled {
-  opacity: 0.5;
+  opacity: var(--dim-disabled);
   cursor: default;
 }
 
