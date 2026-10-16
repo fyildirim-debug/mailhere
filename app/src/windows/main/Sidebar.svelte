@@ -500,7 +500,7 @@
     font-size: var(--fs-meta);
     font-weight: 500;
     font-variant-numeric: tabular-nums;
-    color: color-mix(in srgb, var(--accent-ink) 72%, transparent);
+    color: color-mix(in srgb, var(--accent-ink) 88%, transparent);
   }
 
   /* Kaydırılan bölüm: sağda ince çubuk için yer ayrılır (scrollbar-gutter). */
