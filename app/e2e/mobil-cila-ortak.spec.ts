@@ -26,6 +26,16 @@ async function newMail(page: Page) {
   await page.goto('#/main');
   await page.getByRole('button', { name: 'Yeni posta' }).click();
   await expect(h1(page, 'Yeni posta')).toBeVisible();
+  // Ölçüler ekranın giriş animasyonu (sağdan kayma) bitince alınır; yavaş
+  // makinede kayma sürerken alınan iki ölçü birkaç piksel ayrışırdı.
+  await page.evaluate(() =>
+    Promise.all(
+      document
+        .getAnimations()
+        .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
+        .map((a) => a.finished),
+    ),
+  );
 }
 
 test('boş durum görünümü tanır: Ertelenenler kendi metnini söyler', async ({ page }) => {

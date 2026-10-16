@@ -729,22 +729,36 @@ mod tests {
         assert!(!is_hidden_args(["--tepside=1", "tepside"]));
     }
 
+    /// Bu platformda mutlak yol. Windows'ta `/` ile başlayan yol sürücüsüz
+    /// olduğundan mutlak sayılmaz; AppImage kuralı iki platformda da sınanır.
+    fn abs(p: &str) -> PathBuf {
+        if cfg!(windows) {
+            PathBuf::from(format!("C:{p}"))
+        } else {
+            PathBuf::from(p)
+        }
+    }
+
     #[test]
     fn appimage_yolu_baglama_noktasi_yerine_dosya() {
-        let mounted = Path::new("/tmp/.mount_MailheAbC123/usr/bin/mailhere");
-        let image = Path::new("/home/ali/Uygulamalar/Mailhere_0.8.0_amd64.AppImage");
-        let appdir = Path::new("/tmp/.mount_MailheAbC123");
-        assert_eq!(launch_path(mounted, Some(image), Some(appdir)), image);
+        let mounted = abs("/tmp/.mount_MailheAbC123/usr/bin/mailhere");
+        let image = abs("/home/ali/Uygulamalar/Mailhere_0.8.0_amd64.AppImage");
+        let appdir = abs("/tmp/.mount_MailheAbC123");
+        assert_eq!(launch_path(&mounted, Some(&image), Some(&appdir)), image);
         // APPDIR yoksa bağlama noktası adından anlaşılır.
-        assert_eq!(launch_path(mounted, Some(image), None), image);
+        assert_eq!(launch_path(&mounted, Some(&image), None), image);
         // Miras kalmış APPIMAGE: bu ikili o bağlama noktasında değil.
-        let deb = Path::new("/usr/bin/mailhere");
-        assert_eq!(launch_path(deb, Some(image), Some(appdir)), deb);
-        assert_eq!(launch_path(deb, Some(image), None), deb);
-        assert_eq!(launch_path(deb, None, None), deb);
+        let deb = abs("/usr/bin/mailhere");
+        assert_eq!(launch_path(&deb, Some(&image), Some(&appdir)), deb);
+        assert_eq!(launch_path(&deb, Some(&image), None), deb);
+        assert_eq!(launch_path(&deb, None, None), deb);
         // Göreli APPIMAGE yok sayılır.
         assert_eq!(
-            launch_path(mounted, Some(Path::new("Mailhere.AppImage")), Some(appdir)),
+            launch_path(
+                &mounted,
+                Some(Path::new("Mailhere.AppImage")),
+                Some(&appdir)
+            ),
             mounted
         );
     }
