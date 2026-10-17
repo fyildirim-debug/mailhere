@@ -260,13 +260,15 @@ test('C-12 artığı: tek alıcı çipi (yalnız adres) Kime satırını ikiye b
     await to.press('Enter');
     await expect(page.getByRole('button', { name: 'kerem.aydin.uzun.adres@ornek-sirket.com.tr alıcısını kaldır' })).toBeVisible();
     const field = page.locator('.field.wrap').first();
+    // Ekran giriş animasyonu ve çip yerleşimi bitmeden ölçülmez (yavaş CI'da yazma alanı geçici dar).
+    await page.evaluate(() => Promise.all(document.getAnimations().filter((a) => a.effect?.getComputedTiming().iterations !== Infinity).map((a) => a.finished)));
     // Tek satır: 56 px satır + 1 px alt çizgi.
     expect(await height(field)).toBeLessThanOrEqual(57);
     // Yazma alanı satırda kalır ve ikinci alıcı için yer bırakır.
     const chip = (await field.locator('.chip').boundingBox())!;
     const input = (await to.boundingBox())!;
     expect(Math.abs(input.y + input.height / 2 - (chip.y + chip.height / 2))).toBeLessThan(3);
-    expect(input.width).toBeGreaterThanOrEqual(72);
+    await expect.poll(async () => (await to.boundingBox())!.width).toBeGreaterThanOrEqual(72);
     // Ad kırpılır, sağ kenara taşma yok.
     expect(chip.x + chip.width).toBeLessThanOrEqual(width);
     await page.keyboard.press('Escape');
