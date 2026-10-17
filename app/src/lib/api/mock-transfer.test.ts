@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createMockBackend, mockQr } from './mock';
+import { createMockBackend, mockQr, qrSizeFor } from './mock';
 import type { TransferState } from './types';
 
 // QR ile cihazlar arası aktarım: sahte arka uç Rust tarafıyla aynı sözleşmeyi izler
@@ -15,8 +15,16 @@ afterEach(() => {
 });
 
 describe('QR matrisi', () => {
+  it('boyut gerçek kodlayıcı gibi metin uzunluğundan seçilir (EC-M, bayt kipi)', () => {
+    expect(qrSizeFor('a'.repeat(14))).toBe(21);
+    expect(qrSizeFor('a'.repeat(15))).toBe(25);
+    expect(qrSizeFor('a'.repeat(155))).toBe(53);
+    expect(qrSizeFor('a'.repeat(213))).toBe(57);
+    expect(mockQr('a'.repeat(155)).size).toBe(53);
+  });
+
   it('kare, yalnız 0/1 ve bulucu desenli; aynı metin aynı deseni verir', () => {
-    const qr = mockQr('mailhere://aktar?v=1');
+    const qr = mockQr('mailhere://aktar?v=1', 29);
     expect(qr.size).toBe(29);
     expect(qr.rows).toHaveLength(29);
     for (const row of qr.rows) {
@@ -40,8 +48,8 @@ describe('bilgisayar tarafı: teklif', () => {
     b.on('mh:transfer', (s) => states.push(s));
 
     const offer = await b.call('transfer_begin', { includeSecrets: true });
-    expect(offer.text).toMatch(/^mailhere:\/\/aktar\?v=1&h=192\.168\.1\.20,fd12:3456::20&p=51234&t=[A-Za-z0-9_-]{22}&k=[A-Za-z0-9_-]{43}$/);
-    expect(offer.hosts).toEqual(['192.168.1.20', 'fd12:3456::20']);
+    expect(offer.text).toMatch(/^mailhere:\/\/aktar\?v=1&h=192\.168\.1\.20,172\.17\.0\.1,100\.101\.102\.103,fd12:3456::20&p=51234&t=[A-Za-z0-9_-]{22}&k=[A-Za-z0-9_-]{43}$/);
+    expect(offer.hosts).toEqual(['192.168.1.20', '172.17.0.1', '100.101.102.103', 'fd12:3456::20']);
     expect(offer.port).toBe(51234);
     expect(offer.expiresAt).toBe(NOW.getTime() + 180_000);
     expect(offer.qr.size).toBe(offer.qr.rows.length);

@@ -9,6 +9,7 @@
   import Icon from '../../../lib/ui/Icon.svelte';
   import type { IconName } from '../../../lib/ui/icons';
   import QrCode from '../../../lib/ui/QrCode.svelte';
+  import { QR_QUIET } from '../../../lib/ui/qr';
   import { showToast } from '../../../lib/ui/toast.svelte';
   import { isMobileShell } from '../../../lib/shell';
 
@@ -29,6 +30,13 @@
   /** Teklif açık ve kod hâlâ okutulabilir. */
   const active = $derived(!!offer && (kind === 'waiting' || kind === 'connected'));
   const finished = $derived(!!offer && kind != null && FINAL.includes(kind));
+  // QR kenarı: modül başına tam sayı piksel (en az 4), en az 240 px. Kart bu
+  // boyuta göre büyür; uzun kod (çok adres → yüksek sürüm) kartın dışına taşmaz.
+  const qrPx = $derived.by(() => {
+    if (!offer) return 240;
+    const side = offer.qr.size + 2 * QR_QUIET;
+    return side * Math.max(4, Math.ceil(240 / side));
+  });
   const remaining = $derived(offer ? Math.max(0, Math.ceil((offer.expiresAt - now) / 1000)) : 0);
   const clock = $derived(`${String(Math.floor(remaining / 60)).padStart(2, '0')}:${String(remaining % 60).padStart(2, '0')}`);
 
@@ -137,9 +145,9 @@
     </div>
   {:else}
     <div class="stage">
-      <div class="qr-card" class:idle={!active}>
+      <div class="qr-card" class:idle={!active} style:--qr-px="{qrPx}px">
         {#if active}
-          <QrCode qr={offer.qr} label={t('aktar.qrLabel')} size={Math.max(240, (offer.qr.size + 8) * 4)} />
+          <QrCode qr={offer.qr} label={t('aktar.qrLabel')} size={qrPx} />
         {:else if kind}
           <span class="glyph {tone}"><Icon name={stateIcon[kind]} size={32} /></span>
         {/if}
@@ -234,12 +242,13 @@
   }
 
   /* QR kartı: her temada beyaz zemin (--qr-paper); sessiz bölge SVG'nin içindedir. */
+  /* Kenar: QR + 2×12 iç boşluk + 2×1 kenarlık (border-box). */
   .qr-card {
     flex: none;
     display: grid;
     place-items: center;
-    width: 264px;
-    height: 264px;
+    width: calc(var(--qr-px, 240px) + 26px);
+    height: calc(var(--qr-px, 240px) + 26px);
     padding: 12px;
     border: 1px solid var(--line);
     border-radius: var(--r-card);

@@ -16,6 +16,26 @@ const qr = (page: Page) => page.getByRole('img', { name: /Aktarım QR kodu/ });
 /** Durum satırı (toast da `status` rolündedir; metinle ayrılır). */
 const status = (page: Page) => page.getByRole('status').filter({ hasText: /Telefon|Aktarıldı|Süre doldu|Vazgeçildi|başarısız/ });
 
+/** QR kartın içinde kalır (taşmaz, kırpılmaz); yanındaki düğmeler sayfa dışına çıkmaz. */
+async function expectQrInsideCard(page: Page) {
+  const svg = (await qr(page).boundingBox())!;
+  const card = (await page.locator('.qr-card').boundingBox())!;
+  // İç alan: 1 px kenarlık + 12 px iç boşluk; QR bu alanı tam doldurur.
+  const inset = 13;
+  expect(svg.x).toBeGreaterThanOrEqual(card.x + inset - 0.5);
+  expect(svg.y).toBeGreaterThanOrEqual(card.y + inset - 0.5);
+  expect(svg.x + svg.width).toBeLessThanOrEqual(card.x + card.width - inset + 0.5);
+  expect(svg.y + svg.height).toBeLessThanOrEqual(card.y + card.height - inset + 0.5);
+  // Kart ayar sayfasının içerik alanında; solundan kırpılmaz.
+  const page2 = (await page.getByRole('heading', { level: 2, name: 'Cihazlar' }).boundingBox())!;
+  expect(card.x).toBeGreaterThanOrEqual(page2.x - 1);
+  const viewport = page.viewportSize()!;
+  for (const name of ['Kodu metin olarak göster', 'Kopyala', 'Vazgeç']) {
+    const b = (await page.getByRole('button', { name, exact: true }).boundingBox())!;
+    expect(b.x + b.width, name).toBeLessThanOrEqual(viewport.width);
+  }
+}
+
 async function openDevices(page: Page) {
   await page.goto('/#/main');
   await page.getByRole('button', { name: 'Ayarlar' }).click();
@@ -42,10 +62,12 @@ test('Cihazlar: QR oluşturulur, geri sayım işler, metin gösterilip kopyalan�
 
   await page.getByRole('button', { name: 'QR kodu oluştur' }).click();
   await expect(qr(page)).toBeVisible();
-  // Modül başına bir rect + zemin; sessiz bölge viewBox'ta (29 + 8).
+  // Modül başına bir rect + zemin; sessiz bölge viewBox'ta. Dört adresli kod sürüm 9'dur
+  // (53 modül + 8); her modül tam sayı piksel (4 px) çizilir.
+  await expect(qr(page)).toHaveAttribute('viewBox', '0 0 61 61');
   const box = await qr(page).boundingBox();
-  expect(Math.round(box!.width)).toBe(240);
-  await expect(qr(page)).toHaveAttribute('viewBox', '0 0 37 37');
+  expect(Math.round(box!.width)).toBe(244);
+  await expectQrInsideCard(page);
   const cells = await qr(page).locator('rect.cell').count();
   const ones = await page.evaluate(async () => {
     const o = await window.__mh.call('transfer_begin', { includeSecrets: true });
@@ -62,7 +84,7 @@ test('Cihazlar: QR oluşturulur, geri sayım işler, metin gösterilip kopyalan�
   // Metin varsayılan gizli; gösterilince anahtar uyarısıyla gelir ve kopyalanır.
   await expect(page.locator('code')).toHaveCount(0);
   await page.getByRole('button', { name: 'Kodu metin olarak göster' }).click();
-  await expect(page.locator('code')).toContainText(/^mailhere:\/\/aktar\?v=1&h=192\.168\.1\.20,fd12:3456::20&p=51234&t=/);
+  await expect(page.locator('code')).toContainText(/^mailhere:\/\/aktar\?v=1&h=192\.168\.1\.20,172\.17\.0\.1,100\.101\.102\.103,fd12:3456::20&p=51234&t=/);
   await expect(page.getByText('yalnız telefondaki Mailhere’ye yapıştır')).toBeVisible();
   await page.getByRole('button', { name: 'Kopyala' }).click();
   await expect(page.getByRole('status').filter({ hasText: 'panoya kopyalandı' })).toBeVisible();
@@ -121,3 +143,13 @@ test('"Android uygulamasını indir" dış tarayıcıda sürümler sayfasını a
   expect(opened.url()).toBe('https://github.com/fyildirim-debug/mailheremobile/releases');
   await opened.close();
 });
+
+for (const width of [1440, 1000]) {
+  test(`Cihazlar: uzun kodun QR'ı kartın dışına taşmaz (${width} px)`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await openDevices(page);
+    await page.getByRole('button', { name: 'QR kodu oluştur' }).click();
+    await expect(qr(page)).toBeVisible();
+    await expectQrInsideCard(page);
+  });
+}

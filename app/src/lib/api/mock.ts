@@ -348,12 +348,23 @@ function fakeB64(bytes: number, seed: number): string {
   return out;
 }
 
+/** EC-M bayt kipinde sürüm 1–15'in kapasitesi (bayt); `mh-transfer` aynı düzeyi kullanır. */
+const QR_M_BYTES = [14, 26, 42, 62, 84, 106, 122, 152, 180, 213, 251, 287, 331, 362, 412];
+
+/** Gerçek kodlayıcının metne seçeceği modül sayısı (21 + 4·(sürüm − 1)). */
+export function qrSizeFor(text: string): number {
+  const bytes = new TextEncoder().encode(text).length;
+  const version = QR_M_BYTES.findIndex((cap) => bytes <= cap) + 1 || QR_M_BYTES.length;
+  return 17 + 4 * version;
+}
+
 /**
  * QR görünümlü modül matrisi: köşelerde üç bulucu desen, aralarında zamanlama
  * çizgileri, geri kalanı metinden türetilmiş sözde rastgele veri. Gerçek QR
- * değildir (okutulamaz); yalnız arayüzün çizimi için.
+ * değildir (okutulamaz); yalnız arayüzün çizimi için. Boyut gerçek kodlayıcının
+ * seçeceği sürümle aynıdır, böylece yerleşim gerçek boyutla sınanır.
  */
-export function mockQr(text: string, size = 29): QrMatrix {
+export function mockQr(text: string, size = qrSizeFor(text)): QrMatrix {
   let seed = 7;
   for (const ch of text) seed = (seed * 31 + ch.charCodeAt(0)) >>> 0;
   const next = prng(seed);
@@ -1432,7 +1443,8 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       // Yeni teklif eskisini sessizce kapatır.
       closeOffer(false);
       const seed = (now() ^ (offerSeq++ * 0x9e37) ^ (includeSecrets ? 0x5a5a : 0)) >>> 0;
-      const hosts = ['192.168.1.20', 'fd12:3456::20'];
+      // Gerçek bilgisayarlar çoğu zaman birkaç yerel adres duyurur (Wi-Fi, konteyner, örtü ağı, ULA).
+      const hosts = ['192.168.1.20', '172.17.0.1', '100.101.102.103', 'fd12:3456::20'];
       const text = `mailhere://aktar?v=1&h=${hosts.join(',')}&p=51234&t=${fakeB64(16, seed)}&k=${fakeB64(32, seed + 1)}`;
       const offer: TransferOffer = { text, qr: mockQr(text), hosts, port: 51234, expiresAt: now() + OFFER_TTL_MS };
       // Bitiş: kalan zamanlayıcılar (ör. süre dolması) da kapanır.
