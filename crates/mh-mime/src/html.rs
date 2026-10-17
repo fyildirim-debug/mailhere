@@ -62,6 +62,78 @@ fn is_http(v: &str) -> bool {
     l.starts_with("http://") || l.starts_with("https://")
 }
 
+/// Protokolsüz adres (`//cdn.ornek.com/u.jpg`) https olur; öbür istemciler
+/// de böyle yükler. `///` ya da sunucusuz biçim kabul edilmez.
+fn absolutize(v: &str) -> Option<String> {
+    let v = v.trim();
+    let rest = v.strip_prefix("//")?;
+    let host_ok = rest
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_alphanumeric());
+    host_ok.then(|| format!("https://{rest}"))
+}
+
+/// Göreli adres değerlendirici: yalnız protokolsüz adres kalır (https olarak).
+fn relative_url(url: &str) -> Option<Cow<'_, str>> {
+    absolutize(url).map(Cow::Owned)
+}
+
+/// Uzak görsel adresi: http(s) olduğu gibi, protokolsüz olan https'e çevrilmiş.
+fn remote_image(v: &str) -> Option<String> {
+    let v = v.trim();
+    if is_http(v) {
+        Some(v.to_owned())
+    } else {
+        absolutize(v)
+    }
+}
+
+/// Satır içi raster görsel (`data:image/png;base64,…`). Ağa çıkmaz; SVG ve
+/// başka türler kabul edilmez.
+const DATA_IMAGE_TYPES: &[&str] = &["png", "gif", "jpeg", "jpg", "webp", "bmp"];
+
+fn is_data_image(v: &str) -> bool {
+    let Some(rest) = strip_prefix_ci(v.trim(), "data:image/") else {
+        return false;
+    };
+    let kind = rest
+        .split([';', ','])
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    DATA_IMAGE_TYPES.contains(&kind.as_str())
+}
+
+/// Tembel yükleme öznitelikleri: `src` yer tutucuyken gerçek adres buradadır.
+const LAZY_IMAGE_ATTRS: &[&str] = &[
+    "data-src",
+    "data-original",
+    "data-lazy-src",
+    "srcset",
+    "data-srcset",
+];
+
+/// `srcset` adaylarından en yüksek yoğunluklu/genişlikli olanın adresi;
+/// tek adresli öznitelikte (data-src) o adres.
+fn best_candidate(value: &str) -> Option<String> {
+    let mut best: Option<(f32, String)> = None;
+    for part in value.split(',') {
+        let mut it = part.split_whitespace();
+        let Some(url) = it.next().and_then(remote_image) else {
+            continue;
+        };
+        let weight = it
+            .next()
+            .and_then(|d| d.trim_end_matches(['x', 'w', 'X', 'W']).parse::<f32>().ok())
+            .unwrap_or(1.0);
+        if best.as_ref().is_none_or(|(w, _)| weight > *w) {
+            best = Some((weight, url));
+        }
+    }
+    best.map(|(_, url)| url)
+}
+
 fn strip_prefix_ci<'a>(v: &'a str, prefix: &str) -> Option<&'a str> {
     let head = v.get(..prefix.len())?;
     head.eq_ignore_ascii_case(prefix)
@@ -297,9 +369,17 @@ pub fn sanitize_html(
         .clean_content_tags(DROP_WITH_CONTENT.iter().copied().collect::<HashSet<_>>())
         .add_generic_attributes(GENERIC_ATTRS)
         .add_tag_attributes("img", &["src", "alt", "width", "height", "border"])
+        .add_tag_attributes("img", LAZY_IMAGE_ATTRS)
         .add_tag_attributes("a", &["href", "title", "name"])
-        .url_schemes(["http", "https", "mailto", "cid"].into_iter().collect())
-        .url_relative(UrlRelative::Deny)
+        // `data` yalnız img src'de raster görsel olarak kalır (filter_attr).
+        .url_schemes(
+            ["http", "https", "mailto", "cid", "data"]
+                .into_iter()
+                .collect(),
+        )
+        // Göreli adreslerden yalnız protokolsüz olan (`//sunucu/…`) https'e
+        // çevrilip kalır; gerisi atılır.
+        .url_relative(UrlRelative::Custom(Box::new(relative_url)))
         .link_rel(Some("noopener noreferrer"))
         .set_tag_attribute_value("a", "target", "_blank")
         .strip_comments(true);
@@ -325,7 +405,7 @@ pub fn sanitize_html(
     let out = b.clean(&canon).to_string();
 
     let urls = std::mem::take(&mut *blocked.lock().unwrap_or_else(|e| e.into_inner()));
-    let images = finish_images(&out, &marker, &urls);
+    let images = finish_images(&out, &marker, &urls, remote_allowed);
     Sanitized {
         html: mark_deceptive_links(&images.html),
         has_remote: images.has_remote,
@@ -349,7 +429,7 @@ struct Images {
 /// Çıktı html5ever'dan gelir: etiketler küçük harfli, öznitelik değerleri çift
 /// tırnaklı, `"`, `<` ve `>` kaçışlıdır; metindeki `<` de kaçışlı olduğundan
 /// her `<img` gerçek bir etikettir.
-fn finish_images(html: &str, marker: &str, urls: &[String]) -> Images {
+fn finish_images(html: &str, marker: &str, urls: &[String], remote_allowed: bool) -> Images {
     let extra: usize = urls.iter().map(|u| u.len() + 8).sum();
     let mut out = String::with_capacity(html.len() + extra);
     let mut seen_trackers: HashSet<String> = HashSet::new();
@@ -368,9 +448,22 @@ fn finish_images(html: &str, marker: &str, urls: &[String]) -> Images {
             .and_then(|v| v.strip_prefix(marker))
             .and_then(|n| n.parse::<usize>().ok())
             .and_then(|n| urls.get(n));
-        let remote = match blocked {
-            Some(url) => Some(url.clone()),
-            None => src.map(decode_entities).filter(|v| is_http(v)),
+        // Gerçek görsel yoksa (src yok ya da satır içi yer tutucu) tembel
+        // yükleme adayı kullanılır; adaylar her durumda çıktıdan atılır.
+        let placeholder = src.is_none_or(|v| v.starts_with("data:"));
+        let lazy = if blocked.is_none() && placeholder {
+            LAZY_IMAGE_ATTRS
+                .iter()
+                .find_map(|a| attr(tag, a))
+                .map(decode_entities)
+                .filter(|v| is_http(v))
+        } else {
+            None
+        };
+        let remote = match (blocked, &lazy) {
+            (Some(url), _) => Some(url.clone()),
+            (None, Some(url)) => Some(url.clone()),
+            (None, None) => src.map(decode_entities).filter(|v| is_http(v)),
         };
         if let Some(url) = &remote {
             let style = attr(tag, "style").map(decode_entities);
@@ -385,16 +478,26 @@ fn finish_images(html: &str, marker: &str, urls: &[String]) -> Images {
             }
             has_remote = true;
         }
-        out.push_str("<img");
-        match (blocked, src) {
-            (Some(url), Some(v)) => {
+        let mut tag = tag.to_owned();
+        for a in LAZY_IMAGE_ATTRS {
+            tag = remove_attr(&tag, a);
+        }
+        match (blocked, src, &lazy) {
+            (Some(url), Some(v), _) => {
                 // Yalnız `src` değeri yerinde değişir; diğer öznitelikler kalır.
                 let old = format!(" src=\"{v}\"");
                 let new = format!(" data-mh-src=\"{}\"", escape_attr(url));
-                out.push_str(&tag.replacen(&old, &new, 1));
+                tag = tag.replacen(&old, &new, 1);
             }
-            _ => out.push_str(tag),
+            (None, _, Some(url)) => {
+                tag = remove_attr(&tag, "src");
+                let name = if remote_allowed { "src" } else { "data-mh-src" };
+                tag.push_str(&format!(" {name}=\"{}\"", escape_attr(url)));
+            }
+            _ => {}
         }
+        out.push_str("<img");
+        out.push_str(&tag);
         out.push('>');
     }
     out.push_str(rest);
@@ -402,6 +505,19 @@ fn finish_images(html: &str, marker: &str, urls: &[String]) -> Images {
         html: out,
         has_remote,
         trackers: seen_trackers.len() as u32,
+    }
+}
+
+/// Etiket metninden ` ad="değer"` özniteliğini (ilk geçişini) siler.
+fn remove_attr(tag: &str, name: &str) -> String {
+    let needle = format!(" {name}=\"");
+    let Some(i) = tag.find(&needle) else {
+        return tag.to_owned();
+    };
+    let after = &tag[i + needle.len()..];
+    match after.find('"') {
+        Some(end) => format!("{}{}", &tag[..i], &after[end + 1..]),
+        None => tag.to_owned(),
     }
 }
 
@@ -594,16 +710,22 @@ fn filter_attr<'u>(
             if let Some(cid) = strip_prefix_ci(v, "cid:") {
                 return ctx.inline.get(&normalize_cid(cid)).cloned().map(Cow::Owned);
             }
-            if !is_http(v) {
-                return None;
-            }
-            if ctx.remote_allowed {
+            if is_data_image(v) {
                 return Some(Cow::Borrowed(value));
             }
+            let url = remote_image(v)?;
+            if ctx.remote_allowed {
+                return Some(Cow::Owned(url));
+            }
             let mut list = ctx.blocked.lock().unwrap_or_else(|e| e.into_inner());
-            list.push(v.to_owned());
+            list.push(url);
             Some(Cow::Owned(format!("{}{}", ctx.marker, list.len() - 1)))
         }
+        // Tembel yükleme adayı: yalnız seçilen adres kalır, görsel geçişi
+        // (finish_images) gerekirse src yapar ve özniteliği siler.
+        ("img", a) if LAZY_IMAGE_ATTRS.contains(&a) => best_candidate(value).map(Cow::Owned),
+        // `data:` yalnız img src'de raster görsel olarak kabul edilir.
+        (_, _) if strip_prefix_ci(value.trim(), "data:").is_some() => None,
         (_, "href") if strip_prefix_ci(value.trim(), "cid:").is_some() => None,
         ("a", "href") => match clean_url(value) {
             Some(clean) => {
@@ -1053,5 +1175,113 @@ mod tests {
         assert!(s.html.contains(r##"bgcolor="#ffffff""##));
         assert!(s.html.contains("<font"));
         assert!(s.html.contains("margin:0 auto"));
+    }
+
+    #[test]
+    fn protokolsuz_gorsel_adresi_https_olur() {
+        // Mağaza şablonları `//cdn…` yazar; öbür istemciler https ile yükler.
+        let s = clean(
+            r#"<img src="//cdn.ornek.com/u/120.jpg" width="120" alt="ürün">"#,
+            true,
+        );
+        assert!(s.has_remote);
+        assert!(
+            s.html.contains(r#"src="https://cdn.ornek.com/u/120.jpg""#),
+            "{}",
+            s.html
+        );
+        let s = clean(r#"<img src="//cdn.ornek.com/u/120.jpg">"#, false);
+        assert!(s.has_remote);
+        assert!(
+            s.html
+                .contains(r#"data-mh-src="https://cdn.ornek.com/u/120.jpg""#),
+            "{}",
+            s.html
+        );
+        assert!(!s.html.contains(" src="), "{}", s.html);
+        // Bağlantıda da https olur; başka göreli adres yine atılır.
+        let s = clean(
+            r#"<a href="//ornek.com/x">a</a><a href="/goreli">b</a>"#,
+            true,
+        );
+        assert!(
+            s.html.contains(r#"href="https://ornek.com/x""#),
+            "{}",
+            s.html
+        );
+        assert!(!s.html.contains("goreli"), "{}", s.html);
+    }
+
+    #[test]
+    fn tembel_yuklenen_gorselin_gercek_adresi_kullanilir() {
+        let lazy = r#"<img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" data-src="https://cdn.ornek.com/u.jpg" width="120" height="120">"#;
+        let s = clean(lazy, true);
+        assert!(s.has_remote);
+        assert!(
+            s.html.contains(r#"src="https://cdn.ornek.com/u.jpg""#),
+            "{}",
+            s.html
+        );
+        assert!(!s.html.contains("data-src"), "{}", s.html);
+        assert!(!s.html.contains("R0lGOD"), "{}", s.html);
+        let s = clean(lazy, false);
+        assert!(
+            s.html
+                .contains(r#"data-mh-src="https://cdn.ornek.com/u.jpg""#),
+            "{}",
+            s.html
+        );
+        assert!(!s.html.contains(" src="), "{}", s.html);
+        // Yalnız srcset: en yüksek yoğunluklu aday seçilir; srcset çıktıya geçmez.
+        let s = clean(
+            r#"<img srcset="https://cdn.ornek.com/a.jpg 1x, //cdn.ornek.com/b.jpg 2x" alt="x">"#,
+            true,
+        );
+        assert!(
+            s.html.contains(r#"src="https://cdn.ornek.com/b.jpg""#),
+            "{}",
+            s.html
+        );
+        assert!(!s.html.contains("srcset"), "{}", s.html);
+        // Gerçek src varken yedek adaylar yok sayılır.
+        let s = clean(
+            r#"<img src="https://cdn.ornek.com/asil.jpg" data-src="https://cdn.ornek.com/diger.jpg">"#,
+            true,
+        );
+        assert!(
+            s.html.contains("asil.jpg") && !s.html.contains("diger.jpg"),
+            "{}",
+            s.html
+        );
+        // Tembel aday da izleyici denetiminden geçer.
+        let s = clean(
+            r#"<img data-src="https://iz.example/open.gif" width="1" height="1">"#,
+            true,
+        );
+        assert_eq!(s.trackers, 1);
+        assert!(!s.html.contains("<img"), "{}", s.html);
+    }
+
+    #[test]
+    fn satir_ici_raster_gorsel_kalir_baska_data_adresi_atilir() {
+        let s = clean(
+            r#"<img src="data:image/png;base64,iVBORw0KGgo=" alt="logo">"#,
+            false,
+        );
+        assert!(
+            s.html
+                .contains(r#"src="data:image/png;base64,iVBORw0KGgo=""#),
+            "{}",
+            s.html
+        );
+        assert!(!s.has_remote);
+        for bad in [
+            r#"<img src="data:image/svg+xml;base64,PHN2Zz4=">"#,
+            r#"<img src="data:text/html;base64,PHNjcmlwdD4=">"#,
+            r#"<a href="data:text/html;base64,PHNjcmlwdD4=">a</a>"#,
+        ] {
+            let s = clean(bad, true);
+            assert!(!s.html.contains("data:"), "{bad} → {}", s.html);
+        }
     }
 }
