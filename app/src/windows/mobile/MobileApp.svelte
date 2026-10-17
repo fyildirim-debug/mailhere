@@ -26,6 +26,7 @@
   import ToastHost from '../../lib/ui/ToastHost.svelte';
   import { initMail, mail, markAllRead, pullMail, rowsOf, select, setOnly, setView, type Row } from '../../lib/stores/mail.svelte';
   import { initLock, isLocked, isOpen, lock, watchRelock } from '../../lib/stores/lock.svelte';
+  import { signalFirstScreen } from '../../lib/ready';
   import { refreshSettings } from '../../lib/stores/settings.svelte';
   import { parseRoute } from '../../lib/stores/route.svelte';
   import { checkAll, clearChecked } from '../../lib/stores/selection.svelte';
@@ -135,6 +136,12 @@
       void pullMail();
     }
     wasLocked = l;
+  });
+
+  // İlk anlamlı ekran DOM'da (kilit ekranı ya da posta yüklendi): Android
+  // açılış ekranı bu sinyale dek durur, sonra doğrudan arayüze solar.
+  $effect(() => {
+    if (locked || (isOpen(lock.status) && mail.ready)) signalFirstScreen();
   });
 
   // Android 13+: ilk hesap olunca bildirim izni bir kez istenir (hesap elle
