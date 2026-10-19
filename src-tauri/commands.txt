@@ -12,3 +12,4 @@ update_check
 update_install
 autostart_get
 autostart_set
+link_open

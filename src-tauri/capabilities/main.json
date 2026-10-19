@@ -16,6 +16,7 @@
     "core:webview:allow-set-webview-zoom",
     "opener:allow-open-url",
     "opener:allow-default-urls",
+    "allow-link-open",
     "allow-accounts-list",
     "allow-account-discover",
     "allow-account-add",

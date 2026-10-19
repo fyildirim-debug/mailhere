@@ -3,6 +3,7 @@
 import type { AppError, CommandArgs, CommandName, CommandResult, EventPayloads } from './types';
 import type { MockBackend } from './mock';
 import { sanitizeMailto } from '../util/format';
+import { isMobileShell } from '../shell';
 
 export * from './types';
 
@@ -102,7 +103,10 @@ export const appWindow = {
 export async function openExternal(url: string) {
   if (!/^(https?:|mailto:)/i.test(url)) return;
   if (/^mailto:/i.test(url)) url = sanitizeMailto(url);
-  if (isTauri) {
+  if (isTauri && !isMobileShell) {
+    // Masaüstü: AppImage ortamını temizleyen açıcı (bkz. `src-tauri/src/links.rs`).
+    await call('link_open', { url });
+  } else if (isTauri) {
     const { openUrl } = await import('@tauri-apps/plugin-opener');
     await openUrl(url);
   } else {

@@ -6,6 +6,7 @@
 
 mod autostart;
 mod files;
+mod links;
 mod notify_card;
 mod platform;
 mod prefs;
@@ -144,6 +145,7 @@ fn main() {
             updater::update_install,
             autostart::autostart_get,
             autostart::autostart_set,
+            links::link_open,
         ]))
         .build(tauri::generate_context!())
         .expect("Mailhere başlatılamadı");

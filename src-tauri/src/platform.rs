@@ -86,6 +86,10 @@ impl Platform for DesktopPlatform {
         crate::windows::show_quick(app, id).map_err(internal)
     }
 
+    fn open_url(&self, app: &AppHandle, url: &str) -> Result<(), String> {
+        crate::links::open_url(app, url)
+    }
+
     fn open_compose(&self, app: &AppHandle, prefill: &ComposePrefill) -> AppResult<()> {
         crate::windows::open_compose(app, prefill).map_err(internal)
     }
@@ -93,11 +97,12 @@ impl Platform for DesktopPlatform {
     /// Güvenli türler varsayılan uygulamayla açılır; diğerleri yalnız
     /// klasöründe gösterilir, kullanıcı ne yaptığını bilerek açar.
     fn open_file(&self, app: &AppHandle, path: &Path, _mime: &str, direct: bool) -> AppResult<()> {
-        let opener = app.opener();
         let res = if direct {
-            opener.open_path(path.to_string_lossy(), None::<&str>)
+            crate::links::open_path(app, &path.to_string_lossy())
         } else {
-            opener.reveal_item_in_dir(path)
+            app.opener()
+                .reveal_item_in_dir(path)
+                .map_err(|e| e.to_string())
         };
         res.map_err(|e| {
             tracing::warn!(error = %e, "dosya açılamadı");

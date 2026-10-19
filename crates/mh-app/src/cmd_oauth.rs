@@ -130,11 +130,12 @@ pub async fn oauth_sign_in(
         &config,
         email.as_deref(),
         SIGN_IN_TIMEOUT,
-        move |url| {
-            opener
+        move |url| match opener.try_state::<crate::state::AppState>() {
+            Some(state) => state.platform.open_url(&opener, url),
+            None => opener
                 .opener()
                 .open_url(url, None::<&str>)
-                .map_err(|e| e.to_string())
+                .map_err(|e| e.to_string()),
         },
         async move {
             let _ = cancelled.await;

@@ -46,6 +46,15 @@ pub trait Platform: Send + Sync + 'static {
     /// Yazma penceresi (Android: ana pencerede yazma yığını).
     fn open_compose(&self, app: &AppHandle, prefill: &ComposePrefill) -> AppResult<()>;
 
+    /// Dış bağlantıyı (http/https/mailto) varsayılan uygulamayla açar.
+    /// Masaüstü kabuğu AppImage ortamını çocuk süreçten arındırır.
+    fn open_url(&self, app: &AppHandle, url: &str) -> Result<(), String> {
+        use tauri_plugin_opener::OpenerExt;
+        app.opener()
+            .open_url(url, None::<&str>)
+            .map_err(|e| e.to_string())
+    }
+
     /// Diske yazılmış dosyayı varsayılan uygulamasıyla açar; `direct` değilse
     /// (izin listesi dışı tür) yalnız klasöründe gösterir.
     fn open_file(&self, app: &AppHandle, path: &Path, mime: &str, direct: bool) -> AppResult<()>;

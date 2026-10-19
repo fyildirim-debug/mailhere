@@ -1004,6 +1004,11 @@ export interface Commands {
   autostart_get: [Record<string, never>, boolean];
   /** Açılışta başlamayı açar ya da kapatır; seçim kaydedilir (kapalıysa bir daha kendiliğinden açılmaz). Son durumu döner. */
   autostart_set: [{ on: boolean }, boolean];
+  /**
+   * Yalnız masaüstü: dış bağlantıyı (http, https, mailto) varsayılan uygulamayla açar.
+   * AppImage'da açıcı paketin ortam değişkenlerinden arındırılır (yoksa tarayıcı açılmaz).
+   */
+  link_open: [{ url: string }, null];
 
   // Yalnız mobil kabuk (Android; masaüstü kabukta tanımlı değil)
   /**

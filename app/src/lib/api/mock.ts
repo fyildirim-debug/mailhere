@@ -1578,6 +1578,11 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       autostart = on;
       return autostart;
     },
+    // Yalnız masaüstü: tarayıcıda dış bağlantı.
+    link_open: ({ url }) => {
+      window.open(url, '_blank', 'noopener,noreferrer');
+      return null;
+    },
     // Yalnız mobil kabuk: bildirim sağlığı. Kısıtlamayı kaldırma isteği onaylanmış sayılır.
     battery_status: () => battery,
     battery_settings: () => {
