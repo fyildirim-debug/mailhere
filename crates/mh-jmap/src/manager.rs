@@ -819,6 +819,7 @@ async fn push_loop(ctx: Arc<Ctx>, tx: UnboundedSender<Command>) {
             let client = ctx.shared.client(&ctx.account).await?;
             push::listen(
                 &client,
+                "Email,Mailbox",
                 timing.ping_secs,
                 idle,
                 || {

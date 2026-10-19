@@ -351,6 +351,8 @@ pub fn setup_core(app: &AppHandle, boot: Boot, key: Option<&DbKey>) -> AppResult
     crate::screener::start(&handle, &rt);
     // Sunucu itmesi aboneleri (yalnız Firebase jetonu olan kabukta; masaüstünde boş geçer).
     crate::push::start(&app.state::<AppState>(), &rt);
+    // JMAP konuşan sunucudaki IMAP hesapları: durum akışıyla anında eşitleme.
+    crate::canli::start(&app.state::<AppState>(), &rt);
     // Önceki sürümlerin kaydettiği HTML kaynaklı, şablon artıklı ya da
     // bağlantılı önizlemeler onarılır.
     {

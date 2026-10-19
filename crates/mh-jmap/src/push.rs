@@ -151,13 +151,14 @@ pub fn touches_account(data: &str, account_id: &str) -> bool {
 /// kurulunca bir kez çağrılır.
 pub async fn listen(
     client: &Client,
+    types: &str,
     ping_secs: u32,
     idle: Duration,
     mut on_connect: impl FnMut(),
     mut on_change: impl FnMut(),
 ) -> JmapResult<()> {
     let url = client
-        .event_source_url("Email,Mailbox", ping_secs)
+        .event_source_url(types, ping_secs)
         .ok_or_else(|| JmapError::Protocol("sunucu durum akışı sunmuyor".into()))?;
     // Adres oturumla aynı kökendedir (`Client::resolve`); yönlendirme
     // izlenmez, parola başka sunucuya gitmez.

@@ -294,10 +294,11 @@ impl Headless {
             }
         }));
         let push = crate::push::start(&self.state, &self.handle);
+        let canli = crate::canli::start(&self.state, &self.handle);
         self.tasks
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .extend([watch, push]);
+            .extend([watch, push, canli]);
         Ok(())
     }
 

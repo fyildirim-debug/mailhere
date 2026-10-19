@@ -21,6 +21,10 @@ Posta sunucusu ──(yeni posta)──▶ Aktarıcı ──(FCM veri iletisi: "
 
 Kapalı sağlayıcının aktarıcı uçları 404 döner; açmak için aktarıcıda `MH_PROVIDERS` ve uygulamada `mh_app::push::saglayici` güncellenir. Gmail ve Graph'ın uygulama tarafı OAuth izinleri gelince eklenir (Google'ın kısıtlı kapsam onayı, Microsoft uygulama kaydı).
 
+## Uygulama açıkken: JMAP durum akışı (IMAP hesapları)
+
+Uygulama çalışırken (masaüstünde tepside, Android'de ön plan hizmetinde) aktarıcıya gerek yoktur: `mh_app::canli` JMAP konuşan sunucudaki her parolalı IMAP hesabı için sunucunun durum akışına (RFC 8620 §7.3, EventSource, `types=EmailDelivery`; sunucu tanımazsa `Email`) bağlanır. Yeni posta teslim edilince IMAP eşitlemesi hemen başlar; IDLE kopmuş ya da geç fark edilmiş olsa da posta saniyeler içinde gelir. Adres ve kimlik itme aboneliğiyle aynıdır (IMAP sunucusunun kendi adı, IMAP kullanıcı adı ve parolası). JMAP'i olmayan sunucu 6 saat denenmez; kopan akış 2 sn'den 5 dk'ya artan beklemeyle yenilenir. Hesap listesi dakikada bir gözden geçirilir.
+
 ## Akış (JMAP)
 
 1. Android kabuğu Firebase'i aktarıcıdan aldığı istemci ayarıyla başlatır (`/v1/yapilandirma`; APK'da ve depoda Firebase anahtarı yoktur), kayıt jetonunu kasaya `push-jeton` adıyla yazar (`Itme.kt`).

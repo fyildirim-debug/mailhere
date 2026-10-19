@@ -392,19 +392,8 @@ impl Parcalar {
             .filter(|t| !t.is_empty())
     }
 
-    /// IMAP hesabının sunucusundaki JMAP oturumu (IMAP kullanıcı adı ve parolasıyla).
     async fn yan_istemci(&self, account: &Account) -> mh_jmap::JmapResult<mh_jmap::Client> {
-        let url = imap_jmap_adresi(account).ok_or_else(|| {
-            AppError::new(ErrorCode::Invalid, "Bu hesapta sunucu itmesi kurulamaz.")
-        })?;
-        let username = account
-            .imap
-            .as_ref()
-            .map(|c| c.username.trim().to_owned())
-            .filter(|u| !u.is_empty())
-            .unwrap_or_else(|| account.email.clone());
-        let password = mh_sync::password_for(&self.secrets, &account.id).await?;
-        mh_jmap::Client::connect(&url, mh_jmap::Credentials::new(username, password)).await
+        yan_istemci(&self.secrets, account).await
     }
 
     /// Hesabın JMAP oturumunda tek yöntem: JMAP hesabında eşitlemenin
@@ -731,9 +720,26 @@ impl Parcalar {
     }
 }
 
+/// IMAP hesabının sunucusundaki JMAP oturumu (IMAP kullanıcı adı ve parolasıyla).
+pub async fn yan_istemci(
+    secrets: &Arc<dyn SecretStore>,
+    account: &Account,
+) -> mh_jmap::JmapResult<mh_jmap::Client> {
+    let url = imap_jmap_adresi(account)
+        .ok_or_else(|| AppError::new(ErrorCode::Invalid, "Bu hesapta JMAP yan kanalı yok."))?;
+    let username = account
+        .imap
+        .as_ref()
+        .map(|c| c.username.trim().to_owned())
+        .filter(|u| !u.is_empty())
+        .unwrap_or_else(|| account.email.clone());
+    let password = mh_sync::password_for(secrets, &account.id).await?;
+    mh_jmap::Client::connect(&url, mh_jmap::Credentials::new(username, password)).await
+}
+
 /// Sunucuda JMAP yok ya da bu kimlikle açılmıyor (yeniden denemek boşuna);
 /// ağ ve zaman aşımı hataları geçicidir.
-fn jmap_yok(e: &mh_jmap::JmapError) -> bool {
+pub fn jmap_yok(e: &mh_jmap::JmapError) -> bool {
     use mh_jmap::JmapError as E;
     match e {
         E::Auth | E::Protocol(_) | E::TooLarge(_) | E::Method { .. } => true,

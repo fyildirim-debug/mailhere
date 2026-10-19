@@ -8,6 +8,7 @@
 //! [`setup_core`] çağırır ve komutları [`shared_commands!`] ile kendi
 //! komutlarına ekler ([`lock::gate`] kilitliyken öteki komutları reddeder).
 
+pub mod canli;
 pub mod cmd_account;
 pub mod cmd_cert;
 pub mod cmd_drafts;

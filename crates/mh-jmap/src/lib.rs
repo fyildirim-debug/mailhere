@@ -30,7 +30,7 @@ pub use discover::{candidates, discover, probe};
 pub use error::{JmapError, JmapResult};
 pub use manager::{JmapManager, Timing};
 pub use ops::{destroy_emails, ensure_role_mailbox, move_emails, set_keywords};
-pub use push::{touches_account, SseEvent, SseParser};
+pub use push::{listen, touches_account, SseEvent, SseParser};
 pub use send::{delete_draft, envelope_recipients, save_draft, submit, SavedDraft};
 pub use sync::{
     email_properties, fetch_body, full_sync, incremental_sync, prefetch, role_from, sync_mailboxes,
