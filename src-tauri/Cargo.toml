@@ -37,7 +37,7 @@ serde.workspace = true
 # AppIndicator kitaplığı, StatusNotifier izleyicisi, X11 tepsisi). Hepsi
 # bağımlılık ağacında zaten var (MIT / Apache-2.0).
 [target.'cfg(windows)'.dependencies]
-windows-registry = "0.6.1"
+windows-registry = "0.100.0"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 dbus = "0.9.12"
