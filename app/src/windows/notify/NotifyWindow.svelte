@@ -375,12 +375,13 @@
 </div>
 
 <style>
+  /* Kartın gölgesi (--shadow-card) 20 px dolgunun içinde biter; saydam pencere kenarı onu kesmez. */
   .stack {
-    width: 400px;
+    width: 412px;
     display: flex;
     flex-direction: column;
     gap: 8px;
-    padding: 14px;
+    padding: 20px;
   }
 
   .card {
@@ -391,7 +392,7 @@
     background: var(--raised);
     color: var(--ink);
     border: 1px solid var(--line);
-    box-shadow: var(--shadow-lg);
+    box-shadow: var(--shadow-card);
     animation: arrive var(--t-arrive) var(--ease) both;
   }
 
@@ -529,7 +530,7 @@
     font-size: var(--fs-meta);
     font-weight: 500;
     text-align: left;
-    box-shadow: var(--shadow);
+    box-shadow: var(--shadow-card);
     animation: arrive var(--t-arrive) var(--ease) both;
   }
 

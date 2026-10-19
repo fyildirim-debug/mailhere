@@ -5,9 +5,14 @@
 //! Metinler arayüz diline uyar (ayar değişince yenilenir).
 //!
 //! Ana pencere kapatılınca tepsiye gizlenir; ilk kez gizlenişte bir kez
-//! "arka planda sürüyor" bildirimi gösterilir. Linux'ta simgeyi gösterecek
-//! bir tepsi yoksa (AppIndicator kitaplığı ya da StatusNotifier / X11 tepsisi
-//! yok; ör. eklentisiz GNOME) pencere gizlenmez, simge durumuna küçülür:
+//! "arka planda sürüyor" bildirimi gösterilir. Simgeye tıklamak (Windows'ta
+//! tek ya da çift tık, Linux'ta tepsinin "etkinleştir"i) ana pencereyi açar;
+//! menü sağ tıkla gelir.
+//!
+//! Linux'ta simge doğrudan D-Bus üzerinden StatusNotifierItem olarak yayımlanır
+//! (tray-icon `ksni` arka ucu): AppIndicator kitaplığı gerekmez ve sol tık
+//! menü değil pencereyi açar. Simgeyi gösterecek bir StatusNotifier izleyicisi
+//! yoksa (ör. eklentisiz GNOME) pencere gizlenmez, simge durumuna küçülür:
 //! uygulama kaybolmaz, çıkılmaz.
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -107,14 +112,6 @@ fn tray_state(app: &AppHandle) -> tauri::State<'_, TrayState> {
 
 pub fn create(app: &AppHandle) -> tauri::Result<()> {
     let state = tray_state(app);
-    // AppIndicator kitaplığı yoksa tray-icon panikler (sürüm derlemesinde
-    // süreç düşer); simgesiz sürülür, pencere küçülür.
-    if !host::library() {
-        return Err(tauri::Error::Io(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "AppIndicator kitaplığı (libayatana-appindicator3) yok",
-        )));
-    }
     let lang = language(app);
     let t = texts(lang);
     let open = MenuItem::with_id(app, "open", t.open, true, None::<&str>)?;
@@ -221,12 +218,18 @@ fn on_menu(app: &AppHandle, event: MenuEvent) {
 }
 
 fn on_click(tray: &TrayIcon, event: TrayIconEvent) {
-    if let TrayIconEvent::Click {
-        button: MouseButton::Left,
-        button_state: MouseButtonState::Up,
-        ..
-    } = event
-    {
+    let open = matches!(
+        event,
+        TrayIconEvent::Click {
+            button: MouseButton::Left,
+            button_state: MouseButtonState::Up,
+            ..
+        } | TrayIconEvent::DoubleClick {
+            button: MouseButton::Left,
+            ..
+        }
+    );
+    if open {
         crate::windows::show_main(tray.app_handle());
     }
 }
@@ -326,13 +329,11 @@ pub fn started_hidden(app: &AppHandle) {
 /// Oturum açılışında tepsinin gelmesi için beklenen en uzun süre.
 const HOST_WAIT_SECS: u32 = 20;
 
-/// Tepsinin kendisi: Windows'ta her zaman var; Linux'ta AppIndicator
-/// kitaplığı ve masaüstünün StatusNotifier izleyicisi ya da X11 tepsisi.
+/// Tepsinin kendisi: Windows'ta her zaman var; Linux'ta masaüstünün
+/// StatusNotifier izleyicisi (KDE, GNOME + AppIndicator eklentisi, XFCE,
+/// Cinnamon, MATE, Budgie...).
 #[cfg(not(target_os = "linux"))]
 mod host {
-    pub fn library() -> bool {
-        true
-    }
     pub fn present() -> bool {
         true
     }
@@ -342,33 +343,15 @@ mod host {
 mod host {
     use std::time::Duration;
 
-    /// tray-icon'un (libappindicator-sys, `backcompat`) denediği adlar.
-    const LIBRARIES: [&std::ffi::CStr; 4] = [
-        c"libayatana-appindicator3.so.1",
-        c"libappindicator3.so.1",
-        c"libayatana-appindicator3.so",
-        c"libappindicator3.so",
-    ];
-
-    /// AppIndicator kitaplığı yüklenebiliyor mu.
-    pub fn library() -> bool {
-        LIBRARIES.iter().any(|name| {
-            // SAFETY: sabit, NUL ile biten ad; dönen tutamaç kapatılmaz
-            // (tray-icon aynı kitaplığı birazdan yükler).
-            !unsafe { libc::dlopen(name.as_ptr(), libc::RTLD_LAZY | libc::RTLD_LOCAL) }.is_null()
-        })
-    }
-
     /// Simgeyi gösterecek bir tepsi var mı. Yanıt vermeyen oturum veriyolu
-    /// ya da X sunucusu çağıranı (pencere kapatma) bekletmesin: kısa süre
-    /// sınırıyla ayrı iş parçacığında sorulur; yanıt yoksa "var" sayılır
-    /// (eski davranış: pencere gizlenir).
+    /// çağıranı (pencere kapatma) bekletmesin: kısa süre sınırıyla ayrı iş
+    /// parçacığında sorulur; yanıt yoksa "var" sayılır (pencere gizlenir).
     pub fn present() -> bool {
         let (tx, rx) = std::sync::mpsc::channel();
         let spawned = std::thread::Builder::new()
             .name("mailhere-tepsi-sor".into())
             .spawn(move || {
-                let _ = tx.send(status_notifier() || xembed());
+                let _ = tx.send(status_notifier());
             });
         if spawned.is_err() {
             return true;
@@ -376,8 +359,7 @@ mod host {
         rx.recv_timeout(Duration::from_millis(600)).unwrap_or(true)
     }
 
-    /// StatusNotifier izleyicisi (KDE, GNOME + AppIndicator eklentisi, XFCE,
-    /// Cinnamon, MATE, Budgie...) oturum veriyolunda.
+    /// StatusNotifier izleyicisi oturum veriyolunda mı.
     fn status_notifier() -> bool {
         let Ok(conn) = dbus::blocking::Connection::new_session() else {
             return false;
@@ -393,33 +375,6 @@ mod host {
             ("org.kde.StatusNotifierWatcher",),
         );
         owned.is_ok_and(|(owned,)| owned)
-    }
-
-    /// X11 sistem tepsisi (XEmbed, `_NET_SYSTEM_TRAY_S<n>`): AppIndicator
-    /// izleyici yokken buna düşer.
-    fn xembed() -> bool {
-        use x11rb::protocol::xproto::ConnectionExt;
-
-        if std::env::var_os("DISPLAY").is_none_or(|d| d.is_empty()) {
-            return false;
-        }
-        let Ok((conn, screen)) = x11rb::connect(None) else {
-            return false;
-        };
-        let name = format!("_NET_SYSTEM_TRAY_S{screen}");
-        let Some(atom) = conn
-            .intern_atom(true, name.as_bytes())
-            .ok()
-            .and_then(|c| c.reply().ok())
-            .map(|r| r.atom)
-            .filter(|a| *a != 0)
-        else {
-            return false;
-        };
-        conn.get_selection_owner(atom)
-            .ok()
-            .and_then(|c| c.reply().ok())
-            .is_some_and(|r| r.owner != 0)
     }
 }
 

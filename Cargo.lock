@@ -2545,6 +2545,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "ksni"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "814b44c24cd2cb236c3b8a41c7f08237b452a8e76ecaa81f1cec40b5b678215b"
+dependencies = [
+ "async-executor",
+ "async-io",
+ "async-lock",
+ "futures-channel",
+ "futures-lite",
+ "futures-util",
+ "pastey",
+ "serde",
+ "task-local",
+ "zbus 5.19.0",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2714,11 +2732,10 @@ dependencies = [
 
 [[package]]
 name = "mailhere"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "dbus",
  "keyring",
- "libc",
  "mh-app",
  "mh-core",
  "mh-sync",
@@ -2734,8 +2751,8 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "tray-icon",
  "windows-registry",
- "x11rb",
 ]
 
 [[package]]
@@ -2792,7 +2809,7 @@ dependencies = [
 
 [[package]]
 name = "mh-app"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -2821,7 +2838,7 @@ dependencies = [
 
 [[package]]
 name = "mh-core"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "serde",
  "serde_json",
@@ -2830,7 +2847,7 @@ dependencies = [
 
 [[package]]
 name = "mh-jmap"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -2857,7 +2874,7 @@ dependencies = [
 
 [[package]]
 name = "mh-mime"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "ammonia",
  "base64 0.22.1",
@@ -2869,7 +2886,7 @@ dependencies = [
 
 [[package]]
 name = "mh-notify"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "mh-core",
  "windows-sys 0.61.2",
@@ -2878,7 +2895,7 @@ dependencies = [
 
 [[package]]
 name = "mh-oauth"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "base64 0.22.1",
  "mh-core",
@@ -2893,7 +2910,7 @@ dependencies = [
 
 [[package]]
 name = "mh-relay"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -2911,7 +2928,7 @@ dependencies = [
 
 [[package]]
 name = "mh-send"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -2933,7 +2950,7 @@ dependencies = [
 
 [[package]]
 name = "mh-store"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "argon2",
  "base64 0.22.1",
@@ -2951,7 +2968,7 @@ dependencies = [
 
 [[package]]
 name = "mh-sync"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "async-imap",
  "base64 0.22.1",
@@ -2979,7 +2996,7 @@ dependencies = [
 
 [[package]]
 name = "mh-transfer"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "base64 0.22.1",
  "if-addrs",
@@ -3641,6 +3658,12 @@ dependencies = [
  "rand_core 0.6.4",
  "subtle",
 ]
+
+[[package]]
+name = "pastey"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2ee67f1008b1ba2321834326597b8e186293b049a023cdef258527550b9935b4"
 
 [[package]]
 name = "percent-encoding"
@@ -5266,6 +5289,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "61c41af27dd6d1e27b1b16b489db798443478cef1f06a660c96db617ba5de3b1"
 
 [[package]]
+name = "task-local"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2972044a9e5e448a506a7ff6f0d03b566d8ef4cd6918a58fc59835a0f8666626"
+dependencies = [
+ "pin-project-lite",
+]
+
+[[package]]
 name = "tauri"
 version = "2.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6015,6 +6047,7 @@ checksum = "b2b9c52859a94554803ccd4a24b98f74148ebc73b90676d783f3490b1bff9d72"
 dependencies = [
  "crossbeam-channel",
  "dirs",
+ "ksni",
  "libappindicator",
  "muda",
  "objc2",

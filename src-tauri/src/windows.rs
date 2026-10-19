@@ -16,7 +16,8 @@ use crate::platform::DesktopState;
 
 pub const MAIN: &str = "main";
 pub const NOTIFY: &str = "notify";
-const NOTIFY_WIDTH: f64 = 400.0;
+/// Kart 372 px + iki yanda 20 px saydam dolgu (gölge dolgunun içinde biter).
+const NOTIFY_WIDTH: f64 = 412.0;
 /// Kart penceresi köşeye yapışık durur; boşluğu arayüzün saydam dolgusu verir.
 const NOTIFY_MARGIN: f64 = 2.0;
 /// Hızlı okuma penceresinin ekran kenarına uzaklığı.

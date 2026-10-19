@@ -41,8 +41,9 @@ windows-registry = "0.6.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 dbus = "0.9.12"
-libc = "0.2"
-x11rb.workspace = true
+# Tepsi simgesi D-Bus StatusNotifierItem olarak (AppIndicator kitaplığı yok;
+# sol tık pencereyi açar). Tauri'nin tray-icon'u bu özellikle ksni arka ucuna geçer.
+tray-icon = { version = "0.25", default-features = false, features = ["ksni"] }
 
 [features]
 # `pnpm tauri build` bunu açar; geliştirmede devUrl kullanılır.
