@@ -319,6 +319,26 @@ impl JmapManager {
         self.send(account_id, Command::Resync)
     }
 
+    /// Tek hesabı hemen eşitler (sunucu itmesi "değişti" dedi). Hesap
+    /// çalışmıyorsa `false`.
+    pub fn sync_account(&self, account_id: &str) -> bool {
+        self.send(account_id, Command::Sync)
+    }
+
+    /// Hesabın oturumunda tek yöntem çağırır ve yanıtın bağımsız
+    /// değişkenlerini döner. Hesaba değil oturuma bağlı çekirdek yöntemleri
+    /// (`PushSubscription/get`, `PushSubscription/set`) içindir; oturum
+    /// eşitlemeyle paylaşılır.
+    pub async fn session_call(
+        &self,
+        account: &Account,
+        method: &str,
+        args: serde_json::Value,
+    ) -> AppResult<serde_json::Value> {
+        let client = self.shared.client(account).await.map_err(|e| e.to_app())?;
+        client.call(method, args).await.map_err(|e| e.to_app())
+    }
+
     /// Tüm JMAP hesaplarını hemen eşitler.
     pub fn sync_now(&self) {
         for h in self.handles().values() {

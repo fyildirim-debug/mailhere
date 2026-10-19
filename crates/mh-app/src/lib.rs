@@ -30,6 +30,7 @@ pub mod logging;
 pub mod notify;
 pub mod notify_actions;
 pub mod platform;
+pub mod push;
 pub mod routes;
 pub mod rules;
 pub mod screener;

@@ -11,6 +11,7 @@ members = [
   "crates/mh-jmap",
   "crates/mh-app",
   "crates/mh-transfer",
+  "crates/mh-relay",
   "src-tauri",
 ]
 

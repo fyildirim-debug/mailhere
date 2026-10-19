@@ -349,6 +349,8 @@ pub fn setup_core(app: &AppHandle, boot: Boot, key: Option<&DbKey>) -> AppResult
     // Yanıt hatırlatmaları: açılışta kaçan süreler değerlendirilir, sonra dakikada bir.
     rt.spawn(crate::followups::ticker(handle.clone()));
     crate::screener::start(&handle, &rt);
+    // Sunucu itmesi aboneleri (yalnız Firebase jetonu olan kabukta; masaüstünde boş geçer).
+    crate::push::start(&app.state::<AppState>(), &rt);
     // Önceki sürümlerin kaydettiği HTML kaynaklı, şablon artıklı ya da
     // bağlantılı önizlemeler onarılır.
     {

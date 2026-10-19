@@ -89,6 +89,17 @@ Varsayılan **kapalı**; kapalıyken hiçbir akışta parola sorulmaz ve yukarı
 - **Aktarım:** kilit ayarı ve parola QR ile aktarılmaz; aktarımla gelen hesaplar alıcı cihazın kilit durumuna uyar.
 - **Komutlar:** `lock_status`, `lock_enable`, `lock_disable`, `lock_change`, `lock_unlock`, `lock_ui_lock`, `lock_set_relock`, `lock_reset_local` ortak listede; kapatma ve parola değiştirme mevcut parolayı ister ve aynı bekleme sayacına tabidir; kurma, kapatma ve değiştirme yalnız çekirdek açıkken; kilit işlemleri aynı anda tek (ikincisi "bekle" der). Hızlı okuma ve yazma pencereleri yalnız `lock_status` ve `lock_unlock` çağırabilir.
 
+## Sunucu itmesi (push)
+
+Telefon uykudayken yeni posta için posta sunucusu Mailhere bildirim aktarıcısına (`crates/mh-relay`, Dokploy'da), aktarıcı Firebase Cloud Messaging ile telefona haber verir. Ayrıntı: [`PUSH.md`](PUSH.md).
+
+- **Aktarıcı ne bilir:** abone kimliği, Firebase kayıt jetonu, sağlayıcı türü; Gmail'de posta adresinin SHA-256 özeti (Pub/Sub iletisi adresle gelir). Parola, erişim jetonu, posta içeriği, konu, gönderen ve JMAP hesap adresi aktarıcıya hiç gitmez. Telefona giden FCM iletisi yalnız `t` (`degisti`/`dogrula`), abone kimliği ve (doğrulamada) sunucunun abonelik kimliğiyle kodunu taşır; Google da yalnız bunu görür.
+- **Yetki:** cihazın yönetim anahtarı (32 B rastgele) yalnız SHA-256 özetiyle saklanır, jeton güncelleme ve silme bununla yapılır. Posta sunucusunun çağırdığı adres 32 B rastgele anahtar taşır, sabit zamanlı karşılaştırılır; bu anahtarı bilen en fazla o telefona "değişti" sinyali yollatabilir (telefon yalnız eşitler). Graph bildirimleri `clientState`, Gmail itmeleri Google'ın imzalı OIDC jetonu (veren, hedef kitle, hizmet hesabı, süre) ile doğrulanır.
+- **Sınırlar:** gövde 64 KB, abone açma IP başına saatte 30, toplam 20 000 abone; aynı aboneye 2 sn içindeki değişiklikler tek iletiye birleşir. Kapalı sağlayıcının uçları 404. Günlüğe yalnız abone kimliğinin ilk 6 karakteri yazılır.
+- **Firebase:** hizmet hesabı anahtarı yalnız aktarıcının ortam değişkeninde (Kasa: "Mailhere FCM hizmet hesabı"); uygulamaya yalnız gizli olmayan istemci ayarı aktarıcıdan verilir, APK'da ve depoda Firebase anahtarı yoktur. Uygulamada yalnız `firebase-messaging`: Analytics, Crashlytics, reklam kimliği yok (`firebase_analytics_collection_deactivated`). Google Play Hizmetleri yalnız bu iş için bağlanır (`apk-denetle.sh` ölçüm, konum, reklam ve ML Kit sınıflarını yasaklar).
+- **Telefonda:** abone durumu ve yönetim anahtarı kasada (`push-durum`), jeton `push-jeton`; `ItmeServisi` dışa kapalı, yalnız Google Play Hizmetleri bağlanır. İşlemci itme ve uyanma alarmında en çok 30 sn uyanık tutulur (`WAKE_LOCK`).
+- **Açık kalan:** aktarıcı ele geçirilirse saldırgan abonelere boş "değişti" sinyali yollatabilir ve hangi telefonun kaç aboneliği olduğunu görebilir; posta ya da kimlik bilgisine ulaşamaz. Firebase hizmet hesabı sızarsa Firebase konsolundan iptal edilip yenisi üretilir.
+
 ## Android
 
 Android kabuğu ayrı depoda (`mailheremobile`) derlenir; ortak çekirdek (`crates/*`, `crates/mh-app`) aynıdır. Cihazda henüz doğrulanmamış maddeler **(doğrulanacak)** diye işaretlidir.

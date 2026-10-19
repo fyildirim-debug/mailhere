@@ -1,0 +1,11 @@
+# Yalnız aktarıcı imajı (crates/mh-relay/Dockerfile) için: Rust çalışma alanı yeter.
+.git
+target
+**/node_modules
+app/dist
+app/test-results
+app/playwright-report
+src-tauri/target
+src-tauri/gen
+docs
+*.log

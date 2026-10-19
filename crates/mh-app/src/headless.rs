@@ -293,10 +293,11 @@ impl Headless {
                 tracing::warn!(error = %e.message, "uykudan sonra bağlantılar yenilenemedi");
             }
         }));
+        let push = crate::push::start(&self.state, &self.handle);
         self.tasks
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .push(watch);
+            .extend([watch, push]);
         Ok(())
     }
 

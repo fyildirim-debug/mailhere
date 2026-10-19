@@ -4,7 +4,7 @@ Mailhere; Windows ve Linux için hızlı, sakin, klavyeyle yönetilen bir masaü
 
 ## Ürün ilkeleri (bozulmaz)
 
-- **Posta hızlı gelir.** Telefonda Mailhere arka planda postaları sürekli denetler, yeni posta gelince hemen bildirir; bilgisayarda arka planda (pencere kapalıyken de) çalışır ve hemen bildirir. En hızlı yol kullanılır: IMAP IDLE, JMAP anlık akış, Android ön plan hizmeti; yoklama yalnız yedektir.
+- **Posta hızlı gelir.** Telefonda Mailhere arka planda postaları sürekli denetler, yeni posta gelince hemen bildirir; bilgisayarda arka planda (pencere kapalıyken de) çalışır ve hemen bildirir. En hızlı yol kullanılır: sunucu itmesi (desteklenen sağlayıcıda posta sunucusu → aktarıcı → Firebase, `docs/PUSH.md`), IMAP IDLE, JMAP anlık akış, Android ön plan hizmeti; yoklama yalnız yedektir.
 - **Açılışta başlar.** Bilgisayar ve telefon açılınca Mailhere kendiliğinden başlar. Bilgisayarda pencere açılmaz, yalnız sistem tepsisinde ikon olarak görünür; telefonda görünmez, arka planda başlayıp posta denetler. Kullanıcı ayardan kapatabilir.
 - **Parola kilidi isteğe bağlıdır.** Posta kutusu kullanıcı isterse parolayla kilitlenir ve şifrelenir; açıkken girişte parola sorulur. Varsayılan kapalıdır; kapalıyken hiçbir akışta parola sorulmaz.
 - Yeni her özellik bu üç ilkeyle uyumlu tasarlanır; birini zayıflatan değişiklik yapılmaz.
@@ -49,6 +49,7 @@ Modüller:
 - `crates/mh-app/src/platform.rs` — **`Platform` trait'i**: kabuğa özgü işler (`notify`, `counts_changed`, `open_main`, `open_quick`, `open_compose`, `open_file`, `save_file`, `pick_files`, `fatal`). Masaüstü `src-tauri/src/platform.rs` (`DesktopPlatform`: kart/tepsi/pencereler/dosya penceresi), Android `mailheremobile` (`AndroidPlatform`: sistem bildirimi, tek pencere + `mh:navigate`, paylaşım/SAF). Ortak kod pencere, tepsi ya da dosya penceresine doğrudan dokunmaz; `state.platform` üzerinden gider.
 - `src-tauri/` — masaüstü kabuğu: pencereler, tepsi, bildirim kartı penceresi, anahtar zinciri (`KeyringSecrets`), dosya seçme penceresi, imzalı güncelleme, tek örnek; masaüstüne özel komutlar (`open_quick`, `notify_*`, `demo_notify`, `update_*`; tam liste `src-tauri/commands.txt`).
 - `crates/mh-transfer` — cihazlar arası QR aktarımı (kripto + tel protokolü + sunucu/istemci; Store ve Tauri bilmez).
+- `crates/mh-relay` — bildirim aktarıcısı (`mailhere-relay`, Dokploy): posta sunucusunun "yeni posta" haberini Firebase ile telefona iletir; parola, jeton ya da posta içeriği tutmaz. Uygulama tarafı `crates/mh-app/src/push.rs`. Ayrıntı `docs/PUSH.md`.
 - `crates/mh-core` — ortak tipler (arayüzle sözleşme; `app/src/lib/api/types.ts` ile birebir aynı tutulur).
 - `crates/mh-store` — SQLite + FTS5 yerel depo.
 - `crates/mh-mime` — ayrıştırma, HTML temizleme, önizleme, akıllı kategori.
