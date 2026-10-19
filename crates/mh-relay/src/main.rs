@@ -8,7 +8,8 @@
 //!
 //! Ortam değişkenleri:
 //! - `MH_RELAY_PUBLIC_URL` (zorunlu): dışarıdan görünen kök adres.
-//! - `MH_FCM_SERVICE_ACCOUNT` (zorunlu): Firebase hizmet hesabı JSON'u.
+//! - `MH_FCM_SERVICE_ACCOUNT` (zorunlu): Firebase hizmet hesabı JSON'u (ya da
+//!   base64 kodlu hâli).
 //! - `MH_FIREBASE_API_KEY`, `MH_FIREBASE_APP_ID`, `MH_FIREBASE_SENDER_ID`:
 //!   uygulamaya verilen istemci ayarları (gizli değildir).
 //! - `MH_PROVIDERS` (varsayılan `jmap`): virgülle etkin sağlayıcılar.
@@ -48,6 +49,21 @@ fn zorunlu(ad: &str) -> String {
         eprintln!("{ad} ortam değişkeni gerekli");
         std::process::exit(2)
     })
+}
+
+/// Hizmet hesabı: JSON ya da (ortam dosyasında tırnak ve satır sonu sorunu
+/// çıkmasın diye) base64 kodlu JSON.
+fn hizmet_hesabi(deger: &str) -> Result<fcm::HizmetHesabi, String> {
+    use base64::Engine;
+    let metin = if deger.trim_start().starts_with('{') {
+        deger.to_owned()
+    } else {
+        let b = base64::engine::general_purpose::STANDARD
+            .decode(deger.trim())
+            .map_err(|e| format!("base64 değil: {e}"))?;
+        String::from_utf8(b).map_err(|e| e.to_string())?
+    };
+    serde_json::from_str(&metin).map_err(|e| e.to_string())
 }
 
 /// İstemci adresi: Traefik arkasında `X-Forwarded-For`'un ilk değeri.
@@ -119,7 +135,7 @@ async fn main() {
     let genel_url = zorunlu("MH_RELAY_PUBLIC_URL")
         .trim_end_matches('/')
         .to_owned();
-    let hesap: fcm::HizmetHesabi = serde_json::from_str(&zorunlu("MH_FCM_SERVICE_ACCOUNT"))
+    let hesap: fcm::HizmetHesabi = hizmet_hesabi(&zorunlu("MH_FCM_SERVICE_ACCOUNT"))
         .unwrap_or_else(|e| {
             eprintln!("MH_FCM_SERVICE_ACCOUNT okunamadı: {e}");
             std::process::exit(2)
@@ -211,5 +227,20 @@ async fn main() {
                 .serve_connection(TokioIo::new(soket), svc)
                 .await;
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::hizmet_hesabi;
+    use base64::Engine;
+
+    #[test]
+    fn hizmet_hesabi_json_ya_da_base64() {
+        let j = r#"{"project_id":"p","client_email":"e@p","private_key":"k"}"#;
+        assert_eq!(hizmet_hesabi(j).unwrap().project_id, "p");
+        let b = base64::engine::general_purpose::STANDARD.encode(j);
+        assert_eq!(hizmet_hesabi(&b).unwrap().client_email, "e@p");
+        assert!(hizmet_hesabi("!!").is_err());
     }
 }
