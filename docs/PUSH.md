@@ -15,6 +15,7 @@ Posta sunucusu ──(yeni posta)──▶ Aktarıcı ──(FCM veri iletisi: "
 | Sağlayıcı | Durum | Sunucunun haber yolu | Uygulamanın yapacağı |
 |---|---|---|---|
 | JMAP (Stalwart) | **Açık** | `PushSubscription` (RFC 8620 §7.2) aktarıcının `/v1/jmap/{id}/{anahtar}` ucuna | Abonelik kur, doğrula, 7 günde bir uzat |
+| IMAP, sunucu JMAP de konuşuyorsa (Stalwart) | **Açık** | Aynı `PushSubscription`, IMAP sunucusunun kendi adındaki JMAP ucunda (`https://<IMAP sunucusu>/.well-known/jmap`, IMAP kullanıcı adı ve parolası) | Abonelik JMAP'te, eşitleme IMAP'te; itme IMAP eşitlemesini tetikler. Parola başka ada gitmez; JMAP'i olmayan sunucu 7 gün yeniden denenmez. Yalnız parolalı hesaplar |
 | Microsoft Graph (Outlook) | Hazır, kapalı | Graph aboneliği `/v1/graph/{id}` ucuna (`clientState` eşleşir) | `Mail.ReadBasic` izni + Graph aboneliği (3 günde bir yenile) |
 | Gmail | Hazır, kapalı | Gmail API `users.watch` → Google Pub/Sub → `/v1/gmail` (Google imzalı) | Gmail API izni + `users.watch` (7 günde bir yenile) |
 
@@ -23,7 +24,7 @@ Kapalı sağlayıcının aktarıcı uçları 404 döner; açmak için aktarıcı
 ## Akış (JMAP)
 
 1. Android kabuğu Firebase'i aktarıcıdan aldığı istemci ayarıyla başlatır (`/v1/yapilandirma`; APK'da ve depoda Firebase anahtarı yoktur), kayıt jetonunu kasaya `push-jeton` adıyla yazar (`Itme.kt`).
-2. Çekirdek açılınca ve 6 saatte bir `mh_app::push::Parcalar::refresh` her JMAP hesabı için aktarıcıda abone açar (`POST /v1/abone` → kimlik, yönetim anahtarı, sunucuya verilecek adres) ve posta sunucusunda `PushSubscription` kurar (`types: ["EmailDelivery"]`, tanımazsa `["Email"]`; `expires` 7 gün).
+2. Çekirdek açılınca, hesap eklenince ve 6 saatte bir `mh_app::push::Parcalar::refresh` her JMAP hesabı (ve JMAP'i olan sunucudaki IMAP hesabı) için aktarıcıda abone açar (`POST /v1/abone` → kimlik, yönetim anahtarı, sunucuya verilecek adres) ve posta sunucusunda `PushSubscription` kurar (`types: ["EmailDelivery"]`, tanımazsa `["Email"]`; `expires` 7 gün).
 3. Sunucu adrese `PushVerification` yollar; aktarıcı kodu FCM ile telefona iletir (`t=dogrula`), çekirdek kodu sunucuya verir (`PushSubscription/set` → `verificationCode`). Çekirdek kapalıysa kod kasada (`push-bekleyen`) bekler, çekirdek açılınca uygulanır.
 4. Yeni posta: sunucu `StateChange` yollar → aktarıcı `t=degisti` iletir (aynı aboneye 2 sn içindeki değişiklikler birleşir, sondaki kaçmaz) → `ItmeServisi` çekirdek açıksa hesabı hemen eşitletir (işlemci 30 sn uyanık), değilse hızlandırılmış iş açar (hizmet ya da tek seferlik eşitle-bildir). Bildirim her zamanki koddan geçer (kurallar, elek, sessiz saat).
 5. Jeton yenilenince aboneler aktarıcıda yeni jetona taşınır; silinen hesabın abonesi silinir; aktarıcıya haftada bir canlılık bildirilir (30 gün sessiz abone orada silinir; Firebase "kayıtsız jeton" derse hemen).

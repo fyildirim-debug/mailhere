@@ -16,6 +16,12 @@
 //! 4. Bitmesine 2 günden az kalan abonelik 7 gün uzatılır; aktarıcıya haftada
 //!    bir canlılık bildirilir (30 gün sessiz abone orada silinir).
 //!
+//! IMAP hesabının sunucusu JMAP de konuşuyorsa (Stalwart gibi) abonelik aynı
+//! sunucunun JMAP ucunda (`https://<IMAP sunucusu>/.well-known/jmap`) aynı
+//! kullanıcı adı ve parolayla kurulur; eşitleme IMAP'te kalır, itme yalnız
+//! IMAP eşitlemesini tetikler. Parola IMAP sunucusunun kendi adı dışına
+//! gitmez. JMAP'i olmayan sunucu bir hafta yeniden denenmez.
+//!
 //! Sağlayıcılar: şimdilik yalnız JMAP (Stalwart) açık. Gmail (`users.watch`)
 //! ve Microsoft Graph (abonelik) için aktarıcı uçları hazırdır; uygulama
 //! tarafı [`Saglayici`] ile genişler (OAuth izinleri gelince).
@@ -28,10 +34,10 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use mh_core::{Account, AccountKind, AppError, AppResult, ErrorCode};
+use mh_core::{Account, AccountKind, AppError, AppResult, AuthKind, ErrorCode};
 use mh_jmap::JmapManager;
 use mh_store::Store;
-use mh_sync::SecretStore;
+use mh_sync::{SecretStore, SyncManager};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -55,6 +61,8 @@ const UZAT_ESIGI_MS: i64 = 2 * GUN_MS;
 const CANLILIK_MS: i64 = 6 * GUN_MS;
 /// Düzenleme aralığı (çekirdek açıkken).
 const ARALIK: Duration = Duration::from_secs(6 * 3600);
+/// JMAP'i olmayan IMAP sunucusu bu süre yeniden denenmez.
+const JMAPSIZ_MS: i64 = 7 * GUN_MS;
 const HTTP_SURE: Duration = Duration::from_secs(15);
 
 /// Sunucu itmesi sağlayıcısı (aktarıcıdaki adlarla).
@@ -81,8 +89,22 @@ impl Saglayici {
 pub fn saglayici(account: &Account) -> Option<Saglayici> {
     match account.kind {
         AccountKind::Jmap if mh_jmap::is_syncable(account) => Some(Saglayici::Jmap),
+        AccountKind::Imap if imap_jmap_adresi(account).is_some() => Some(Saglayici::Jmap),
         _ => None,
     }
+}
+
+/// Parolalı IMAP hesabında sunucunun olası JMAP oturum adresi: IMAP
+/// sunucusunun kendi adı (parola başka ada gitmez).
+pub fn imap_jmap_adresi(account: &Account) -> Option<String> {
+    if !mh_sync::is_syncable(account) || account.auth != AuthKind::Password {
+        return None;
+    }
+    let host = account.imap.as_ref()?.host.trim().trim_end_matches('.');
+    if host.is_empty() || host.contains(['/', '@', '?', '#', ' ']) {
+        return None;
+    }
+    Some(format!("https://{host}/.well-known/jmap"))
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -92,6 +114,9 @@ pub struct Durum {
     pub jeton: Option<String>,
     #[serde(default)]
     pub hesaplar: BTreeMap<String, Abone>,
+    /// JMAP ucu bulunamayan IMAP hesapları ve son deneme (ms).
+    #[serde(default)]
+    pub jmapsiz: BTreeMap<String, i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -331,6 +356,7 @@ pub struct Parcalar {
     pub store: Arc<Store>,
     pub secrets: Arc<dyn SecretStore>,
     pub jmap: Arc<JmapManager>,
+    pub sync: Arc<SyncManager>,
 }
 
 impl Parcalar {
@@ -339,6 +365,7 @@ impl Parcalar {
             store: state.store.clone(),
             secrets: state.secrets.clone(),
             jmap: state.jmap.clone(),
+            sync: state.sync.clone(),
         }
     }
 
@@ -365,6 +392,31 @@ impl Parcalar {
             .filter(|t| !t.is_empty())
     }
 
+    /// IMAP hesabının sunucusundaki JMAP oturumu (IMAP kullanıcı adı ve parolasıyla).
+    async fn yan_istemci(&self, account: &Account) -> mh_jmap::JmapResult<mh_jmap::Client> {
+        let url = imap_jmap_adresi(account).ok_or_else(|| {
+            AppError::new(ErrorCode::Invalid, "Bu hesapta sunucu itmesi kurulamaz.")
+        })?;
+        let username = account
+            .imap
+            .as_ref()
+            .map(|c| c.username.trim().to_owned())
+            .filter(|u| !u.is_empty())
+            .unwrap_or_else(|| account.email.clone());
+        let password = mh_sync::password_for(&self.secrets, &account.id).await?;
+        mh_jmap::Client::connect(&url, mh_jmap::Credentials::new(username, password)).await
+    }
+
+    /// Hesabın JMAP oturumunda tek yöntem: JMAP hesabında eşitlemenin
+    /// oturumu, IMAP hesabında sunucunun JMAP ucu.
+    async fn cagir(&self, account: &Account, method: &str, args: Value) -> AppResult<Value> {
+        if account.kind == AccountKind::Jmap {
+            return self.jmap.session_call(account, method, args).await;
+        }
+        let c = self.yan_istemci(account).await.map_err(|e| e.to_app())?;
+        c.call(method, args).await.map_err(|e| e.to_app())
+    }
+
     async fn abonelik_kur(&self, account: &Account, a: &mut Abone, simdi: i64) -> AppResult<()> {
         let mut turler = json!(["EmailDelivery"]);
         for deneme in 0..2 {
@@ -376,10 +428,7 @@ impl Parcalar {
                     "expires": utc_tarih(simdi + SURE_MS),
                 }}
             });
-            let v = self
-                .jmap
-                .session_call(account, "PushSubscription/set", args)
-                .await?;
+            let v = self.cagir(account, "PushSubscription/set", args).await?;
             match olusturma_coz(&v, "k") {
                 SetSonuc::Olustu { id, bitis } => {
                     a.uzak_id = Some(id);
@@ -412,10 +461,7 @@ impl Parcalar {
             return self.abonelik_kur(account, a, simdi).await;
         };
         let args = json!({ "update": { (id.clone()): { "expires": utc_tarih(simdi + SURE_MS) } } });
-        let v = self
-            .jmap
-            .session_call(account, "PushSubscription/set", args)
-            .await?;
+        let v = self.cagir(account, "PushSubscription/set", args).await?;
         match guncelleme_coz(&v, &id) {
             SetSonuc::Guncellendi { bitis } => {
                 a.bitis = Some(bitis.unwrap_or(simdi + SURE_MS));
@@ -436,11 +482,7 @@ impl Parcalar {
     async fn abonelik_sil(&self, account: &Account, a: &Abone) {
         if let Some(id) = &a.uzak_id {
             let args = json!({ "destroy": [id] });
-            if let Err(e) = self
-                .jmap
-                .session_call(account, "PushSubscription/set", args)
-                .await
-            {
+            if let Err(e) = self.cagir(account, "PushSubscription/set", args).await {
                 tracing::debug!(error = %e.message, "eski abonelik silinemedi");
             }
         }
@@ -504,7 +546,13 @@ impl Parcalar {
             .into_iter()
             .filter(|a| saglayici(a).is_some())
             .collect();
-        let ids: Vec<String> = hesaplar.iter().map(|a| a.id.clone()).collect();
+        d.jmapsiz
+            .retain(|id, t| simdi - *t < JMAPSIZ_MS && hesaplar.iter().any(|a| &a.id == id));
+        let ids: Vec<String> = hesaplar
+            .iter()
+            .filter(|a| !d.jmapsiz.contains_key(&a.id))
+            .map(|a| a.id.clone())
+            .collect();
         let bul = |id: &str| hesaplar.iter().find(|a| a.id == id);
 
         for is in planla(&d, &ids, simdi) {
@@ -519,6 +567,24 @@ impl Parcalar {
                     let (Some(acc), Some(s)) = (bul(id), bul(id).and_then(saglayici)) else {
                         continue;
                     };
+                    // IMAP hesabı: aktarıcıda abone açmadan önce sunucunun JMAP'i var mı?
+                    if acc.kind == AccountKind::Imap {
+                        match self.yan_istemci(acc).await {
+                            Ok(_) => {}
+                            Err(e) if jmap_yok(&e) => {
+                                tracing::info!(
+                                    "IMAP sunucusunda JMAP yok; sunucu itmesi kurulmadı"
+                                );
+                                d.jmapsiz.insert(id.clone(), simdi);
+                                self.durum_yaz(&d);
+                                continue;
+                            }
+                            Err(e) => {
+                                tracing::warn!(error = %e, "IMAP sunucusunun JMAP ucuna ulaşılamadı");
+                                continue;
+                            }
+                        }
+                    }
                     match relay_ac(&jeton, s).await {
                         Ok(k) => {
                             let mut a = Abone {
@@ -606,10 +672,7 @@ impl Parcalar {
             return Ok("hesap yok");
         };
         let args = json!({ "update": { (abonelik.clone()): { "verificationCode": kod } } });
-        let v = self
-            .jmap
-            .session_call(&acc, "PushSubscription/set", args)
-            .await?;
+        let v = self.cagir(&acc, "PushSubscription/set", args).await?;
         match guncelleme_coz(&v, &abonelik) {
             SetSonuc::Guncellendi { .. } => {
                 a.uzak_id = Some(abonelik);
@@ -645,8 +708,10 @@ impl Parcalar {
                     .map(|(id, _)| id.clone());
                 match hesap {
                     Some(id) if self.jmap.sync_account(&id) => Ok("eşitleniyor"),
+                    Some(id) if self.sync.sync_account(&id) => Ok("eşitleniyor"),
                     _ => {
                         self.jmap.sync_now();
+                        self.sync.sync_now();
                         Ok("tümü eşitleniyor")
                     }
                 }
@@ -666,6 +731,19 @@ impl Parcalar {
     }
 }
 
+/// Sunucuda JMAP yok ya da bu kimlikle açılmıyor (yeniden denemek boşuna);
+/// ağ ve zaman aşımı hataları geçicidir.
+fn jmap_yok(e: &mh_jmap::JmapError) -> bool {
+    use mh_jmap::JmapError as E;
+    match e {
+        E::Auth | E::Protocol(_) | E::TooLarge(_) | E::Method { .. } => true,
+        E::Status(s) => *s < 500,
+        E::App(a) => a.code != ErrorCode::Network,
+        E::Http(h) => h.is_status() || h.is_decode() || h.is_redirect(),
+        E::Timeout => false,
+    }
+}
+
 /// Düzenleme ve doğrulama aynı anda çalışmasın (aynı abone iki kez açılmasın).
 static KILIT: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
@@ -681,6 +759,16 @@ pub fn start(state: &AppState, rt: &tokio::runtime::Handle) -> tokio::task::Join
             tokio::time::sleep(ARALIK).await;
         }
     })
+}
+
+/// Hesap eklenince: aboneler 6 saatlik düzenlemeyi beklemeden kurulur.
+pub fn tetikle(state: &AppState) {
+    let p = Parcalar::of(state);
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = p.refresh().await {
+            tracing::warn!(error = %e.message, "itme aboneleri düzenlenemedi");
+        }
+    });
 }
 
 #[cfg(test)]
@@ -802,5 +890,52 @@ mod tests {
         .unwrap();
         assert_eq!(d.hesaplar["h"].uzak_id, None);
         assert!(!d.hesaplar["h"].dogrulandi);
+        assert!(d.jmapsiz.is_empty());
+    }
+
+    fn imap(host: &str, auth: AuthKind) -> Account {
+        Account {
+            id: "a".into(),
+            name: "İş".into(),
+            email: "furkan@ornek.com".into(),
+            display_name: "Furkan".into(),
+            color: "#4C6FD8".into(),
+            kind: AccountKind::Imap,
+            imap: Some(mh_core::ServerConfig {
+                host: host.into(),
+                port: 993,
+                security: mh_core::Security::Tls,
+                username: "furkan".into(),
+            }),
+            smtp: None,
+            jmap_url: None,
+            signatures: Vec::new(),
+            signature_new: None,
+            signature_reply: None,
+            created_at: 0,
+            auth,
+            notify: true,
+        }
+    }
+
+    #[test]
+    fn imap_hesabinda_jmap_ucu_imap_sunucusunda() {
+        let a = imap("mail.ornek.com", AuthKind::Password);
+        assert_eq!(
+            imap_jmap_adresi(&a).as_deref(),
+            Some("https://mail.ornek.com/.well-known/jmap")
+        );
+        assert_eq!(saglayici(&a), Some(Saglayici::Jmap));
+        // OAuth hesabında parola yok; tanıtım ve bozuk adreste itme kurulmaz.
+        assert_eq!(saglayici(&imap("imap.gmail.com", AuthKind::Google)), None);
+        assert_eq!(saglayici(&imap("demo.invalid", AuthKind::Password)), None);
+        assert_eq!(
+            imap_jmap_adresi(&imap("kotu.com/x", AuthKind::Password)),
+            None
+        );
+        assert_eq!(
+            imap_jmap_adresi(&imap("x@kotu.com", AuthKind::Password)),
+            None
+        );
     }
 }

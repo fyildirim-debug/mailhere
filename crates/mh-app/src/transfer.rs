@@ -1018,6 +1018,7 @@ pub async fn transfer_apply(
             AccountKind::Imap => state.sync.start(a.clone()),
             AccountKind::Jmap => state.jmap.start(a.clone()),
         }
+        crate::push::tetikle(&state);
     };
     let applier = Applier {
         store: &state.store,

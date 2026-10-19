@@ -86,6 +86,7 @@ pub async fn account_add_jmap(
     state.store.insert_account(&account)?;
     state.store.set_jmap_username(&account.id, &username)?;
     state.jmap.start(account.clone());
+    crate::push::tetikle(&state);
     crate::lock::accounts_changed(&app);
     crate::sink::changed(&app, Vec::new());
     Ok(account)

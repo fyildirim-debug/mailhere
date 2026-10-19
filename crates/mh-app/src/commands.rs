@@ -91,6 +91,7 @@ pub async fn account_add(
     };
     state.store.insert_account(&account)?;
     state.sync.start(account.clone());
+    crate::push::tetikle(&state);
     // Parola kilidi açıksa kayıttaki gizli değer adları yenilenir.
     crate::lock::accounts_changed(&app);
     crate::sink::changed(&app, Vec::new());
