@@ -1,11 +1,23 @@
+<script lang="ts" module>
+  // Aynı bağlantı bir konuşmadaki birden çok postada olabilir; `mh:link` bir kez açılır.
+  let lastLink = { url: '', at: 0 };
+
+  function claimLink(url: string): boolean {
+    const now = Date.now();
+    if (lastLink.url === url && now - lastLink.at < 1000) return false;
+    lastLink = { url, at: now };
+    return true;
+  }
+</script>
+
 <script lang="ts">
   // Posta gövdesi. HTML betiksiz, CSP'li bir çerçevede; düz metin bağlantıları güvenle ayrılmış halde.
   // Koyu temada HTML posta koyu temaya eşlenir (darkmail.ts): açık zeminler
   // koyulaşır, koyu yazı açılır, görseller ve koyu tasarlanmış alanlar kalır.
   // `original` ile posta kendi renklerine döner. Çerçevenin yükleyemediği
   // izinli uzak görseller (CORP başlığı) arka uçtan `data:` olarak alınır.
-  import { onDestroy } from 'svelte';
-  import { call, openExternal, type MessageId } from '../api';
+  import { onDestroy, onMount } from 'svelte';
+  import { call, EVENTS, on, openExternal, type MessageId } from '../api';
   import { t } from '../i18n/index.svelte';
   import { darkMailWanted, settings } from '../stores/settings.svelte';
   import { linkify } from '../util/format';
@@ -169,11 +181,7 @@
       const a = (e.target as Element | null)?.closest?.('a[href]');
       if (!a) return;
       e.preventDefault();
-      const url = a.getAttribute('href') ?? '';
-      // Metni başka bir adres gösteren bağlantı (arka uç işaretler): önce onay.
-      const host = a.getAttribute('data-mh-host');
-      if (host) confirmLink = { url, host };
-      else void openExternal(url);
+      follow(a);
     });
     if (remoteAllowed) rescueImages(doc);
   }
@@ -264,6 +272,28 @@
 
   let confirmLink = $state<{ url: string; host: string } | null>(null);
 
+  /** Bağlantıyı açar; metni başka bir adres gösteren bağlantıda (arka uç işaretler) önce onay. */
+  function follow(a: Element) {
+    const url = a.getAttribute('href') ?? '';
+    const host = a.getAttribute('data-mh-host');
+    if (host) confirmLink = { url, host };
+    else void openExternal(url);
+  }
+
+  // Linux (WebKitGTK) betiksiz çerçevede tıklama dinleyicisini çalıştırmaz;
+  // `target="_blank"` bağlantı yeni pencere isteği olur, kabuk onu `mh:link`
+  // olarak verir. Bağlantı bu postadaysa burada açılır (aynı bağlantı aynı
+  // anda birden çok postada olabilir: bir kez açılır).
+  onMount(() =>
+    on(EVENTS.link, ({ url }) => {
+      const doc = frame?.contentDocument;
+      if (!doc) return;
+      const a = [...doc.querySelectorAll('a[href]')].find((el) => (el as HTMLAnchorElement).href === url);
+      if (!a || !claimLink(url)) return;
+      follow(a);
+    }),
+  );
+
   function closeConfirm() {
     confirmLink = null;
     frame?.focus();
@@ -296,7 +326,7 @@
     <iframe
       bind:this={frame}
       title={t('read.frame')}
-      sandbox="allow-same-origin"
+      sandbox="allow-same-origin allow-popups"
       referrerpolicy="no-referrer"
       {srcdoc}
       style:height="{height}px"

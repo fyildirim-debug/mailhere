@@ -739,6 +739,7 @@ export const EVENTS = {
   transfer: 'mh:transfer',
   navigate: 'mh:navigate',
   lock: 'mh:lock',
+  link: 'mh:link',
 } as const;
 
 export interface NotifyEvent {
@@ -752,6 +753,15 @@ export interface NotifyEvent {
 /** Ana pencere bu postayı açmalı (karttan ya da hızlı okumadan). */
 export interface OpenEvent {
   id: MessageId;
+}
+
+/**
+ * Posta çerçevesinde tıklanan bağlantı: pencere motoru yeni pencere isteği
+ * olarak bildirdi (Linux WebKitGTK betiksiz çerçevede tıklama dinleyicisini
+ * çalıştırmaz). Aldatıcı bağlantı onayı arayüzde uygulanır.
+ */
+export interface LinkEvent {
+  url: string;
 }
 
 export interface ChangedEvent {
@@ -784,6 +794,7 @@ export interface EventPayloads {
   'mh:transfer': TransferState;
   'mh:navigate': NavigateEvent;
   'mh:lock': LockStatus;
+  'mh:link': LinkEvent;
 }
 
 // -------------------------------------------------------------------- hatalar

@@ -697,7 +697,7 @@ impl Parcalar {
                     .map(|(id, _)| id.clone());
                 match hesap {
                     Some(id) if self.jmap.sync_account(&id) => Ok("eşitleniyor"),
-                    Some(id) if self.sync.sync_account(&id) => Ok("eşitleniyor"),
+                    Some(id) if self.sync.sync_inbox(&id) => Ok("eşitleniyor"),
                     _ => {
                         self.jmap.sync_now();
                         self.sync.sync_now();
@@ -743,7 +743,8 @@ pub fn jmap_yok(e: &mh_jmap::JmapError) -> bool {
     use mh_jmap::JmapError as E;
     match e {
         E::Auth | E::Protocol(_) | E::TooLarge(_) | E::Method { .. } => true,
-        E::Status(s) => *s < 500,
+        // Yönlendirme ve geçici sunucu hataları yeniden denenir.
+        E::Status(s) => (400..500).contains(s) && *s != 408 && *s != 429,
         E::App(a) => a.code != ErrorCode::Network,
         E::Http(h) => h.is_status() || h.is_decode() || h.is_redirect(),
         E::Timeout => false,

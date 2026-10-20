@@ -108,9 +108,12 @@ async fn dinle(p: Parcalar, account: Account) {
                 || {
                     baglandi = true;
                     tracing::info!("JMAP durum akışı bağlandı (IMAP hesabı)");
+                    // Kopukken teslim edilmiş posta kaçmasın.
+                    let _ = p.sync.sync_inbox(&account.id);
                 },
                 || {
-                    if !p.sync.sync_account(&account.id) {
+                    tracing::debug!("JMAP durum akışı: yeni posta teslim edildi");
+                    if !p.sync.sync_inbox(&account.id) {
                         p.sync.sync_now();
                     }
                 },
@@ -128,7 +131,7 @@ async fn dinle(p: Parcalar, account: Account) {
             tokio::time::sleep(JMAPSIZ_BEKLE).await;
             continue;
         }
-        tracing::debug!(error = %e, "JMAP durum akışı kesildi");
+        tracing::warn!(error = %e, "JMAP durum akışı kesildi; yeniden bağlanılacak");
         if baglandi {
             bekle = EN_AZ_BEKLE;
         }

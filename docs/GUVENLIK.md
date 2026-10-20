@@ -25,6 +25,7 @@ Son denetim: 2026-10-13 (beş alanda kod denetimi; bulgular doğrulanıp düzelt
 
 **Posta içeriği**
 - HTML Rust'ta temizlenir (ammonia + CSS izin listesi). Betiksiz, CSP'li, Referer göndermeyen bir çerçevede gösterilir. Uzak içerik varsayılan kapalı.
+- Posta çerçevesi `allow-same-origin allow-popups` kum havuzundadır (betik yok). Bağlantılar `target="_blank"`tır; tıklama arayüzde yakalanır, Linux'ta (WebKitGTK betiksiz çerçevede dinleyiciyi çalıştırmaz) yeni pencere isteği olarak kabuğa gelir: pencere hiç açılmaz (`NewWindowResponse::Deny`), yalnız http/https/mailto adresi `mh:link` ile arayüze verilir; aldatıcı bağlantı onayı uygulanıp sistem tarayıcısında açılır.
 - Aşırı iç içe ya da büyük HTML doğrusal bir ön taramayla yakalanır, düz metne düşer. Ayrıştırma ayrı iş parçacığında yapılır.
 - Görünen ad, konu ve ek adlarından satır sonu, denetim ve yön değiştiren karakterler atılır. Adres gibi görünen ad gerçek adresi gizleyemez.
 - Yanıtın gideceği tüm adresler görünür. Gönderenin alan adı dışına giden yanıtta uyarı çıkar.

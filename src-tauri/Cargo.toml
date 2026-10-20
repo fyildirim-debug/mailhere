@@ -44,6 +44,8 @@ dbus = "0.9.12"
 # Tepsi simgesi D-Bus StatusNotifierItem olarak (AppIndicator kitaplığı yok;
 # sol tık pencereyi açar). Tauri'nin tray-icon'u bu özellikle ksni arka ucuna geçer.
 tray-icon = { version = "0.25", default-features = false, features = ["ksni"] }
+# Bildirim kartı penceresinin gravity'si (pencere yöneticisi köşeyi sabit tutsun).
+gtk = "0.18"
 
 [features]
 # `pnpm tauri build` bunu açar; geliştirmede devUrl kullanılır.

@@ -6,7 +6,7 @@ use std::sync::atomic::Ordering;
 
 use mh_app::routes::{compose_route, is_app_url};
 use mh_app::AppState;
-use mh_core::{events, AppError, CardPosition, ComposePrefill, MessageId, OpenEvent};
+use mh_core::{events, AppError, CardPosition, ComposePrefill, LinkEvent, MessageId, OpenEvent};
 use tauri::{
     AppHandle, Emitter, LogicalSize, Manager, Monitor, PhysicalPosition, WebviewUrl, WebviewWindow,
     WebviewWindowBuilder, Window, WindowEvent,
@@ -53,6 +53,34 @@ fn guard(app: &AppHandle) -> impl Fn(&tauri::Url) -> bool + Send + 'static {
     }
 }
 
+/// Yeni pencere isteği (postada `target="_blank"` bağlantı): pencere hiç
+/// açılmaz; web ve e-posta bağlantısı arayüze `mh:link` olarak verilir,
+/// arayüz aldatıcı bağlantı onayını uygulayıp tarayıcıda açar.
+fn new_window(
+    app: &AppHandle,
+    label: &str,
+) -> impl Fn(
+    tauri::Url,
+    tauri::webview::NewWindowFeatures,
+) -> tauri::webview::NewWindowResponse<tauri::Wry>
+       + Send
+       + 'static {
+    let (app, label) = (app.clone(), label.to_owned());
+    move |url, _| {
+        if matches!(url.scheme(), "http" | "https" | "mailto") {
+            let ev = LinkEvent {
+                url: url.to_string(),
+            };
+            if let Err(e) = app.emit_to(label.as_str(), events::LINK, ev) {
+                tracing::warn!(error = %e, "bağlantı olayı gönderilemedi");
+            }
+        } else {
+            tracing::warn!(scheme = url.scheme(), "desteklenmeyen bağlantı açılmadı");
+        }
+        tauri::webview::NewWindowResponse::Deny
+    }
+}
+
 pub fn create_main(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     build_main(app, true)
 }
@@ -63,6 +91,7 @@ fn build_main(app: &AppHandle, visible: bool) -> tauri::Result<WebviewWindow> {
     }
     WebviewWindowBuilder::new(app, MAIN, url("main"))
         .on_navigation(guard(app))
+        .on_new_window(new_window(app, MAIN))
         .title("Mailhere")
         .inner_size(1280.0, 820.0)
         // Dar pencere kipleri (ikon rayı 1120 px altı, liste → okuma yığını
@@ -235,19 +264,64 @@ pub fn notify_layout(app: &AppHandle, height: f64) -> tauri::Result<()> {
     tracing::debug!(height, "bildirim penceresi yerleşimi");
     let w = ensure_notify(app)?;
     let height = height.clamp(1.0, 2000.0);
-    w.set_size(LogicalSize::new(NOTIFY_WIDTH, height))?;
-    if let Some(m) = current_monitor(app) {
-        w.set_position(corner(
-            Area::from(&m),
-            card_position(app),
-            NOTIFY_WIDTH,
-            height,
-            NOTIFY_MARGIN,
-        ))?;
+    let pos = card_position(app);
+    let at = current_monitor(app)
+        .map(|m| corner(Area::from(&m), pos, NOTIFY_WIDTH, height, NOTIFY_MARGIN));
+    #[cfg(target_os = "linux")]
+    gtk_place(&w, pos, height, at)?;
+    #[cfg(not(target_os = "linux"))]
+    {
+        w.set_size(LogicalSize::new(NOTIFY_WIDTH, height))?;
+        if let Some(at) = at {
+            w.set_position(at)?;
+        }
     }
     w.set_always_on_top(true)?;
     w.show()?;
     Ok(())
+}
+
+/// Linux: kart penceresini GTK'da boyutlandırıp yerleştirir. Pencere
+/// yöneticisi (Mutter) odak almış pencerenin uygulama tarafından taşınmasını
+/// yok sayar; "Yanıtla"dan sonra pencere büyüyünce aşağı taşar, düğmeler
+/// ekran dışında kalırdı. Kart köşesine göre "gravity" verilir: yönetici
+/// boyut değişince o köşeyi sabit tutar; konum da o köşeye göre verilir.
+#[cfg(target_os = "linux")]
+fn gtk_place(
+    w: &WebviewWindow,
+    pos: CardPosition,
+    height: f64,
+    at: Option<PhysicalPosition<i32>>,
+) -> tauri::Result<()> {
+    use gtk::gdk::Gravity;
+    use gtk::prelude::GtkWindowExt;
+
+    let scale = w.scale_factor().unwrap_or(1.0).max(0.1);
+    let (gravity, east, south) = match pos {
+        CardPosition::BottomRight => (Gravity::SouthEast, true, true),
+        CardPosition::TopRight => (Gravity::NorthEast, true, false),
+        CardPosition::BottomLeft => (Gravity::SouthWest, false, true),
+        CardPosition::TopLeft => (Gravity::NorthWest, false, false),
+    };
+    let (lw, lh) = (NOTIFY_WIDTH.round() as i32, height.round() as i32);
+    // GTK konumu mantıksal piksel ve gravity'nin gösterdiği köşe için ister.
+    let anchor = at.map(|p| {
+        let x = (f64::from(p.x) / scale).round() as i32;
+        let y = (f64::from(p.y) / scale).round() as i32;
+        (
+            x + if east { lw } else { 0 },
+            y + if south { lh } else { 0 },
+        )
+    });
+    let win = w.clone();
+    w.run_on_main_thread(move || {
+        let Ok(gw) = win.gtk_window() else { return };
+        gw.set_gravity(gravity);
+        gw.resize(lw, lh);
+        if let Some((x, y)) = anchor {
+            gw.move_(x, y);
+        }
+    })
 }
 
 /// Kart penceresine klavye odağı verir. Pencere odak çalmadan açılır
@@ -281,6 +355,7 @@ pub fn show_quick(app: &AppHandle, id: MessageId) -> tauri::Result<()> {
     let (width, height) = (440.0, 700.0);
     let w = WebviewWindowBuilder::new(app, &label, url(&format!("quick/{id}")))
         .on_navigation(guard(app))
+        .on_new_window(new_window(app, &label))
         .title("Mailhere")
         .inner_size(width, height)
         .min_inner_size(380.0, 480.0)
@@ -333,8 +408,10 @@ pub fn open_compose(app: &AppHandle, prefill: &ComposePrefill) -> tauri::Result<
         tracing::warn!(open, "yazma penceresi sınırına ulaşıldı");
         return Ok(());
     }
-    let w = WebviewWindowBuilder::new(app, format!("compose-{n}"), url(&route))
+    let label = format!("compose-{n}");
+    let w = WebviewWindowBuilder::new(app, &label, url(&route))
         .on_navigation(guard(app))
+        .on_new_window(new_window(app, &label))
         .title("Yeni posta · Mailhere")
         .inner_size(820.0, 660.0)
         .min_inner_size(600.0, 480.0)

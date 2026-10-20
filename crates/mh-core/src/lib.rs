@@ -1385,6 +1385,11 @@ pub mod events {
     /// `LockStatus`: parola kilidinin durumu değişti (kilitlendi, açıldı,
     /// ayar değişti); tüm pencereler kilit ekranını buna göre gösterir.
     pub const LOCK: &str = "mh:lock";
+    /// `LinkEvent`: posta çerçevesinde bağlantıya tıklandı ve pencere motoru
+    /// bunu yeni pencere isteği olarak bildirdi (Linux WebKitGTK betiksiz
+    /// çerçevede tıklama dinleyicisini çalıştırmaz). Arayüz aldatıcı bağlantı
+    /// onayını uygulayıp tarayıcıda açar.
+    pub const LINK: &str = "mh:link";
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -1402,6 +1407,13 @@ pub struct NotifyEvent {
 #[serde(rename_all = "camelCase")]
 pub struct OpenEvent {
     pub id: MessageId,
+}
+
+/// Posta çerçevesinden açılmak istenen bağlantı (`mh:link`).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LinkEvent {
+    pub url: String,
 }
 
 /// Tek pencereli kabukta (Android) ayrı pencere yerine rota değişimi

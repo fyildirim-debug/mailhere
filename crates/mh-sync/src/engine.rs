@@ -60,6 +60,10 @@ const IDLE_RENEW: Duration = Duration::from_secs(10 * 60);
 /// bağlantısı yeni postayı en çok bu kadar geciktirir.
 const POLL: Duration = Duration::from_secs(120);
 const FULL_SYNC_TIMEOUT: Duration = Duration::from_secs(20 * 60);
+/// Tek kutu (gelen kutusu, işlem sonrası kutu) eşitlemesinin süre sınırı.
+/// Sessizce ölmüş bağlantıda takılan yoklama yeni postayı tam eşitlemenin
+/// 20 dakikasına kadar bekletmesin: aşılınca bağlantı baştan kurulur.
+const QUICK_SYNC_TIMEOUT: Duration = Duration::from_secs(90);
 const ACTION_TIMEOUT: Duration = Duration::from_secs(120);
 /// Bağlantı kopması yüzünden bu kadar kez yarıda kalan işlemden vazgeçilir
 /// (kuyruğu sonsuza dek tıkamasın).
@@ -318,6 +322,12 @@ impl SyncManager {
     /// çalışmıyorsa `false`.
     pub fn sync_account(&self, account_id: &str) -> bool {
         self.send(account_id, Command::SyncAll)
+    }
+
+    /// Hesabın gelen kutusunu hemen eşitler (sunucu "yeni posta teslim
+    /// edildi" dedi). Hesap çalışmıyorsa `false`.
+    pub fn sync_inbox(&self, account_id: &str) -> bool {
+        self.send(account_id, Command::SyncInbox)
     }
 
     /// Hesabın tek kutusunu hemen eşitler (ör. görünür yapılan klasör).
@@ -737,7 +747,12 @@ async fn run_session(
         }
         run_actions(ctx, &mut conn, rx, pending).await?;
         if let Some(cmd) = next_sync(pending) {
-            let res = match timeout(FULL_SYNC_TIMEOUT, execute_sync(ctx, &mut conn, &cmd)).await {
+            let limit = if cmd == Command::SyncAll {
+                FULL_SYNC_TIMEOUT
+            } else {
+                QUICK_SYNC_TIMEOUT
+            };
+            let res = match timeout(limit, execute_sync(ctx, &mut conn, &cmd)).await {
                 Ok(r) => r,
                 Err(_) => Err(SyncError::Timeout),
             };
