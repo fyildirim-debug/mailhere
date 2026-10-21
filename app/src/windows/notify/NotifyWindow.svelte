@@ -112,14 +112,19 @@
   // pencerede boyut gözlemcisi çalışmayabilir: kart sayısı ve hali değişince
   // doğrudan ölçülür.
   let lastHeight = 0;
+  /** Bu pencere kart gösterdi mi: kartlar bitince pencere kapanır; açılırken (kartlar kuyruktan gelmeden) kapanmasın. */
+  let shown = false;
   function sync(force: boolean) {
     void tick().then(() => {
       if (!isTauri) return;
       if (!cards.length) {
+        if (!shown) return;
+        shown = false;
         lastHeight = 0;
         void call('notify_hide');
         return;
       }
+      shown = true;
       if (!stack) return;
       const height = Math.ceil(stack.getBoundingClientRect().height);
       if (!force && height === lastHeight) return;

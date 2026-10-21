@@ -106,11 +106,19 @@ pub(crate) fn decide(
     // Tam ekran (oyun, sunum, video) sırasında kart yok; bir kez sorulur.
     let fullscreen = !messages.is_empty() && mh_notify::is_fullscreen();
     for message in messages {
-        if state
+        let decision = state
             .mute
-            .decide(&settings, &message, now, minutes, fullscreen)
-            == Decision::Card
-        {
+            .decide(&settings, &message, now, minutes, fullscreen);
+        // Kaçan bildirimi izlemek için (içerik yazılmaz).
+        tracing::info!(
+            id = message.id,
+            kart = decision == Decision::Card,
+            okunmamis = message.unread,
+            sessiz = state.mute.is_muted(now),
+            tam_ekran = fullscreen,
+            "yeni posta"
+        );
+        if decision == Decision::Card {
             // Doğrulama kodu kartta "Kodu kopyala" olarak sunulur.
             let otp = state.store.otp(message.id).unwrap_or_default();
             notify(

@@ -265,6 +265,13 @@ const MIGRATIONS: &[&str] = &[
         backfilled  INTEGER NOT NULL DEFAULT 0
     );
     "#,
+    // Eski varsayılan "yalnız Kişiler" bülten ve otomatik postaları sessizce
+    // geçiriyordu; varsayılan "her posta" oldu, kayıtlı eski varsayılan bir
+    // kez taşınır (kullanıcı sonra yine seçebilir).
+    r#"
+    UPDATE settings SET json = json_set(json, '$.notify', 'all')
+    WHERE json_extract(json, '$.notify') = 'people';
+    "#,
 ];
 
 /// Dallar ayrı geliştirilirken ana dalın ara sürümleri bazı geçişleri yer
@@ -311,6 +318,29 @@ pub fn latest_version() -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn eski_varsayilan_kisiler_her_postaya_tasinir() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        let son = MIGRATIONS.len();
+        for sql in &MIGRATIONS[..son - 1] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", (son - 1) as i64)
+            .unwrap();
+        conn.execute(
+            "INSERT INTO settings (id, json) VALUES (1, '{\"notify\":\"people\",\"theme\":\"dark\"}')",
+            [],
+        )
+        .unwrap();
+        migrate(&mut conn).unwrap();
+        let json: String = conn
+            .query_row("SELECT json FROM settings WHERE id = 1", [], |r| r.get(0))
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["notify"], "all");
+        assert_eq!(v["theme"], "dark", "diğer ayarlar korunur");
+    }
 
     #[test]
     fn yer_tutucuyla_atlanan_gecis_tamamlanir() {

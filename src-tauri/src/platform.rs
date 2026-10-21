@@ -9,7 +9,7 @@ use std::time::Instant;
 use mh_app::state::internal;
 use mh_app::{BoxFut, Confirm, Platform};
 use mh_core::{AppError, AppResult, ComposePrefill, ErrorCode, MessageId, NotifyEvent, Settings};
-use tauri::{AppHandle, WebviewWindow};
+use tauri::{AppHandle, Manager, WebviewWindow};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_opener::OpenerExt;
 
@@ -22,6 +22,8 @@ pub struct DesktopState {
     pub compose_counter: AtomicU32,
     /// Bildirim penceresi henüz dinlemiyorken kaybolmasın diye bekleyen kartlar.
     pub cards: Mutex<Vec<(Instant, NotifyEvent)>>,
+    /// Bildirim penceresi açık ve kartları dinliyor (`notify_pending` çağrıldı).
+    pub notify_ready: AtomicBool,
 }
 
 pub struct DesktopPlatform;
@@ -75,6 +77,15 @@ impl Platform for DesktopPlatform {
     fn muted(&self, app: &AppHandle) {
         if let Err(e) = crate::windows::notify_hide(app) {
             tracing::warn!(error = %e, "bildirim penceresi gizlenemedi");
+        }
+        let muted = app
+            .try_state::<mh_app::AppState>()
+            .is_some_and(|s| s.mute.is_muted(mh_app::state::now_ms()));
+        tracing::info!(muted, "bildirim susturması değişti");
+        if muted {
+            crate::tray::muted_from_card(app);
+        } else {
+            crate::tray::refresh(app);
         }
     }
 

@@ -1,6 +1,7 @@
 //! Köşe kartı: kuyruk, pencere ve kart komutları (yalnız masaüstü). Sistem
 //! bildirimi ortak katmandadır (`mh_app::notify::native`).
 
+use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use mh_app::state::{now_ms, AppState};
@@ -34,21 +35,33 @@ pub fn show_card(app: &AppHandle, ev: NotifyEvent, native_setting: bool) {
         mh_app::notify::native(app, &ev);
         return;
     }
-    if let Some(state) = app.try_state::<DesktopState>() {
-        let mut q = state.cards.lock().unwrap_or_else(|e| e.into_inner());
-        q.retain(|(at, e)| at.elapsed() < QUEUE_TTL && e.message.id != ev.message.id);
-        q.push((Instant::now(), ev.clone()));
-        let excess = q.len().saturating_sub(QUEUE_MAX);
-        q.drain(..excess);
+    // Kart penceresi kartlar bitince kapanır (`windows::notify_hide`); gizli
+    // bekleyen web görünümü (WebView2, WebKitGTK) askıya alınıp sonraki
+    // kartları kaçırıyordu. Pencere açık ve dinliyorsa kart olayla gider;
+    // değilse kuyruğa girer, yeni pencere açılınca kuyruktan alır.
+    let ready = app
+        .try_state::<DesktopState>()
+        .is_some_and(|s| s.notify_ready.load(Ordering::SeqCst))
+        && app.get_webview_window(crate::windows::NOTIFY).is_some();
+    if !ready {
+        if let Some(state) = app.try_state::<DesktopState>() {
+            let mut q = state.cards.lock().unwrap_or_else(|e| e.into_inner());
+            q.retain(|(at, e)| at.elapsed() < QUEUE_TTL && e.message.id != ev.message.id);
+            q.push((Instant::now(), ev.clone()));
+            let excess = q.len().saturating_sub(QUEUE_MAX);
+            q.drain(..excess);
+        }
     }
     if let Err(e) = crate::windows::ensure_notify(app) {
         tracing::warn!(error = %e, "bildirim penceresi açılamadı");
         mh_app::notify::native(app, &ev);
         return;
     }
-    tracing::debug!(id = ev.message.id, "bildirim kartı gönderiliyor");
-    if let Err(e) = app.emit_to(crate::windows::NOTIFY, events::NOTIFY, ev) {
-        tracing::warn!(error = %e, "bildirim olayı gönderilemedi");
+    tracing::info!(id = ev.message.id, ready, "bildirim kartı gönderiliyor");
+    if ready {
+        if let Err(e) = app.emit_to(crate::windows::NOTIFY, events::NOTIFY, ev) {
+            tracing::warn!(error = %e, "bildirim olayı gönderilemedi");
+        }
     }
 }
 
@@ -57,6 +70,7 @@ pub fn take_pending(app: &AppHandle) -> Vec<NotifyEvent> {
     let Some(state) = app.try_state::<DesktopState>() else {
         return Vec::new();
     };
+    state.notify_ready.store(true, Ordering::SeqCst);
     let mut q = state.cards.lock().unwrap_or_else(|e| e.into_inner());
     tracing::debug!(count = q.len(), "bekleyen kartlar istendi");
     q.drain(..)

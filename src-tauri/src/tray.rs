@@ -38,7 +38,10 @@ pub struct Texts {
     pub sync: &'static str,
     pub compose: &'static str,
     pub mute: &'static str,
+    pub unmute: &'static str,
     pub quit: &'static str,
+    pub muted_title: &'static str,
+    pub muted_body: &'static str,
     pub hint_title: &'static str,
     pub hint_body: &'static str,
 }
@@ -50,7 +53,10 @@ pub fn texts(lang: Language) -> Texts {
             sync: "Postaları al",
             compose: "Yeni posta",
             mute: "Bildirimleri 1 saat sessize al",
+            unmute: "Bildirimleri yeniden aç",
             quit: "Çık",
+            muted_title: "Bildirimler 1 saat sessiz",
+            muted_body: "Yeni posta gelmeye devam eder ama kart açılmaz. Tepsi menüsündeki \"Bildirimleri yeniden aç\" ile hemen açabilirsin.",
             hint_title: "Mailhere arka planda",
             hint_body: "Mailhere arka planda çalışmayı sürdürüyor; tepsideki simgeden açabilirsin.",
         },
@@ -59,20 +65,28 @@ pub fn texts(lang: Language) -> Texts {
             sync: "Get mail",
             compose: "New message",
             mute: "Mute notifications for 1 hour",
+            unmute: "Unmute notifications",
             quit: "Quit",
+            muted_title: "Notifications muted for 1 hour",
+            muted_body: "New mail keeps arriving, but no cards are shown. Choose \"Unmute notifications\" in the tray menu to turn them back on.",
             hint_title: "Mailhere is still running",
             hint_body: "Mailhere keeps running in the background; open it from the tray icon.",
         },
     }
 }
 
-/// İpucu metni.
-pub fn tooltip(lang: Language, unread: u32) -> String {
-    match (lang, unread) {
+/// İpucu metni; bildirimler sessizdeyse bunu da söyler.
+pub fn tooltip(lang: Language, unread: u32, muted: bool) -> String {
+    let base = match (lang, unread) {
         (Language::Tr, 0) => "Mailhere · Hepsi okundu".to_owned(),
         (Language::Tr, n) => format!("Mailhere · {n} okunmamış"),
         (Language::En, 0) => "Mailhere · All read".to_owned(),
         (Language::En, n) => format!("Mailhere · {n} unread"),
+    };
+    match (muted, lang) {
+        (false, _) => base,
+        (true, Language::Tr) => format!("{base} · Bildirimler sessiz"),
+        (true, Language::En) => format!("{base} · Notifications muted"),
     }
 }
 
@@ -201,11 +215,15 @@ fn on_menu(app: &AppHandle, event: MenuEvent) {
                 }
             });
         }
+        // Sessizken aynı öğe susturmayı kaldırır.
         "mute" => {
             if let Some(s) = app.try_state::<AppState>() {
-                s.mute.mute_for(now_ms(), 60);
+                let now = now_ms();
+                let minutes = if s.mute.is_muted(now) { 0 } else { 60 };
+                s.mute.mute_for(now, minutes);
             }
             let _ = crate::windows::notify_hide(app);
+            refresh(app);
         }
         "quit" => {
             if let Some(s) = app.try_state::<DesktopState>() {
@@ -248,9 +266,31 @@ pub fn refresh(app: &AppHandle) {
         .lang
         .lock()
         .unwrap_or_else(|e| e.into_inner());
+    let muted = state.mute.is_muted(now_ms());
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
-        let _ = tray.set_tooltip(Some(tooltip(lang, unread)));
+        let _ = tray.set_tooltip(Some(tooltip(lang, unread, muted)));
     }
+    let t = texts(lang);
+    if let Some(items) = tray_state(app)
+        .items
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+    {
+        let _ = items.mute.set_text(if muted { t.unmute } else { t.mute });
+    }
+}
+
+/// Karttaki "Bir saat sessize al" ile susturuldu: kullanıcı bilmeden
+/// bildirimsiz kalmasın diye bir kez sistem bildirimi verilir.
+pub fn muted_from_card(app: &AppHandle) {
+    let lang = *tray_state(app)
+        .lang
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let t = texts(lang);
+    mh_app::notify::native_text(app, t.muted_title, t.muted_body);
+    refresh(app);
 }
 
 /// Tepsi simgesi kullanıcıya görünüyor mu: kuruldu ve (Linux'ta) onu
@@ -384,10 +424,14 @@ mod tests {
 
     #[test]
     fn ipucu() {
-        assert_eq!(tooltip(Language::Tr, 0), "Mailhere · Hepsi okundu");
-        assert_eq!(tooltip(Language::Tr, 3), "Mailhere · 3 okunmamış");
-        assert_eq!(tooltip(Language::En, 0), "Mailhere · All read");
-        assert_eq!(tooltip(Language::En, 3), "Mailhere · 3 unread");
+        assert_eq!(tooltip(Language::Tr, 0, false), "Mailhere · Hepsi okundu");
+        assert_eq!(tooltip(Language::Tr, 3, false), "Mailhere · 3 okunmamış");
+        assert_eq!(tooltip(Language::En, 0, false), "Mailhere · All read");
+        assert_eq!(tooltip(Language::En, 3, false), "Mailhere · 3 unread");
+        assert_eq!(
+            tooltip(Language::Tr, 2, true),
+            "Mailhere · 2 okunmamış · Bildirimler sessiz"
+        );
     }
 
     #[test]

@@ -907,10 +907,10 @@ pub enum Language {
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum NotifyMode {
-    /// Yalnız Kişiler kategorisi (varsayılan).
-    #[default]
+    /// Yalnız Kişiler kategorisi.
     People,
-    /// Her yeni posta.
+    /// Her yeni posta (varsayılan: posta hızlı gelir ve bildirilir).
+    #[default]
     All,
     /// Yalnız önemli kişiler listesi.
     Vip,
@@ -1333,7 +1333,7 @@ impl Default for Settings {
         Self {
             theme: Theme::System,
             language: Language::Tr,
-            notify: NotifyMode::People,
+            notify: NotifyMode::All,
             vip: Vec::new(),
             quiet_start: Some("22:00".into()),
             quiet_end: Some("08:00".into()),
@@ -1789,7 +1789,7 @@ mod tests {
     fn ayar_varsayilanlari_ve_eksik_alanlar() {
         let s: Settings = serde_json::from_str(r#"{"theme":"dark"}"#).unwrap();
         assert_eq!(s.theme, Theme::Dark);
-        assert_eq!(s.notify, NotifyMode::People);
+        assert_eq!(s.notify, NotifyMode::All);
         assert_eq!(s.undo_send_seconds, 10);
         assert!(s.conversation_view, "eski ayarda konuşma görünümü açık");
         assert_eq!(

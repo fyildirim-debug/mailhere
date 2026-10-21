@@ -702,7 +702,7 @@ export interface TransferState {
 export const defaultSettings: Settings = {
   theme: 'system',
   language: 'tr',
-  notify: 'people',
+  notify: 'all',
   vip: [],
   quietStart: '22:00',
   quietEnd: '08:00',

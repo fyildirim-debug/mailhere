@@ -7,6 +7,7 @@
 mod autostart;
 mod files;
 mod links;
+mod logfile;
 mod notify_card;
 mod platform;
 mod prefs;
@@ -57,6 +58,9 @@ fn setup(app: &mut App, rt: tokio::runtime::Handle) -> Result<(), Box<dyn std::e
         Arc::new(secrets::KeyringSecrets)
     };
     let dirs = Dirs::resolve(memory, || os_dirs(&handle))?;
+    if !memory {
+        logfile::open(&dirs.data);
+    }
     let platform = Arc::new(DesktopPlatform);
     let boot = mh_app::lock::Boot {
         rt: rt.clone(),
@@ -113,7 +117,17 @@ fn setup(app: &mut App, rt: tokio::runtime::Handle) -> Result<(), Box<dyn std::e
 }
 
 fn main() {
-    mh_app::logging::init(tracing_subscriber::fmt::layer().with_target(false));
+    use tracing_subscriber::Layer;
+    mh_app::logging::init(
+        tracing_subscriber::fmt::layer()
+            .with_target(false)
+            .and_then(
+                tracing_subscriber::fmt::layer()
+                    .with_target(false)
+                    .with_ansi(false)
+                    .with_writer(|| logfile::Writer),
+            ),
+    );
     let runtime = mh_app::logging::runtime();
     let rt = runtime.handle().clone();
 

@@ -144,3 +144,5 @@ Masaüstündeki hesaplar, ayarlar, kurallar ve etiketler telefona QR koduyla, ya
 - **Bellekteki veri:** çözülmüş veritabanı sayfaları ve anahtar zinciri kitaplığının kopyaları süreç belleğinde kalabilir. Parola kilidi açık oturumda bunu değiştirmez; arayüz kilidi yalnız ekranı kapatır.
 - **Parola kilidi sayacı** süreç belleğindedir: uygulamayı yeniden başlatan biri beş beklemesiz deneme daha yapar; çevrimdışı kaba kuvvete karşı asıl koruma Argon2id parametreleridir. Masaüstünde kilitli açılış bildirimine tıklamak pencereyi getirmez (tepsi simgesi getirir).
 - **Lisans:** bazı bağımlılıklar MPL-2.0 (Tauri üzerinden cssparser/selectors, dirs üzerinden option-ext). GPL değil, ama CLAUDE.md'deki izin listesinde yok; karar sahibin.
+
+- Masaüstü günlük dosyası `<yerel veri klasörü>/logs/mailhere.log` (Windows `%LOCALAPPDATA%\com.furkanyildirim.mailhere\logs`, Linux `~/.local/share/com.furkanyildirim.mailhere/logs`; 2 MB'ta döner, en çok iki dosya). Ortak süzgeçten geçer: parola, jeton, ham IMAP/SMTP/HTTP trafiği ve posta içeriği yazılmaz; yalnız posta kimliği ve durum (ör. "yeni posta, kart: evet").

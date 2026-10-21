@@ -163,7 +163,7 @@ pub fn on_window_event(window: &Window, event: &WindowEvent) {
             mh_app::lock::window_hidden(window.app_handle());
         } else if window.label() == NOTIFY {
             api.prevent_close();
-            let _ = window.hide();
+            let _ = notify_hide(window.app_handle());
         }
     }
 }
@@ -336,9 +336,15 @@ pub fn notify_focus(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Kartlar bitti (ya da sessize alındı): pencere kapanır. Gizli bekletilen
+/// web görünümünü işletim sistemi askıya alabiliyor, sonraki kartlar
+/// gelmiyordu; yeni kart yeni pencere açar (bkz. `notify_card::show_card`).
 pub fn notify_hide(app: &AppHandle) -> tauri::Result<()> {
+    if let Some(s) = app.try_state::<DesktopState>() {
+        s.notify_ready.store(false, Ordering::SeqCst);
+    }
     if let Some(w) = app.get_webview_window(NOTIFY) {
-        w.hide()?;
+        w.destroy()?;
     }
     Ok(())
 }
