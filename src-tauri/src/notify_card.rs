@@ -16,22 +16,76 @@ type Res<T> = Result<T, AppError>;
 const QUEUE_MAX: usize = 10;
 const QUEUE_TTL: Duration = Duration::from_secs(120);
 
-/// GNOME Wayland her yeni pencereyi öne alamaz ve konum vermeye izin
-/// vermez; orada sistem bildirimi kullanılır.
-pub fn is_gnome_wayland() -> bool {
+fn env(name: &str) -> Option<String> {
+    std::env::var(name).ok().filter(|v| !v.trim().is_empty())
+}
+
+/// Wayland oturumu mu (XDG_SESSION_TYPE ya da WAYLAND_DISPLAY)?
+fn wayland_session(session_type: Option<&str>, wayland_display: Option<&str>) -> bool {
+    session_type.is_some_and(|t| t.trim().eq_ignore_ascii_case("wayland"))
+        || wayland_display.is_some()
+}
+
+fn gnome(desktop: Option<&str>) -> bool {
+    desktop.is_some_and(|d| d.to_ascii_uppercase().contains("GNOME"))
+}
+
+/// GTK X11 arka ucuna zorlanmalı mı? Wayland'de uygulama pencere konumu
+/// veremez; KWin (KDE Plasma) ve diğer bileşikler kart penceresini ekranın
+/// ortasına koyuyordu. XWayland varsa (DISPLAY) GNOME dışı Wayland oturumunda
+/// uygulama X11 üzerinden açılır: kart köşesine yerleşir, tepsi D-Bus'la
+/// çalışmayı sürdürür. Kullanıcının GDK_BACKEND seçimine dokunulmaz;
+/// `MAILHERE_WAYLAND=1` Wayland'de kalmayı seçer. GNOME Wayland'de sistem
+/// bildirimi kullanılır (`card_unplaceable`).
+pub fn prefer_x11(
+    session_type: Option<&str>,
+    wayland_display: Option<&str>,
+    desktop: Option<&str>,
+    display: Option<&str>,
+    gdk_backend: Option<&str>,
+    stay_wayland: Option<&str>,
+) -> bool {
+    wayland_session(session_type, wayland_display)
+        && !gnome(desktop)
+        && display.is_some()
+        && gdk_backend.is_none()
+        && stay_wayland.is_none_or(|v| v.trim() != "1")
+}
+
+/// Açılışta, iş parçacıkları başlamadan çağrılır (`main`).
+pub fn choose_backend() {
+    if !cfg!(target_os = "linux") {
+        return;
+    }
+    if prefer_x11(
+        env("XDG_SESSION_TYPE").as_deref(),
+        env("WAYLAND_DISPLAY").as_deref(),
+        env("XDG_CURRENT_DESKTOP").as_deref(),
+        env("DISPLAY").as_deref(),
+        env("GDK_BACKEND").as_deref(),
+        env("MAILHERE_WAYLAND").as_deref(),
+    ) {
+        std::env::set_var("GDK_BACKEND", "x11");
+    }
+}
+
+/// Kart penceresi konumlanamaz: GTK Wayland arka ucunda (GNOME Wayland ya da
+/// XWayland'siz Wayland). Orada sistem bildirimi kullanılır.
+pub fn card_unplaceable() -> bool {
     if !cfg!(target_os = "linux") {
         return false;
     }
-    let wayland =
-        std::env::var("XDG_SESSION_TYPE").is_ok_and(|v| v.eq_ignore_ascii_case("wayland"));
-    let gnome = std::env::var("XDG_CURRENT_DESKTOP")
-        .is_ok_and(|v| v.to_ascii_uppercase().contains("GNOME"));
-    wayland && gnome
+    let session = wayland_session(
+        env("XDG_SESSION_TYPE").as_deref(),
+        env("WAYLAND_DISPLAY").as_deref(),
+    );
+    let x11 = env("GDK_BACKEND").is_some_and(|b| b.trim().to_ascii_lowercase().starts_with("x11"));
+    session && !x11
 }
 
-/// Kartı gösterir. `native` ayarı ya da GNOME Wayland'de sistem bildirimi.
+/// Kartı gösterir. `native` ayarı ya da konumlanamayan oturumda sistem bildirimi.
 pub fn show_card(app: &AppHandle, ev: NotifyEvent, native_setting: bool) {
-    if native_setting || is_gnome_wayland() {
+    if native_setting || card_unplaceable() {
         mh_app::notify::native(app, &ev);
         return;
     }
@@ -146,4 +200,66 @@ pub fn show_demo_card(app: &AppHandle) -> AppResult<()> {
     };
     show_card(app, ev, false);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn kde_wayland_x11e_gecer_gnome_ve_kullanici_secimi_korunur() {
+        let w = Some("wayland");
+        // KDE Plasma Wayland, XWayland var: X11 arka ucu.
+        assert!(prefer_x11(
+            w,
+            Some("wayland-0"),
+            Some("KDE"),
+            Some(":0"),
+            None,
+            None
+        ));
+        // GNOME Wayland: sistem bildirimi yolu, arka uç değişmez.
+        assert!(!prefer_x11(
+            w,
+            Some("wayland-0"),
+            Some("ubuntu:GNOME"),
+            Some(":0"),
+            None,
+            None
+        ));
+        // XWayland yok, kullanıcı GDK_BACKEND seçmiş ya da Wayland'de kalmak istiyor.
+        assert!(!prefer_x11(
+            w,
+            Some("wayland-0"),
+            Some("KDE"),
+            None,
+            None,
+            None
+        ));
+        assert!(!prefer_x11(
+            w,
+            Some("wayland-0"),
+            Some("KDE"),
+            Some(":0"),
+            Some("wayland"),
+            None
+        ));
+        assert!(!prefer_x11(
+            w,
+            Some("wayland-0"),
+            Some("KDE"),
+            Some(":0"),
+            None,
+            Some("1")
+        ));
+        // X11 oturumu: dokunulmaz.
+        assert!(!prefer_x11(
+            Some("x11"),
+            None,
+            Some("KDE"),
+            Some(":0"),
+            None,
+            None
+        ));
+    }
 }

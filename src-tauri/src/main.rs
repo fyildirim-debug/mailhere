@@ -117,6 +117,8 @@ fn setup(app: &mut App, rt: tokio::runtime::Handle) -> Result<(), Box<dyn std::e
 }
 
 fn main() {
+    // Ortam değişkeni, iş parçacıkları başlamadan.
+    notify_card::choose_backend();
     use tracing_subscriber::Layer;
     mh_app::logging::init(
         tracing_subscriber::fmt::layer()
