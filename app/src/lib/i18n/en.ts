@@ -191,6 +191,7 @@ export const en: Record<MessageKey, string> = {
 
   'notify.more': '{n} more messages',
   'notify.openInbox': 'Open inbox',
+  'notify.dblOpen': 'Double-click to open in the Mailhere window',
   'notify.now': 'now',
   'notify.minutesAgo': '{n} min ago',
   'notify.label': 'New mail: {name}',

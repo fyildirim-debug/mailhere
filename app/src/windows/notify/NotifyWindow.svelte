@@ -164,6 +164,13 @@
     await call('open_quick', { id: c.message.id });
   }
 
+  /** Simgeye (logo, avatar) ya da kartın boş yerine çift tık: ana pencere öne gelir, posta açılır. Düğme ve yazı alanı hariç. */
+  function openInMain(c: Card, e: MouseEvent) {
+    if ((e.target as Element | null)?.closest?.('button, a, input, textarea')) return;
+    remove(c.key);
+    void call('open_main', { id: c.message.id });
+  }
+
   function run(c: Card, a: NotifyAction) {
     if (a === 'reply') startReply(c);
     else void act(c, a);
@@ -305,7 +312,16 @@
   {/if}
 
   {#each visible as c (c.key)}
-    <div class="card" data-card={c.key} data-mode={c.mode} role="alertdialog" aria-label={t('notify.label', { name: displayName(c.message.from) })}>
+    <div
+      class="card"
+      data-card={c.key}
+      data-mode={c.mode}
+      role="alertdialog"
+      tabindex="-1"
+      aria-label={t('notify.label', { name: displayName(c.message.from) })}
+      title={c.mode === 'idle' ? t('notify.dblOpen') : undefined}
+      ondblclick={(e) => openInMain(c, e)}
+    >
       {#if c.mode === 'done' && c.done}
         {#key c.done}
           <div class="done" role="status">

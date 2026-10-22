@@ -199,6 +199,7 @@ export const tr = {
   // bildirim kartı
   'notify.more': '{n} posta daha',
   'notify.openInbox': 'Gelen kutusunu aç',
+  'notify.dblOpen': 'Çift tıkla: Mailhere penceresinde aç',
   'notify.now': 'şimdi',
   'notify.minutesAgo': '{n} dk önce',
   'notify.label': 'Yeni posta: {name}',
