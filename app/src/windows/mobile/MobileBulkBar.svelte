@@ -1,6 +1,7 @@
 <script lang="ts">
   // Seçim kipinde alt eylem çubuğu (56 px + güvenli alan): arşivle, sil,
-  // okundu/okunmadı, yıldız, ertele, klasöre taşı, etiket. Mantık
+  // İstenmeyen ve "Diğer". Diğer, yukarı açılan menüde okundu/okunmadı,
+  // yıldız, ertele, klasöre taşı ve etiketi toplar (çubuk sıkışmasın). Mantık
   // bulk.svelte.ts / selection.svelte.ts ile ortak; her eylem geri alınabilir.
   import { t } from '../../lib/i18n/index.svelte';
   import { flatten, folderLabel, folderTree } from '../../lib/mail/folders';
@@ -11,6 +12,9 @@
   import { mail } from '../../lib/stores/mail.svelte';
   import { checkedIds, checkedRows } from '../../lib/stores/selection.svelte';
   import { tagStore } from '../../lib/stores/tags.svelte';
+  import { showToast } from '../../lib/ui/toast.svelte';
+  import { junkOf } from './folders';
+  import { haptic } from './haptic';
 
   const rows = $derived(checkedRows());
   const ids = $derived(checkedIds());
@@ -18,8 +22,44 @@
   const allStarred = $derived(rows.every((r) => r.starred));
   const accounts = $derived([...new Set(rows.map((r) => r.accountId))]);
   const oneAccount = $derived(accounts.length === 1 ? accounts[0] : null);
+  const junk = $derived(oneAccount ? junkOf(oneAccount) : undefined);
 
-  let menu = $state<'snooze' | 'move' | 'tag' | null>(null);
+  let menu = $state<'more' | 'snooze' | 'move' | 'tag' | null>(null);
+
+  /** İstenmeyen klasörüne taşır; klasör yoksa ya da seçim birden çok hesaptaysa nedenini söyler. */
+  function spam() {
+    if (junk) {
+      void bulkMoveToFolder(ids, junk, folderLabel(junk));
+      return;
+    }
+    haptic('reject');
+    showToast({ text: oneAccount ? t('mob.swipe.noJunk') : t('bulk.mixedAccounts') });
+  }
+
+  const moreItems = $derived.by((): MenuItem[] => [
+    {
+      key: 'read',
+      label: allRead ? t('mob.unread') : t('mob.read'),
+      icon: 'mail',
+      onclick: () => void bulkSetUnread(ids, allRead),
+    },
+    {
+      key: 'star',
+      label: allStarred ? t('mob.unstar') : t('mob.star'),
+      icon: 'star',
+      onclick: () => void bulkStar(ids, !allStarred),
+    },
+    { key: 'snooze', label: t('act.snooze'), icon: 'clock', onclick: () => (menu = 'snooze') },
+    {
+      key: 'move',
+      label: t('mob.move'),
+      icon: 'folder',
+      disabled: !oneAccount,
+      hint: oneAccount ? undefined : t('bulk.mixedAccounts'),
+      onclick: () => (menu = 'move'),
+    },
+    { key: 'tag', label: t('mob.tag'), icon: 'tag', onclick: () => (menu = 'tag') },
+  ]);
 
   const moveItems = $derived.by((): MenuItem[] => {
     if (!oneAccount) return [];
@@ -39,6 +79,11 @@
       return { key: tg.id, label: tg.name, checked: all, onclick: () => void setTag(ids, tg, !all) };
     }),
   );
+
+  /** Menü öğesi alt menü açınca (ertele, taşı, etiket) Menu önce kapanır; alt menü bir sonraki adımda açılır. */
+  function close() {
+    if (menu === 'more') menu = null;
+  }
 </script>
 
 <div class="bar" role="toolbar" aria-label={t('bulk.count', { n: rows.length })}>
@@ -48,48 +93,33 @@
   <button class="act" onclick={() => bulkMove(ids, 'trash')}>
     <Icon name="trash" size={22} /><span>{t('act.delete')}</span>
   </button>
-  <button class="act" onclick={() => bulkSetUnread(ids, allRead)}>
-    <Icon name="mail" size={22} /><span>{allRead ? t('mob.unread') : t('mob.read')}</span>
-  </button>
-  <button class="act" onclick={() => bulkStar(ids, !allStarred)}>
-    <span class:star={!allStarred}><Icon name="star" size={22} filled={!allStarred} /></span><span>{allStarred ? t('mob.unstar') : t('mob.star')}</span>
+  <button class="act" onclick={spam}>
+    <Icon name="spam" size={22} /><span>{t('mob.swipe.spam')}</span>
   </button>
   <div class="anchor">
-    <button class="act" class:on={menu === 'snooze'} aria-haspopup="menu" aria-expanded={menu === 'snooze'} onclick={() => (menu = menu === 'snooze' ? null : 'snooze')}>
-      <Icon name="clock" size={22} /><span>{t('act.snooze')}</span>
+    <button
+      class="act"
+      class:on={menu !== null}
+      aria-haspopup="menu"
+      aria-expanded={menu !== null}
+      onclick={() => (menu = menu === null ? 'more' : null)}
+    >
+      <Icon name="more" size={22} /><span>{t('mob.more')}</span>
     </button>
-    {#if menu === 'snooze'}
+    {#if menu === 'more'}
+      <Menu style="bottom: calc(100% + 6px); right: 0; top: auto" items={moreItems} onclose={close} />
+    {:else if menu === 'snooze'}
       <SnoozeMenu
-        style="bottom: calc(100% + 6px); left: 0; top: auto"
+        style="bottom: calc(100% + 6px); right: 0; left: auto; top: auto"
         onclose={() => (menu = null)}
         onpick={(at) => {
           menu = null;
           void bulkSnooze(ids, at);
         }}
       />
-    {/if}
-  </div>
-  <div class="anchor">
-    <button
-      class="act"
-      class:on={menu === 'move'}
-      aria-haspopup="menu"
-      aria-expanded={menu === 'move'}
-      disabled={!oneAccount}
-      title={oneAccount ? undefined : t('bulk.mixedAccounts')}
-      onclick={() => (menu = menu === 'move' ? null : 'move')}
-    >
-      <Icon name="folder" size={22} /><span>{t('mob.move')}</span>
-    </button>
-    {#if menu === 'move'}
+    {:else if menu === 'move'}
       <Menu style="bottom: calc(100% + 6px); right: 0; top: auto" title={t('read.moveTo')} items={moveItems} onclose={() => (menu = null)} />
-    {/if}
-  </div>
-  <div class="anchor">
-    <button class="act" class:on={menu === 'tag'} aria-haspopup="menu" aria-expanded={menu === 'tag'} onclick={() => (menu = menu === 'tag' ? null : 'tag')}>
-      <Icon name="tag" size={22} /><span>{t('mob.tag')}</span>
-    </button>
-    {#if menu === 'tag'}
+    {:else if menu === 'tag'}
       <Menu style="bottom: calc(100% + 6px); right: 0; top: auto" title={t('tag.menu')} items={tagItems} onclose={() => (menu = null)} />
     {/if}
   </div>
@@ -153,11 +183,6 @@
     max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
-  }
-
-  .star {
-    display: inline-flex;
-    color: var(--amber);
   }
 
   .anchor :global(.popover) {

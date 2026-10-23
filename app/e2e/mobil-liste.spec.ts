@@ -90,6 +90,24 @@ test('sola kaydırma arşivler, Geri al geri getirir; sağa kaydırma erteler', 
   await expect(row(page, 'Sözleşme imzaya hazır')).toBeVisible();
 });
 
+test('seçim çubuğu dört düğme: Arşivle, Sil, İstenmeyen, Diğer; Diğer yukarı açılan menüde kalan eylemler', async ({ page }) => {
+  await row(page, 'Cumartesi kahvaltı?').click({ delay: 650 });
+  const bar = page.getByRole('toolbar', { name: '1 posta seçili' });
+  await expect(bar.getByRole('button')).toHaveText(['Arşivle', 'Sil', 'İstenmeyen', 'Diğer']);
+  await bar.getByRole('button', { name: 'Diğer' }).click();
+  const menu = page.getByRole('menu');
+  await expect(menu).toBeVisible();
+  // Mobilde menü alttan yukarı açılan sayfadır.
+  await expect(menu.getByRole('menuitem', { name: /Okunmadı|Okundu/ })).toBeVisible();
+  await expect(menu.getByRole('menuitem', { name: 'Ertele' })).toBeVisible();
+  await expect(menu.getByRole('menuitem', { name: 'Taşı' })).toBeVisible();
+  await expect(menu.getByRole('menuitem', { name: 'Etiket' })).toBeVisible();
+  // Alt menü: Ertele seçenekleri aynı yerde açılır.
+  await menu.getByRole('menuitem', { name: 'Ertele' }).click();
+  await expect(page.getByRole('menu')).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: 'Ertele' })).toHaveCount(0);
+});
+
 test('uzun basış seçim kipini açar; dokunma seçimi genişletir; toplu arşivle geri alınır', async ({ page }) => {
   await row(page, 'Cumartesi kahvaltı?').click({ delay: 650 });
   await expect(page.getByRole('heading', { level: 1, name: '1 seçili' })).toBeVisible();
