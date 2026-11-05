@@ -4,10 +4,17 @@
 //! `GIO_MODULE_DIR`, `XDG_DATA_DIRS`…). Bu ortam sistemin `xdg-open`ına ve
 //! tarayıcısına geçerse tarayıcı açılmaz, bağlantıya tıklamak hiçbir şey
 //! yapmaz. AppImage içindeyken açıcı bu değişkenlerden arındırılmış ortamla
-//! başlatılır; diğer paketlerde opener eklentisi kullanılır.
+//! başlatılır.
+//!
+//! Linux'ta açıcı GIO ile, masaüstünün başlatma bağlamıyla çalışır (X11'de
+//! kullanıcı zaman damgası, Wayland'de etkinleştirme işareti): pencere
+//! yöneticisi (KWin, Mutter) tarayıcıyı odak çalma sayıp arkada açmasın, öne
+//! getirsin. GIO açamazsa `xdg-open`a düşülür. Diğer sistemlerde opener
+//! eklentisi kullanılır.
 
 use mh_core::{AppError, ErrorCode};
 use tauri::AppHandle;
+#[cfg(not(target_os = "linux"))]
 use tauri_plugin_opener::OpenerExt;
 
 type Res<T> = Result<T, AppError>;
@@ -42,23 +49,83 @@ fn allowed(url: &str) -> bool {
 /// Bağlantıyı varsayılan uygulamayla açar.
 pub fn open_url(app: &AppHandle, url: &str) -> Result<(), String> {
     #[cfg(target_os = "linux")]
-    if let Some(dir) = appimage::dir() {
-        return appimage::open(url, &dir);
+    {
+        linux::launch(app, url.to_owned())
     }
-    app.opener()
-        .open_url(url, None::<&str>)
-        .map_err(|e| e.to_string())
+    #[cfg(not(target_os = "linux"))]
+    {
+        app.opener()
+            .open_url(url, None::<&str>)
+            .map_err(|e| e.to_string())
+    }
 }
 
 /// Dosyayı varsayılan uygulamasıyla açar.
 pub fn open_path(app: &AppHandle, path: &str) -> Result<(), String> {
     #[cfg(target_os = "linux")]
-    if let Some(dir) = appimage::dir() {
-        return appimage::open(path, &dir);
+    {
+        use gtk::gio::prelude::FileExt;
+        let uri = gtk::gio::File::for_path(path).uri().to_string();
+        linux::launch(app, uri)
     }
-    app.opener()
-        .open_path(path, None::<&str>)
+    #[cfg(not(target_os = "linux"))]
+    {
+        app.opener()
+            .open_path(path, None::<&str>)
+            .map_err(|e| e.to_string())
+    }
+}
+
+#[cfg(target_os = "linux")]
+mod linux {
+    use tauri::AppHandle;
+    use tauri_plugin_opener::OpenerExt;
+
+    use super::appimage;
+
+    /// Ana iş parçacığında GIO ile açar; olmazsa `xdg-open` (AppImage'da
+    /// arındırılmış ortamla) ya da opener eklentisi.
+    pub fn launch(app: &AppHandle, uri: String) -> Result<(), String> {
+        let handle = app.clone();
+        app.run_on_main_thread(move || {
+            use gtk::gio::prelude::AppLaunchContextExt;
+
+            let kok = appimage::dir();
+            let ctx = gtk::gdk::Display::default().and_then(|d| d.app_launch_context());
+            if let (Some(ctx), Some(kok)) = (&ctx, &kok) {
+                for k in appimage::BOZUCU {
+                    ctx.unsetenv(k);
+                }
+                for k in ["XDG_DATA_DIRS", "PATH"] {
+                    if let Ok(v) = std::env::var(k) {
+                        let t = appimage::temiz_liste(&v, kok);
+                        if t.is_empty() {
+                            ctx.unsetenv(k);
+                        } else {
+                            ctx.setenv(k, t);
+                        }
+                    }
+                }
+            }
+            match gtk::gio::AppInfo::launch_default_for_uri(&uri, ctx.as_ref()) {
+                Ok(()) => tracing::debug!("bağlantı GIO ile açıldı"),
+                Err(e) => {
+                    tracing::warn!(error = %e, "GIO açamadı; xdg-open deneniyor");
+                    let r = match kok {
+                        Some(kok) => appimage::open(&uri, &kok),
+                        None => handle
+                            .opener()
+                            .open_url(&uri, None::<&str>)
+                            .map_err(|e| e.to_string()),
+                    };
+                    if let Err(e) = r {
+                        tracing::warn!(error = %e, "bağlantı açılamadı");
+                    }
+                }
+            }
+        })
         .map_err(|e| e.to_string())
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -66,7 +133,7 @@ mod appimage {
     use std::process::{Command, Stdio};
 
     /// AppImage kancalarının yazdığı, sistem uygulamalarını bozan değişkenler.
-    const BOZUCU: &[&str] = &[
+    pub const BOZUCU: &[&str] = &[
         "APPDIR",
         "APPIMAGE",
         "ARGV0",

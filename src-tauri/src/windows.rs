@@ -8,11 +8,13 @@ use mh_app::routes::{compose_route, is_app_url};
 use mh_app::AppState;
 use mh_core::{events, AppError, CardPosition, ComposePrefill, LinkEvent, MessageId, OpenEvent};
 use tauri::{
-    AppHandle, Emitter, LogicalSize, Manager, Monitor, PhysicalPosition, WebviewUrl, WebviewWindow,
+    AppHandle, Emitter, Manager, Monitor, PhysicalPosition, WebviewUrl, WebviewWindow,
     WebviewWindowBuilder, Window, WindowEvent,
 };
 
 use crate::platform::DesktopState;
+#[cfg(not(target_os = "linux"))]
+use tauri::LogicalSize;
 
 pub const MAIN: &str = "main";
 pub const NOTIFY: &str = "notify";
@@ -189,6 +191,7 @@ pub fn ensure_notify(app: &AppHandle) -> tauri::Result<WebviewWindow> {
 }
 
 /// Kartın gösterileceği ekran: imlecin bulunduğu, yoksa ana pencerenin, yoksa birincil.
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 fn current_monitor(app: &AppHandle) -> Option<Monitor> {
     if let Ok(p) = app.cursor_position() {
         if let Ok(Some(m)) = app.monitor_from_point(p.x, p.y) {
@@ -209,6 +212,7 @@ fn card_position(app: &AppHandle) -> CardPosition {
 }
 
 /// Çalışma alanı (fiziksel piksel): konum, boyut ve ölçek.
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 #[derive(Debug, Clone, Copy)]
 struct Area {
     x: i32,
@@ -218,6 +222,7 @@ struct Area {
     scale: f64,
 }
 
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 impl From<&Monitor> for Area {
     fn from(m: &Monitor) -> Self {
         let a = m.work_area();
@@ -233,6 +238,7 @@ impl From<&Monitor> for Area {
 
 /// Pencereyi çalışma alanının ayarlı köşesine yerleştirir. Boyutlar mantıksal,
 /// sonuç fiziksel pikseldir.
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 fn corner(
     area: Area,
     corner: CardPosition,
@@ -265,15 +271,19 @@ pub fn notify_layout(app: &AppHandle, height: f64) -> tauri::Result<()> {
     let w = ensure_notify(app)?;
     let height = height.clamp(1.0, 2000.0);
     let pos = card_position(app);
-    let at = current_monitor(app)
-        .map(|m| corner(Area::from(&m), pos, NOTIFY_WIDTH, height, NOTIFY_MARGIN));
     #[cfg(target_os = "linux")]
-    gtk_place(&w, pos, height, at)?;
+    gtk_corner(&w, pos, NOTIFY_WIDTH, height, NOTIFY_MARGIN, false)?;
     #[cfg(not(target_os = "linux"))]
     {
         w.set_size(LogicalSize::new(NOTIFY_WIDTH, height))?;
-        if let Some(at) = at {
-            w.set_position(at)?;
+        if let Some(m) = current_monitor(app) {
+            w.set_position(corner(
+                Area::from(&m),
+                pos,
+                NOTIFY_WIDTH,
+                height,
+                NOTIFY_MARGIN,
+            ))?;
         }
     }
     w.set_always_on_top(true)?;
@@ -281,46 +291,66 @@ pub fn notify_layout(app: &AppHandle, height: f64) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Linux: kart penceresini GTK'da boyutlandırıp yerleştirir. Pencere
-/// yöneticisi (Mutter) odak almış pencerenin uygulama tarafından taşınmasını
-/// yok sayar; "Yanıtla"dan sonra pencere büyüyünce aşağı taşar, düğmeler
-/// ekran dışında kalırdı. Kart köşesine göre "gravity" verilir: yönetici
-/// boyut değişince o köşeyi sabit tutar; konum da o köşeye göre verilir.
+/// Linux: pencereyi GTK'da boyutlandırıp birincil ekranın çalışma alanının
+/// ayarlı köşesine koyar. Hesap GTK'nin kendi birimleriyle yapılır: X11'de
+/// kesirli ölçek (Xft.dpi, ör. %125) Tauri'nin ölçeğini değiştirir ama GTK
+/// pencereyi tam sayı ölçekle yerleştirir; karışınca kart tuhaf yerlere
+/// düşüyordu. İmleç konumu da kullanılmaz: XWayland'de imleç yalnız X11
+/// penceresinin üstündeyken güncellenir, çok ekranda yanlış ekran seçilirdi.
+/// Köşeye göre "gravity" verilir: pencere yöneticisi (Mutter) odaklı
+/// pencerenin taşınmasını yok saysa da boyut değişince o köşe sabit kalır.
+/// `fit` ise yükseklik çalışma alanına sığdırılır (en az 480).
 #[cfg(target_os = "linux")]
-fn gtk_place(
+fn gtk_corner(
     w: &WebviewWindow,
     pos: CardPosition,
+    width: f64,
     height: f64,
-    at: Option<PhysicalPosition<i32>>,
+    margin: f64,
+    fit: bool,
 ) -> tauri::Result<()> {
     use gtk::gdk::Gravity;
-    use gtk::prelude::GtkWindowExt;
+    use gtk::prelude::{GtkWindowExt, MonitorExt, WidgetExt};
 
-    let scale = w.scale_factor().unwrap_or(1.0).max(0.1);
     let (gravity, east, south) = match pos {
         CardPosition::BottomRight => (Gravity::SouthEast, true, true),
         CardPosition::TopRight => (Gravity::NorthEast, true, false),
         CardPosition::BottomLeft => (Gravity::SouthWest, false, true),
         CardPosition::TopLeft => (Gravity::NorthWest, false, false),
     };
-    let (lw, lh) = (NOTIFY_WIDTH.round() as i32, height.round() as i32);
-    // GTK konumu mantıksal piksel ve gravity'nin gösterdiği köşe için ister.
-    let anchor = at.map(|p| {
-        let x = (f64::from(p.x) / scale).round() as i32;
-        let y = (f64::from(p.y) / scale).round() as i32;
-        (
-            x + if east { lw } else { 0 },
-            y + if south { lh } else { 0 },
-        )
-    });
+    let (lw, lh, m) = (
+        width.round() as i32,
+        height.round() as i32,
+        margin.round() as i32,
+    );
     let win = w.clone();
     w.run_on_main_thread(move || {
         let Ok(gw) = win.gtk_window() else { return };
+        let display = gw.display();
+        let monitor = display.primary_monitor().or_else(|| display.monitor(0));
+        let Some(area) = monitor.map(|mon| mon.workarea()) else {
+            gw.resize(lw, lh);
+            return;
+        };
+        let lh = if fit {
+            lh.min((area.height() - 2 * m).max(480))
+        } else {
+            lh
+        };
         gw.set_gravity(gravity);
         gw.resize(lw, lh);
-        if let Some((x, y)) = anchor {
-            gw.move_(x, y);
-        }
+        // Gravity'de GTK konumu o köşenin noktası olarak ister.
+        let x = if east {
+            area.x() + area.width() - m
+        } else {
+            area.x() + m
+        };
+        let y = if south {
+            area.y() + area.height() - m
+        } else {
+            area.y() + m
+        };
+        gw.move_(x, y);
     })
 }
 
@@ -368,6 +398,9 @@ pub fn show_quick(app: &AppHandle, id: MessageId) -> tauri::Result<()> {
         .decorations(false)
         .visible(false)
         .build()?;
+    #[cfg(target_os = "linux")]
+    gtk_corner(&w, card_position(app), width, height, QUICK_MARGIN, true)?;
+    #[cfg(not(target_os = "linux"))]
     match current_monitor(app) {
         Some(m) => {
             // Ekran küçükse pencereyi çalışma alanına sığdır.
