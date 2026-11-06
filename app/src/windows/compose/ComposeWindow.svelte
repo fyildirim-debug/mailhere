@@ -95,7 +95,9 @@
   let discarded = false;
 
   const from = $derived(accounts.find((a) => a.id === fromId));
-  const locked = $derived(queued != null);
+  /** Gönderim sunucuya gidiyor: ikinci Ctrl Enter ya da çift tık ikinci posta yaratmasın. */
+  let sending = $state(false);
+  const locked = $derived(queued != null || sending);
   const showRecent = $derived(embedded && toFocused && !to.length && !drafts.to.trim() && recentPeople.length > 0 && !locked);
 
   // İmza: gönderirken metnin sonuna eklenir. Hesap değişince o hesabın varsayılanı gelir.
@@ -548,10 +550,11 @@
     const msg = outgoing();
     if (!from || !msg) return;
     if (draftTimer) clearTimeout(draftTimer);
-    if (saving) await saving;
-    const sig = signature?.body.trimEnd();
-    const text = sig ? `${body.trimEnd()}\n\n${sig}` : body;
+    sending = true;
     try {
+      if (saving) await saving;
+      const sig = signature?.body.trimEnd();
+      const text = sig ? `${body.trimEnd()}\n\n${sig}` : body;
       const item = await call('send', { msg: { ...msg, bodyText: text, sendAt, draftId } });
       queued = { id: item.id, at: item.sendAt };
       laterOpen = false;
@@ -559,6 +562,8 @@
       if (embedded) onsent?.({ id: item.id, sendAt: item.sendAt, msg: { ...msg, sendAt, draftId } });
     } catch (e) {
       error = toAppError(e).message;
+    } finally {
+      sending = false;
     }
   }
 
