@@ -98,6 +98,32 @@ impl Command {
     }
 }
 
+/// Komutu bekleyenlere ekler; eşitleme istekleri (`Sync`, `Resync`) zaten
+/// bekliyorsa yinelenmez (bağlantı kopukken biriken istekler tek eşitleme olsun).
+fn enqueue(pending: &mut VecDeque<Command>, c: Command) {
+    let dup = match c {
+        Command::Sync => pending
+            .iter()
+            .any(|p| matches!(p, Command::Sync | Command::Resync)),
+        Command::Resync => pending.iter().any(|p| matches!(p, Command::Resync)),
+        _ => false,
+    };
+    if !dup {
+        pending.push_back(c);
+    }
+}
+
+/// Yeniden bağlanma beklemesine %0–25 rastgele pay ekler: ağ geri gelince
+/// hesapların komut ve durum akışı bağlantıları aynı anda yüklenmesin.
+/// Kaynak saatin nanosaniyesidir; `max` aşılmaz.
+fn jittered(backoff: Duration, max: Duration) -> Duration {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.subsec_nanos());
+    let extra = backoff.as_millis() as u64 * u64::from(nanos % 256) / 1024;
+    (backoff + Duration::from_millis(extra)).min(max)
+}
+
 /// Sıradaki komut: önce sunucu işlemleri (yerel değişiklik eşitlemeyle
 /// ezilmesin); yinelenen eşitleme istekleri birleştirilir.
 fn next_command(pending: &mut VecDeque<Command>) -> Option<Command> {
@@ -640,7 +666,7 @@ async fn account_loop(ctx: Arc<Ctx>, mut rx: UnboundedReceiver<Command>) {
         let wait = if wait_user {
             Duration::from_secs(365 * 24 * 3600)
         } else {
-            backoff
+            jittered(backoff, timing.max_backoff)
         };
         let sleep = tokio::time::sleep(wait);
         tokio::pin!(sleep);
@@ -650,7 +676,7 @@ async fn account_loop(ctx: Arc<Ctx>, mut rx: UnboundedReceiver<Command>) {
                 cmd = rx.recv() => match cmd {
                     None => return,
                     Some(Command::Sync) => break,
-                    Some(c) => pending.push_back(c),
+                    Some(c) => enqueue(&mut pending, c),
                 },
             }
         }
@@ -676,7 +702,7 @@ async fn run_session(
     periodic.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         while let Ok(c) = rx.try_recv() {
-            pending.push_back(c);
+            enqueue(pending, c);
         }
         while let Some(cmd) = next_command(pending) {
             if client.is_stale() {
@@ -703,20 +729,20 @@ async fn run_session(
                 });
             }
             while let Ok(c) = rx.try_recv() {
-                pending.push_back(c);
+                enqueue(pending, c);
             }
         }
         tokio::select! {
             cmd = rx.recv() => match cmd {
                 None => return Ok(()),
-                Some(c) => pending.push_back(c),
+                Some(c) => enqueue(pending, c),
             },
             _ = poll.tick() => {
                 if !ctx.push_ok.load(Ordering::SeqCst) {
-                    pending.push_back(Command::Sync);
+                    enqueue(pending, Command::Sync);
                 }
             }
-            _ = periodic.tick() => pending.push_back(Command::Sync),
+            _ = periodic.tick() => enqueue(pending, Command::Sync),
         }
     }
 }
@@ -847,7 +873,7 @@ async fn push_loop(ctx: Arc<Ctx>, tx: UnboundedSender<Command>) {
         if was_connected {
             backoff = timing.min_backoff;
         }
-        tokio::time::sleep(backoff).await;
+        tokio::time::sleep(jittered(backoff, timing.max_backoff)).await;
         backoff = (backoff * 2).min(timing.max_backoff);
     }
 }
@@ -855,6 +881,44 @@ async fn push_loop(ctx: Arc<Ctx>, tx: UnboundedSender<Command>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn kuyruga_eklemede_esitleme_yinelenmez() {
+        let mut q = VecDeque::new();
+        enqueue(&mut q, Command::Sync);
+        enqueue(&mut q, Command::Sync);
+        enqueue(
+            &mut q,
+            Command::Destroy {
+                jmap_ids: vec!["j".into()],
+            },
+        );
+        enqueue(
+            &mut q,
+            Command::Destroy {
+                jmap_ids: vec!["j".into()],
+            },
+        );
+        enqueue(&mut q, Command::Resync);
+        enqueue(&mut q, Command::Resync);
+        // Baştan eşitleme bekliyorken sıradan eşitleme gereksizdir.
+        enqueue(&mut q, Command::Sync);
+        assert_eq!(q.len(), 4, "{}", q.len());
+        assert!(matches!(q[0], Command::Sync));
+        assert!(matches!(q[3], Command::Resync));
+    }
+
+    #[test]
+    fn geri_cekilme_payi_sinirli() {
+        let max = Duration::from_secs(300);
+        for _ in 0..50 {
+            let b = Duration::from_secs(8);
+            let j = jittered(b, max);
+            assert!(j >= b && j <= b + b / 4, "{j:?}");
+        }
+        assert_eq!(jittered(max, max), max);
+        assert_eq!(jittered(Duration::ZERO, max), Duration::ZERO);
+    }
 
     #[test]
     fn komut_sirasi_ve_birlestirme() {

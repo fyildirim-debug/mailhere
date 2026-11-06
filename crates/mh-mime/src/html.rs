@@ -920,19 +920,35 @@ mod tests {
         );
     }
 
+    /// Girdi 10 kat büyüyünce süre doğrusala yakın mı büyüyor? Mutlak süre
+    /// yerine oran: yük altındaki makinede ya da debug derlemede kırılmasın.
+    /// Karesel tarama 100 kat verir; eşik 30 (ölçüm gürültüsü için küçük
+    /// girdinin süresine 50 ms taban eklenir).
+    fn dogrusal(build: impl Fn(usize) -> String, n: usize) -> Sanitized {
+        let time = |html: &str| {
+            let t = std::time::Instant::now();
+            let out = clean(html, false);
+            (t.elapsed(), out)
+        };
+        let (small, _) = time(&build(n / 10));
+        let (big, out) = time(&build(n));
+        let floor = std::time::Duration::from_millis(50);
+        assert!(
+            big <= (small + floor) * 30,
+            "küçük {small:?}, büyük {big:?}"
+        );
+        out
+    }
+
     #[test]
     fn cok_sayida_engelli_gorsel_tek_geciste() {
         let n = 20_000;
-        let html: String = (0..n)
-            .map(|i| format!(r#"<img src="https://iz.example/{i}.png?a=1&amp;b=&quot;">"#))
-            .collect();
-        let t = std::time::Instant::now();
-        let s = clean(&html, false);
-        assert!(
-            t.elapsed() < std::time::Duration::from_secs(3),
-            "{:?}",
-            t.elapsed()
-        );
+        let build = |n: usize| -> String {
+            (0..n)
+                .map(|i| format!(r#"<img src="https://iz.example/{i}.png?a=1&amp;b=&quot;">"#))
+                .collect()
+        };
+        let s = dogrusal(build, n);
         assert_eq!(s.html.matches("data-mh-src=").count(), n);
         assert!(!s.html.contains(" src="));
         assert!(s
@@ -1145,23 +1161,19 @@ mod tests {
     fn cok_sayida_izleyici_ve_baglanti_dogrusal() {
         // ~190 bayt × 8000 ≈ 1,5 MB: HTML sınırının altında.
         let n = 8_000;
-        let html: String = (0..n)
-            .map(|i| {
-                format!(
-                    r#"<a href="https://kotu.example/{i}?utm_source=x">banka{i}.com</a><img src="https://iz.example/{i}.gif" width="1" height="1"><a href="https://ornek.com/{i}">devam</a>"#
-                )
-            })
-            .collect();
-        let t = std::time::Instant::now();
-        let s = clean(&html, false);
-        assert!(
-            t.elapsed() < std::time::Duration::from_secs(3),
-            "{:?}",
-            t.elapsed()
-        );
-        assert_eq!(s.trackers, n);
-        assert_eq!(s.cleaned_links, n);
-        assert_eq!(s.html.matches("data-mh-host=").count(), n as usize);
+        let build = |n: usize| -> String {
+            (0..n)
+                .map(|i| {
+                    format!(
+                        r#"<a href="https://kotu.example/{i}?utm_source=x">banka{i}.com</a><img src="https://iz.example/{i}.gif" width="1" height="1"><a href="https://ornek.com/{i}">devam</a>"#
+                    )
+                })
+                .collect()
+        };
+        let s = dogrusal(build, n);
+        assert_eq!(s.trackers as usize, n);
+        assert_eq!(s.cleaned_links as usize, n);
+        assert_eq!(s.html.matches("data-mh-host=").count(), n);
     }
 
     #[test]
