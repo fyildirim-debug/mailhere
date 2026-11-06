@@ -113,6 +113,8 @@ fn enqueue(pending: &mut VecDeque<Command>, c: Command) {
 }
 
 struct AccountCtx {
+    /// "Postaları al" (SyncAll) gelince IDLE döngüsünün beklemesini keser.
+    wake: tokio::sync::Notify,
     account: Account,
     store: Arc<Store>,
     secrets: Arc<dyn SecretStore>,
@@ -172,6 +174,7 @@ impl AccountCtx {
 
 struct Handle {
     tx: UnboundedSender<Command>,
+    ctx: Arc<AccountCtx>,
     tasks: Vec<JoinHandle<()>>,
 }
 
@@ -276,6 +279,7 @@ impl SyncManager {
         }
         let (tx, rx) = unbounded_channel();
         let ctx = Arc::new(AccountCtx {
+            wake: tokio::sync::Notify::new(),
             account: account.clone(),
             store: self.store.clone(),
             secrets: self.secrets.clone(),
@@ -284,9 +288,9 @@ impl SyncManager {
         });
         let tasks = vec![
             self.rt.spawn(account_loop(ctx.clone(), rx)),
-            self.rt.spawn(idle_loop(ctx, tx.clone())),
+            self.rt.spawn(idle_loop(ctx.clone(), tx.clone())),
         ];
-        self.handles().insert(account.id, Handle { tx, tasks });
+        self.handles().insert(account.id, Handle { tx, ctx, tasks });
     }
 
     /// Hesabın görevlerini durdurur. Kuyruktaki sunucu işlemleri kalır;
@@ -318,9 +322,13 @@ impl SyncManager {
     }
 
     fn send(&self, account_id: &str, cmd: Command) -> bool {
-        self.handles()
-            .get(account_id)
-            .is_some_and(|h| h.tx.send(cmd).is_ok())
+        self.handles().get(account_id).is_some_and(|h| {
+            // Elle eşitleme bekleyen IDLE bağlantısını da hemen yeniden kurar.
+            if cmd == Command::SyncAll {
+                h.ctx.wake.notify_one();
+            }
+            h.tx.send(cmd).is_ok()
+        })
     }
 
     /// Tüm hesapları hemen eşitler (bekleyen yeniden bağlanmayı ve onay
@@ -1555,7 +1563,14 @@ async fn idle_loop(ctx: Arc<AccountCtx>, tx: UnboundedSender<Command>) {
                 } else {
                     jittered(backoff, MAX_BACKOFF)
                 };
-                tokio::time::sleep(wait).await;
+                // "Postaları al" beklemeyi keser: kullanıcı ağın döndüğünü
+                // biliyorsa IDLE 5 dakikaya kadar beklemesin.
+                tokio::select! {
+                    _ = tokio::time::sleep(wait) => {}
+                    _ = ctx.wake.notified() => {
+                        tracing::debug!(account = %ctx.account.id, "IDLE elle eşitlemeyle uyandı");
+                    }
+                }
                 backoff = (backoff * 2).min(MAX_BACKOFF);
             }
         }
