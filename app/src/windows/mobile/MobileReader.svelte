@@ -250,6 +250,9 @@
               { label: t('act.replyAllLong'), icon: 'replyAll' as const, onclick: () => compose('replyAll') },
               { label: t('act.forward'), icon: 'forward' as const, onclick: () => compose('forward') },
             ]),
+        // Komşu posta: kaydırmanın erişilebilir karşılığı (ekran okuyucu, klavye).
+        { label: t('mob.read.prev'), icon: 'chevronLeft' as const, disabled: !neighbors.prev, onclick: () => goTo(neighbors.prev, 'right') },
+        { label: t('mob.read.next'), icon: 'chevronRight' as const, disabled: !neighbors.next, onclick: () => goTo(neighbors.next, 'left') },
         { label: t('read.moveTo'), icon: 'folder', onclick: moveMenu },
         { label: t('tag.menu'), icon: 'tag', onclick: tagMenu },
         { label: msg.pinned ? t('pin.unpin') : t('pin.pin'), icon: 'pin', onclick: () => void togglePin(ids()) },
@@ -301,6 +304,8 @@
   let slide = $state<'left' | 'right' | null>(null);
   let drag: { x: number; y: number; id: number } | null = null;
   let scroller = $state<HTMLDivElement>();
+  /** Yatay sürükleme bitti: ardından gelen tık (bağlantı, düğme) yutulur. */
+  let swallowClick = false;
 
   function goTo(row: Row | null, dir: 'left' | 'right') {
     if (!row) return;
@@ -313,6 +318,8 @@
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     drag = { x: e.clientX, y: e.clientY, id: e.pointerId };
     dragging = false;
+    // Android uzun kaydırmadan sonra click üretmeyebilir; asılı bayrak sonraki dokunuşu yutmasın.
+    swallowClick = false;
   }
 
   function move(e: PointerEvent) {
@@ -338,11 +345,20 @@
     drag = null;
     if (!dragging) return;
     dragging = false;
+    swallowClick = true;
     const dx = shift;
     shift = 0;
     if (e.type === 'pointercancel' || Math.abs(dx) < COMMIT) return;
     if (dx < 0) goTo(neighbors.next, 'left');
     else goTo(neighbors.prev, 'right');
+  }
+
+  /** Sürükleme sonrası gelen tık içerikteki bağlantıyı ya da düğmeyi açmasın. */
+  function clickCapture(e: MouseEvent) {
+    if (!swallowClick) return;
+    swallowClick = false;
+    e.preventDefault();
+    e.stopPropagation();
   }
 </script>
 
@@ -374,6 +390,7 @@
   onpointermove={move}
   onpointerup={up}
   onpointercancel={up}
+  onclickcapture={clickCapture}
 >
   {#if d}
     <article
