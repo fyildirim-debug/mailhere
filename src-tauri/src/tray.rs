@@ -75,19 +75,35 @@ pub fn texts(lang: Language) -> Texts {
     }
 }
 
-/// İpucu metni; bildirimler sessizdeyse bunu da söyler.
-pub fn tooltip(lang: Language, unread: u32, muted: bool) -> String {
+/// İpucu metni; bildirimler sessizdeyse bunu da söyler. Birden çok hesapta okunmamış varsa hesap başına dağılımı
+/// alt satırlarda verir (`accounts`: hesap adı ve okunmamış sayısı, kenar
+/// çubuğu sırasıyla). Tek hesap ya da hepsi okunmuşsa yalnız toplam yazılır.
+pub fn tooltip_accounts(
+    lang: Language,
+    unread: u32,
+    muted: bool,
+    accounts: &[(String, u32)],
+) -> String {
     let base = match (lang, unread) {
         (Language::Tr, 0) => "Mailhere · Hepsi okundu".to_owned(),
         (Language::Tr, n) => format!("Mailhere · {n} okunmamış"),
         (Language::En, 0) => "Mailhere · All read".to_owned(),
         (Language::En, n) => format!("Mailhere · {n} unread"),
     };
-    match (muted, lang) {
+    let mut out = match (muted, lang) {
         (false, _) => base,
         (true, Language::Tr) => format!("{base} · Bildirimler sessiz"),
         (true, Language::En) => format!("{base} · Notifications muted"),
+    };
+    if accounts.len() > 1 && unread > 0 {
+        for (name, n) in accounts.iter().filter(|(_, n)| *n > 0) {
+            out.push('\n');
+            out.push_str(name);
+            out.push_str(": ");
+            out.push_str(&n.to_string());
+        }
     }
+    out
 }
 
 /// Menü öğeleri (dil değişince yeniden adlandırılır) ve tepsinin kurulup
@@ -257,18 +273,27 @@ pub fn refresh(app: &AppHandle) {
     let Some(state) = app.try_state::<AppState>() else {
         return;
     };
-    let unread = state
+    let counts = state.store.counts(now_ms()).unwrap_or_default();
+    let unread = counts.inbox_unread;
+    // Hesap başına dağılım kenar çubuğu sırasıyla; hesap listesi okunamazsa
+    // yalnız toplam yazılır.
+    let accounts: Vec<(String, u32)> = state
         .store
-        .counts(now_ms())
-        .map(|c| c.inbox_unread)
-        .unwrap_or(0);
+        .accounts()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|a| {
+            let n = counts.per_account_unread.get(&a.id).copied().unwrap_or(0);
+            (a.name, n)
+        })
+        .collect();
     let lang = *tray_state(app)
         .lang
         .lock()
         .unwrap_or_else(|e| e.into_inner());
     let muted = state.mute.is_muted(now_ms());
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
-        let _ = tray.set_tooltip(Some(tooltip(lang, unread, muted)));
+        let _ = tray.set_tooltip(Some(tooltip_accounts(lang, unread, muted, &accounts)));
     }
     let t = texts(lang);
     if let Some(items) = tray_state(app)
@@ -424,13 +449,41 @@ mod tests {
 
     #[test]
     fn ipucu() {
-        assert_eq!(tooltip(Language::Tr, 0, false), "Mailhere · Hepsi okundu");
-        assert_eq!(tooltip(Language::Tr, 3, false), "Mailhere · 3 okunmamış");
-        assert_eq!(tooltip(Language::En, 0, false), "Mailhere · All read");
-        assert_eq!(tooltip(Language::En, 3, false), "Mailhere · 3 unread");
+        let t = |l, n, m| tooltip_accounts(l, n, m, &[]);
+        assert_eq!(t(Language::Tr, 0, false), "Mailhere · Hepsi okundu");
+        assert_eq!(t(Language::Tr, 3, false), "Mailhere · 3 okunmamış");
+        assert_eq!(t(Language::En, 0, false), "Mailhere · All read");
+        assert_eq!(t(Language::En, 3, false), "Mailhere · 3 unread");
         assert_eq!(
-            tooltip(Language::Tr, 2, true),
+            t(Language::Tr, 2, true),
             "Mailhere · 2 okunmamış · Bildirimler sessiz"
+        );
+    }
+
+    #[test]
+    fn ipucu_hesap_dagilimi() {
+        let iki = [("İş".to_owned(), 2), ("Kişisel".to_owned(), 0)];
+        assert_eq!(
+            tooltip_accounts(Language::Tr, 2, false, &iki),
+            "Mailhere · 2 okunmamış\nİş: 2"
+        );
+        assert_eq!(
+            tooltip_accounts(
+                Language::En,
+                3,
+                true,
+                &[("Work".to_owned(), 1), ("Home".to_owned(), 2)]
+            ),
+            "Mailhere · 3 unread · Notifications muted\nWork: 1\nHome: 2"
+        );
+        // Tek hesapta ve hepsi okunmuşken dağılım yazılmaz.
+        assert_eq!(
+            tooltip_accounts(Language::Tr, 4, false, &[("İş".to_owned(), 4)]),
+            "Mailhere · 4 okunmamış"
+        );
+        assert_eq!(
+            tooltip_accounts(Language::Tr, 0, false, &iki),
+            "Mailhere · Hepsi okundu"
         );
     }
 
