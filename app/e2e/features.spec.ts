@@ -165,6 +165,8 @@ test('bülten: abonelikten tek tıkla çıkılır', async ({ page }) => {
 
 test('arama işleçleri: from: ve has:ek', async ({ page }) => {
   await page.goto('/#/main');
+  // Hesaplar yüklenmeden Ctrl K yok sayılır (kurulum ekranı); liste gelince basılır.
+  await expect(list(page).getByText('Sözleşme imzaya hazır')).toBeVisible();
   await page.keyboard.press('Control+k');
   await expect(page.getByRole('option', { name: /has:ek/ })).toBeVisible();
   await page.getByRole('combobox').fill('from:elif has:ek');

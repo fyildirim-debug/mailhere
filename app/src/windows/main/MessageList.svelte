@@ -21,9 +21,11 @@
   interface Props {
     /** Sütun genişliği (px); verilmezse kalan alanı doldurur (yığın kipi). */
     width?: number | null;
+    /** Bağlam menüsünden klasöre taşı / etiketle seçicisini açar (seçiciler ana pencerede). */
+    onpick?: (kind: 'move' | 'tag', row: Row) => void;
   }
 
-  let { width = null }: Props = $props();
+  let { width = null, onpick }: Props = $props();
 
   /** Arama sorgusunu komut paletinde düzenlemeye açar. */
   function editSearch() {
@@ -125,6 +127,12 @@
       { label: m.unread ? t('act.markRead') : t('act.markUnread'), icon: 'mail', kbd: m.unread ? undefined : 'U', onclick: () => void setUnread(m.ids, !m.unread) },
       { label: m.starred ? t('act.unstar') : t('act.star'), icon: 'star', kbd: 'S', onclick: () => void toggleStar(m.id, m.starred) },
       { label: t('act.archive'), icon: 'archive', kbd: 'E', onclick: () => void moveTo(m.ids, 'archive') },
+      ...(onpick
+        ? ([
+            { label: t('picker.move'), icon: 'folder', kbd: 'V', onclick: () => onpick('move', m) },
+            { label: t('picker.tag'), icon: 'tag', kbd: 'L', onclick: () => onpick('tag', m) },
+          ] as MenuItem[])
+        : []),
       { label: t('snooze.tomorrow'), icon: 'clock', kbd: 'H', onclick: () => void snooze(m.ids, tomorrow) },
       { label: t('act.delete'), icon: 'trash', kbd: '#', danger: true, onclick: () => void moveTo(m.ids, 'trash') },
     ];

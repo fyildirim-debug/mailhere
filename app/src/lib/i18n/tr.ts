@@ -1193,6 +1193,12 @@ export const tr = {
   'mob.lock.relock': 'Uygulamaya dönünce parola sor',
   'mob.lock.relockHint': 'Uygulama bir dakikadan uzun arka planda kaldıysa dönüşte kilit ekranı gelir; bildirimler sürer.',
   'keys.page': 'Okuma alanını bir sayfa kaydır',
+  'palette.setNotifications': 'Ayarlar: Bildirimler',
+  'palette.setCompose': 'Ayarlar: Yazma ve gönderme',
+  'palette.setAccounts': 'Ayarlar: Hesaplar',
+  'palette.setDevices': 'Ayarlar: Cihazlar ve aktarım',
+  'palette.setPrivacy': 'Ayarlar: Gizlilik ve güvenlik',
+  'palette.setAbout': 'Ayarlar: Güncellemeler',
 } as const;
 
 export type MessageKey = keyof typeof tr;
