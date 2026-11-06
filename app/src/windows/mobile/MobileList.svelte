@@ -9,7 +9,7 @@
   // yüksekliği kadar kaydırılarak okunur.
   import { onMount, untrack } from 'svelte';
   import { fade } from 'svelte/transition';
-  import { call, type Category, type SwipeAction } from '../../lib/api';
+  import { call, toAppError, type Category, type SwipeAction } from '../../lib/api';
   import { t, type MessageKey } from '../../lib/i18n/index.svelte';
   import { folderLabel } from '../../lib/mail/folders';
   import { emptyState, groupLabel, groupOf, isInboxView, orderRows } from '../../lib/mail/listing';
@@ -238,6 +238,9 @@
       await call('sync_reconnect');
       await refreshList();
       await refreshCounts();
+    } catch (e) {
+      // Sessizce geri çekilmez: ne olduğu söylenir (çevrimdışı satırı ayrıca durur).
+      showToast({ text: t('toast.error', { message: toAppError(e).message }) });
     } finally {
       refreshing = false;
       pull = 0;
