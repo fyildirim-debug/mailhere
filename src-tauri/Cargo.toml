@@ -37,13 +37,13 @@ serde.workspace = true
 # AppIndicator kitaplığı, StatusNotifier izleyicisi, X11 tepsisi). Hepsi
 # bağımlılık ağacında zaten var (MIT / Apache-2.0).
 [target.'cfg(windows)'.dependencies]
-windows-registry = "0.6.1"
+windows-registry = "0.100.0"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 dbus = "0.9.12"
 # Tepsi simgesi D-Bus StatusNotifierItem olarak (AppIndicator kitaplığı yok;
 # sol tık pencereyi açar). Tauri'nin tray-icon'u bu özellikle ksni arka ucuna geçer.
-tray-icon = { version = "0.25", default-features = false, features = ["ksni"] }
+tray-icon = { version = "0.26", default-features = false, features = ["ksni"] }
 # Bildirim kartı penceresinin gravity'si (pencere yöneticisi köşeyi sabit tutsun).
 gtk = "0.18"
 
