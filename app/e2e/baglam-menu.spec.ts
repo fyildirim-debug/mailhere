@@ -64,3 +64,12 @@ test('bağlam menüsünden Klasöre taşı seçiciyi satır için açar', async 
   await page.keyboard.press('Escape');
   await expect(page.getByRole('combobox', { name: 'Klasör ara' })).toHaveCount(0);
 });
+
+test('komut paleti: ayar bölümleri aranır ve açılır', async ({ page }) => {
+  await page.goto('/#/main');
+  await expect(list(page).getByText('Sözleşme imzaya hazır')).toBeVisible();
+  await page.keyboard.press('Control+k');
+  await page.getByRole('combobox').fill('gizlilik');
+  await page.getByRole('option', { name: /Ayarlar: Gizlilik ve güvenlik/ }).click();
+  await expect(page.getByRole('navigation', { name: 'Ayarlar' }).getByRole('button', { name: 'Gizlilik ve güvenlik', exact: true })).toHaveAttribute('aria-current', 'page');
+});
