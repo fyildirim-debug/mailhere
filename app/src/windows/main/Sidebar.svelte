@@ -885,7 +885,7 @@
 
   @keyframes pulse {
     50% {
-      opacity: 0.35;
+      opacity: var(--dim-disabled);
     }
   }
 

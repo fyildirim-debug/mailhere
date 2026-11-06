@@ -381,7 +381,7 @@
   @media (prefers-reduced-motion: reduce) {
     .pull.busy :global(svg) {
       animation: none;
-      opacity: 0.55;
+      opacity: var(--dim-disabled);
     }
   }
 
