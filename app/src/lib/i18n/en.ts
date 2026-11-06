@@ -1176,4 +1176,5 @@ export const en: Record<MessageKey, string> = {
   'mob.lock.leadUi': 'Welcome back; enter your password to continue. Mail is still being checked in the background.',
   'mob.lock.relock': 'Ask for the password when returning to the app',
   'mob.lock.relockHint': 'If the app stayed in the background for more than a minute, the lock screen appears on return; notifications continue.',
+  'keys.page': 'Scroll the reading pane a page',
 };

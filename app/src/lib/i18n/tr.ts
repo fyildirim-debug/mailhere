@@ -1192,6 +1192,7 @@ export const tr = {
   'mob.lock.leadUi': 'Uygulamaya dönüldü; devam etmek için parolanı gir. Arka planda posta denetimi sürüyor.',
   'mob.lock.relock': 'Uygulamaya dönünce parola sor',
   'mob.lock.relockHint': 'Uygulama bir dakikadan uzun arka planda kaldıysa dönüşte kilit ekranı gelir; bildirimler sürer.',
+  'keys.page': 'Okuma alanını bir sayfa kaydır',
 } as const;
 
 export type MessageKey = keyof typeof tr;

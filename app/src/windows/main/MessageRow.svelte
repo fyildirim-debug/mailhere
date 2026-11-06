@@ -15,9 +15,11 @@
     message: Row;
     now: number;
     compact: boolean;
+    /** Sağ tık / Shift F10: bağlam menüsü (liste çizer; sanal satır dönüştürülmüş olduğundan burada açılamaz). */
+    onmenu?: (message: Row, at: { x: number; y: number }) => void;
   }
 
-  let { message, now, compact }: Props = $props();
+  let { message, now, compact, onmenu }: Props = $props();
 
   const selected = $derived(mail.selectedId != null && message.ids.includes(mail.selectedId));
   const checked = $derived(isChecked(message.id));
@@ -26,6 +28,22 @@
   // Yanıt hatırlatmalı (gönderilmiş) satırda beklenen kişi, yani ilk alıcı görünür.
   const who = $derived(message.followUp != null && message.to[0] ? message.to[0] : message.from);
   const awaiting = $derived(followUpDue(message.followUp, now));
+
+  // Sağ tık (ya da Shift F10 / menü tuşu) bağlam menüsünü listeye bildirir.
+  function openMenu(e: MouseEvent | KeyboardEvent) {
+    if (!onmenu) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e instanceof MouseEvent && e.button === 2) onmenu(message, { x: e.clientX, y: e.clientY });
+    else {
+      const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      onmenu(message, { x: r.left + 48, y: r.top + r.height / 2 });
+    }
+  }
+
+  function menuKey(e: KeyboardEvent) {
+    if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) openMenu(e);
+  }
 </script>
 
 <div class="row" class:selected class:checked class:unread={message.unread} class:compact data-id={message.id}>
@@ -38,6 +56,8 @@
       if (!e.ctrlKey && !e.metaKey && !e.shiftKey) showReader();
     }}
     ondblclick={() => call('open_quick', { id: message.id })}
+    oncontextmenu={openMenu}
+    onkeydown={menuKey}
   >
     <span class="dot" aria-hidden="true"></span>
     <Avatar address={who} />

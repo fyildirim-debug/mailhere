@@ -11,6 +11,13 @@ describe('kısayollar', () => {
     expect(shortcutFor({ key: '#' })).toBe('delete');
   });
 
+  it('Space okuma alanını kaydırır; Shift geri, yazarken ya da değiştiriciyle çalışmaz', () => {
+    expect(shortcutFor({ key: ' ' })).toBe('pageDown');
+    expect(shortcutFor({ key: ' ', shiftKey: true })).toBe('pageUp');
+    expect(shortcutFor({ key: ' ', editing: true })).toBeNull();
+    expect(shortcutFor({ key: ' ', ctrlKey: true })).toBeNull();
+  });
+
   it('metin yazarken tek tuşlar çalışmaz, Ctrl K ve Esc çalışır', () => {
     expect(shortcutFor({ key: 'e', editing: true })).toBeNull();
     expect(shortcutFor({ key: 'z', ctrlKey: true, editing: true })).toBeNull();

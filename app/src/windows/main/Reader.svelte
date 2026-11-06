@@ -91,6 +91,16 @@
     snoozeOpen = true;
   }
 
+  let scrollEl = $state<HTMLDivElement>();
+
+  /** Space / Shift Space: gövdeyi bir sayfa kaydırır; kaydıracak posta yoksa false. */
+  export function page(dir: 1 | -1): boolean {
+    if (!scrollEl || !d) return false;
+    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    scrollEl.scrollBy({ top: dir * scrollEl.clientHeight * 0.85, behavior: reduced ? 'auto' : 'smooth' });
+    return true;
+  }
+
   /** Başlıklar ve gövde yalıtılmış bir çerçevede yazdırılır; arayüz basılmaz. */
   async function print() {
     if (!d) return;
@@ -332,7 +342,7 @@
       </div>
     {/if}
 
-    <div class="scroll">
+    <div class="scroll" bind:this={scrollEl}>
       {#if conversation}
         {#key `${d.accountId}|${d.threadId}`}
           <article class="article">

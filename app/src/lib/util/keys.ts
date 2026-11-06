@@ -45,7 +45,10 @@ export type Shortcut =
   /** Ctrl + / Ctrl - / Ctrl 0: arayüz ölçeği. */
   | 'zoomIn'
   | 'zoomOut'
-  | 'zoomReset';
+  | 'zoomReset'
+  /** Space / Shift Space: okuma alanını bir sayfa aşağı / yukarı kaydır. */
+  | 'pageDown'
+  | 'pageUp';
 
 export interface KeyLike {
   key: string;
@@ -100,6 +103,7 @@ export function shortcutFor(e: KeyLike): Shortcut | null {
   if (key === '/') return 'search';
   if (key === 'Delete') return 'delete';
   if (key === 'Enter') return 'open';
+  if (key === ' ') return e.shiftKey ? 'pageUp' : 'pageDown';
   if (e.shiftKey && key === 'o') return 'triage';
   // Shift ile gezinme seçimi genişletir.
   if (e.shiftKey && (key === 'j' || key === 'ArrowDown')) return 'extendNext';
@@ -174,6 +178,8 @@ export const KEY_LABEL: Partial<Record<Shortcut, string>> = {
   zoomIn: 'Ctrl +',
   zoomOut: 'Ctrl -',
   zoomReset: 'Ctrl 0',
+  pageDown: 'Space',
+  pageUp: 'Shift Space',
 };
 
 /** Bir G hedefinin yazılışı, ör. "G I". */
@@ -211,6 +217,7 @@ export const KEY_GROUPS: { title: MessageKey; rows: KeyRow[] }[] = [
     rows: [
       { keys: 'J / K', label: 'keys.move' },
       { keys: 'Enter', label: 'keys.open' },
+      { keys: 'Space / Shift Space', label: 'keys.page' },
       { keys: 'Shift J / K', label: 'keys.extend' },
       { keys: 'Ctrl A', label: 'keys.selectAll' },
       ...GO_KEYS.map((g) => ({ keys: `G ${g.key}`, label: `keys.go.${g.target}` as MessageKey })),

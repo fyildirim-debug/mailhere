@@ -322,6 +322,13 @@
       void call('open_compose', { prefill: { mode: 'new', messageId: null } });
       return;
     }
+    if (sc === 'pageDown' || sc === 'pageUp') {
+      // Space okuma alanını kaydırır; odaktaki düğmenin kendi Space davranışı (satır dışında) korunur.
+      const ae = document.activeElement as HTMLElement | null;
+      if (ae?.closest('button, a, summary, [role="menuitem"]') && !ae.closest('.row')) return;
+      if (!triage.on && reader?.page(sc === 'pageDown' ? 1 : -1)) e.preventDefault();
+      return;
+    }
     if (triage.on) {
       // Odak kipinde: listeden çıkaran eylemler sıradakine geçer; J atlar, K geri döner.
       if (sc === 'archive') void archiveCurrent();

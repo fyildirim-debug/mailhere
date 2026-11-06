@@ -8,7 +8,9 @@
   import { showToast } from '../../lib/ui/toast.svelte';
   import { emptyState, groupLabel, groupOf, isInboxView, listTitle, orderRows } from '../../lib/mail/listing';
   import { buildLayout, scrollToReveal, visibleEntries } from '../../lib/ui/virtual';
-  import { loadMore, mail, markAllRead, pullMail, rowsOf, setCategory, setOnly, setView, syncing } from '../../lib/stores/mail.svelte';
+  import { call } from '../../lib/api';
+  import { displayName, snoozeOptions } from '../../lib/util/format';
+  import { loadMore, mail, markAllRead, moveTo, pullMail, rowsOf, setCategory, setOnly, setUnread, setView, snooze, syncing, toggleStar, type Row } from '../../lib/stores/mail.svelte';
   import { settings, updateSettings } from '../../lib/stores/settings.svelte';
   import { tagById } from '../../lib/stores/tags.svelte';
   import MessageRow from './MessageRow.svelte';
@@ -110,6 +112,23 @@
 
   const onlyKey: Record<ListOnly, MessageKey> = { unread: 'list.only.unread', starred: 'list.only.starred', attachments: 'list.only.attachments' };
   let filterMenu = $state<{ x: number; y: number } | null>(null);
+
+  // Satır bağlam menüsü: satırın kendisine uygulanır, seçimi değiştirmez;
+  // sıra satır düğmeleriyle aynı, kısayol çipleri klavyeyi öğretir.
+  let rowMenu = $state<{ row: Row; at: { x: number; y: number } } | null>(null);
+  const rowMenuItems = $derived.by<MenuItem[]>(() => {
+    if (!rowMenu) return [];
+    const m = rowMenu.row;
+    const tomorrow = snoozeOptions(now).find((o) => o.key === 'tomorrow')!.at;
+    return [
+      { label: t('read.openQuick'), icon: 'external', onclick: () => void call('open_quick', { id: m.id }) },
+      { label: m.unread ? t('act.markRead') : t('act.markUnread'), icon: 'mail', kbd: m.unread ? undefined : 'U', onclick: () => void setUnread(m.ids, !m.unread) },
+      { label: m.starred ? t('act.unstar') : t('act.star'), icon: 'star', kbd: 'S', onclick: () => void toggleStar(m.id, m.starred) },
+      { label: t('act.archive'), icon: 'archive', kbd: 'E', onclick: () => void moveTo(m.ids, 'archive') },
+      { label: t('snooze.tomorrow'), icon: 'clock', kbd: 'H', onclick: () => void snooze(m.ids, tomorrow) },
+      { label: t('act.delete'), icon: 'trash', kbd: '#', danger: true, onclick: () => void moveTo(m.ids, 'trash') },
+    ];
+  });
   const filterItems = $derived<MenuItem[]>([
     { label: t('list.only.all'), checked: mail.only == null, onclick: () => mail.only && setOnly(mail.only) },
     ...(['unread', 'starred', 'attachments'] as ListOnly[]).map((k) => ({
@@ -214,7 +233,7 @@
             {#if entry.kind === 'group'}
               <div class="group">{entry.label}</div>
             {:else}
-              <MessageRow message={rows[entry.index]} {now} {compact} />
+              <MessageRow message={rows[entry.index]} {now} {compact} onmenu={(row, at) => (rowMenu = { row, at })} />
             {/if}
           </div>
         {/each}
@@ -230,6 +249,7 @@
 </section>
 
 {#if filterMenu}<Menu at={filterMenu} title={t('list.filterBy')} items={filterItems} onclose={() => (filterMenu = null)} />{/if}
+{#if rowMenu}<Menu at={rowMenu.at} title={rowMenu.row.subject || displayName(rowMenu.row.from)} items={rowMenuItems} onclose={() => (rowMenu = null)} />{/if}
 {#if savePrompt}
   <NamePrompt
     at={savePrompt}
