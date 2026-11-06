@@ -168,7 +168,11 @@ impl Outbox {
         let auto = row.id.starts_with(AUTO_PREFIX);
         match self.deliver(row).await {
             Ok(note) => {
-                let _ = self.store.outbox_remove(&row.id);
+                // Sunucu kabul etti; satır silinemezse bir sonraki turda aynı posta
+                // ikinci kez giderdi. Sessiz geçilmez, günlüğe düşer.
+                if let Err(e) = self.store.outbox_remove(&row.id) {
+                    tracing::error!(id = %row.id, error = %e, "gönderilen posta giden kutusundan silinemedi");
+                }
                 if let Some(draft) = row.msg.draft_id {
                     if let Err(e) = self.delete_draft(draft) {
                         tracing::warn!(error = %e, "gönderilen postanın taslağı silinemedi");
@@ -194,7 +198,9 @@ impl Outbox {
                 if !permanent && attempts < MAX_ATTEMPTS {
                     let retry_at = now_ms() + 60_000 * i64::from(attempts);
                     tracing::info!(id = %row.id, attempts, "gönderim yeniden denenecek");
-                    let _ = self.store.outbox_retry(&row.id, retry_at, &e.message);
+                    if let Err(e) = self.store.outbox_retry(&row.id, retry_at, &e.message) {
+                        tracing::warn!(id = %row.id, error = %e, "yeniden deneme zamanı yazılamadı");
+                    }
                     return;
                 }
                 // Kuralın iletmesi kullanıcının taslağı değildir.
