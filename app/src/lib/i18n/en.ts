@@ -1183,4 +1183,7 @@ export const en: Record<MessageKey, string> = {
   'palette.setDevices': 'Settings: Devices and transfer',
   'palette.setPrivacy': 'Settings: Privacy and security',
   'palette.setAbout': 'Settings: Updates',
+  // Mobil okuma: komşu postaya geçiş (kaydırmanın menüdeki karşılığı).
+  'mob.read.prev': 'Previous message',
+  'mob.read.next': 'Next message',
 };

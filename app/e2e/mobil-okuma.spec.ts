@@ -437,3 +437,45 @@ test('izinli uzak görsel çerçevede yüklenemezse arka uçtan indirilir', asyn
   await expect(cover).toHaveAttribute('src', /^data:image\/svg\+xml;base64,/);
   await expect.poll(() => cover.evaluate((el) => (el as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
 });
+
+test('Diğer eylemler menüsünde Önceki / Sonraki posta: kaydırmanın erişilebilir karşılığı', async ({ page }) => {
+  // Listenin ilk satırı: önceki yok, sonraki var.
+  const first = await list(page).locator('.row .subject').first().textContent();
+  await list(page).locator('.row').first().click();
+  await expect(page.getByRole('heading', { level: 2, name: first ?? '' })).toBeVisible();
+  await openMore(page);
+  const menu = sheet(page, 'Diğer eylemler');
+  await expect(menu.getByRole('menuitem', { name: 'Önceki posta' })).toBeDisabled();
+  await menu.getByRole('menuitem', { name: 'Sonraki posta' }).click();
+  await expect(page.getByRole('heading', { level: 2, name: first ?? '' })).toHaveCount(0);
+  await expect(page.getByRole('heading', { level: 2 })).toHaveCount(1);
+  // Geri dönüş: Önceki posta ilkini açar.
+  await openMore(page);
+  await sheet(page, 'Diğer eylemler').getByRole('menuitem', { name: 'Önceki posta' }).click();
+  await expect(page.getByRole('heading', { level: 2, name: first ?? '' })).toBeVisible();
+});
+
+test('okuma ekranında yatay sürükleme sonrası tık içerikteki bağlantıyı açmaz', async ({ page }) => {
+  await row(page, 'Cumartesi kahvaltı?').click();
+  const subject = page.getByRole('heading', { level: 2, name: 'Cumartesi kahvaltı?' });
+  await expect(subject).toBeVisible();
+  const article = page.locator('.m-screen.pushed .scroll article');
+  await article.evaluate((el) => {
+    (window as unknown as { __tik: number }).__tik = 0;
+    el.addEventListener('click', () => ((window as unknown as { __tik: number }).__tik += 1));
+  });
+  const box = await article.boundingBox();
+  if (!box) throw new Error('okuma alanı yok');
+  const y = box.y + 40;
+  // Eşiğin altında kalan sürükleme: posta değişmez, bırakışta tarayıcının ürettiği tık yutulur.
+  await page.mouse.move(box.x + 200, y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 160, y, { steps: 4 });
+  await page.mouse.move(box.x + 140, y, { steps: 4 });
+  await page.mouse.up();
+  await expect(subject).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as { __tik: number }).__tik)).toBe(0);
+  // Bayrak asılı kalmaz: sonraki sade dokunuş içeriğe ulaşır.
+  await page.mouse.click(box.x + 200, y);
+  expect(await page.evaluate(() => (window as unknown as { __tik: number }).__tik)).toBe(1);
+});

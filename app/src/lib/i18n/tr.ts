@@ -1199,6 +1199,9 @@ export const tr = {
   'palette.setDevices': 'Ayarlar: Cihazlar ve aktarım',
   'palette.setPrivacy': 'Ayarlar: Gizlilik ve güvenlik',
   'palette.setAbout': 'Ayarlar: Güncellemeler',
+  // Mobil okuma: komşu postaya geçiş (kaydırmanın menüdeki karşılığı).
+  'mob.read.prev': 'Önceki posta',
+  'mob.read.next': 'Sonraki posta',
 } as const;
 
 export type MessageKey = keyof typeof tr;
