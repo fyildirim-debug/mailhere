@@ -203,6 +203,19 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
+/// Yeniden bağlanma beklemesine %0–25 rastgele pay ekler: ağ geri gelince
+/// birden çok hesabın (ve aynı sunucuya giden komut + IDLE bağlantılarının)
+/// hepsi aynı anda yüklenmesin. Harici kitaplık gerekmesin diye kaynak
+/// saatin nanosaniyesidir; `max` aşılmaz.
+fn jittered(backoff: Duration, max: Duration) -> Duration {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.subsec_nanos());
+    let pay = u64::from(nanos % 256);
+    let extra = backoff.as_millis() as u64 * pay / 1024;
+    (backoff + Duration::from_millis(extra)).min(max)
+}
+
 /// Hesaba göre gruplanmış postalar: (hesap, eşitleniyor mu, yerler).
 type ByAccount = Vec<(String, bool, Vec<MessageLocation>)>;
 
@@ -662,7 +675,7 @@ async fn account_loop(ctx: Arc<AccountCtx>, mut rx: UnboundedReceiver<Command>) 
         if opened.elapsed() >= STABLE_SESSION {
             backoff = MIN_BACKOFF;
         }
-        let sleep = tokio::time::sleep(backoff);
+        let sleep = tokio::time::sleep(jittered(backoff, MAX_BACKOFF));
         tokio::pin!(sleep);
         loop {
             tokio::select! {
@@ -1135,6 +1148,7 @@ async fn full_sync(ctx: &AccountCtx, conn: &mut Conn) -> SyncResult<()> {
     // Önce gelen kutusu, sonra rol kutuları, sonra klasörler (yol sırasıyla).
     targets.sort_by_key(|m| sync_order(m.mailbox.role));
     let total = targets.len() as u32;
+    let started = Instant::now();
     let mut changed: Vec<String> = Vec::new();
     let mut new_unread = Vec::new();
     for (i, info) in targets.iter().enumerate() {
@@ -1157,6 +1171,15 @@ async fn full_sync(ctx: &AccountCtx, conn: &mut Conn) -> SyncResult<()> {
         }
         new_unread.extend(out.new_unread);
     }
+    // Günlükte süre: yavaş sunucu ya da büyük kutu şikayetinde ilk bakılacak yer.
+    tracing::info!(
+        account = %ctx.account.id,
+        mailboxes = total,
+        changed = changed.len(),
+        new = new_unread.len(),
+        elapsed_ms = started.elapsed().as_millis() as u64,
+        "tam eşitleme bitti"
+    );
     ctx.status(SyncState::Online);
     ctx.changed(changed);
     ctx.emit_new(&new_unread);
@@ -1530,7 +1553,7 @@ async fn idle_loop(ctx: Arc<AccountCtx>, tx: UnboundedSender<Command>) {
                 let wait = if e.to_app().code == ErrorCode::Untrusted {
                     MAX_BACKOFF
                 } else {
-                    backoff
+                    jittered(backoff, MAX_BACKOFF)
                 };
                 tokio::time::sleep(wait).await;
                 backoff = (backoff * 2).min(MAX_BACKOFF);
@@ -1592,6 +1615,17 @@ async fn idle_session(ctx: &AccountCtx, tx: &UnboundedSender<Command>) -> SyncRe
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn geri_cekilme_payi_sinirli() {
+        for _ in 0..50 {
+            let b = Duration::from_secs(8);
+            let j = jittered(b, MAX_BACKOFF);
+            assert!(j >= b && j <= b + b / 4, "{j:?}");
+            assert_eq!(jittered(MAX_BACKOFF, MAX_BACKOFF), MAX_BACKOFF);
+            assert_eq!(jittered(Duration::ZERO, MAX_BACKOFF), Duration::ZERO);
+        }
+    }
 
     fn l(path: &str, attr_role: Option<MailboxRole>, all: bool) -> Listed {
         Listed {
