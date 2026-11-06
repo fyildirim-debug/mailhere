@@ -11,7 +11,7 @@ test('sağ tık menüsü: satır eylemleri, Esc kapatır, Arşivle satırı kald
   const menu = page.getByRole('menu', { name: 'Cumartesi kahvaltı?' });
   await expect(menu).toBeVisible();
   await expect(menu.getByRole('menuitem').first()).toBeFocused();
-  await expect(menu.getByRole('menuitem')).toHaveCount(6);
+  await expect(menu.getByRole('menuitem')).toHaveCount(8);
   // Sağ tık seçimi değiştirmez.
   await expect(page.getByRole('heading', { level: 2, name: 'Cumartesi kahvaltı?' })).toHaveCount(0);
   await page.keyboard.press('Escape');
@@ -53,4 +53,14 @@ test('Space okuma alanını kaydırır, Shift Space geri alır', async ({ page }
   await expect.poll(() => scroll.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
   await page.keyboard.press('Shift+Space');
   await expect.poll(() => scroll.evaluate((el) => el.scrollTop)).toBe(0);
+});
+
+test('bağlam menüsünden Klasöre taşı seçiciyi satır için açar', async ({ page }) => {
+  await page.goto('/#/main');
+  await list(page).getByText('Cumartesi kahvaltı?').click({ button: 'right' });
+  await page.getByRole('menu', { name: 'Cumartesi kahvaltı?' }).getByRole('menuitem', { name: /^Klasöre taşı/ }).click();
+  await expect(page.getByRole('heading', { level: 2, name: 'Cumartesi kahvaltı?' })).toBeVisible();
+  await expect(page.getByRole('combobox', { name: 'Klasör ara' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('combobox', { name: 'Klasör ara' })).toHaveCount(0);
 });

@@ -11,7 +11,7 @@
   import { runToastAction, showToast } from '../../lib/ui/toast.svelte';
   import { snoozeOptions } from '../../lib/util/format';
   import { GO_TIMEOUT, goTarget, isEditing, shortcutFor } from '../../lib/util/keys';
-  import { currentRows, initMail, mail, move, moveTo, moveToFolder, openSettings, pullMail, select, selectedIds, setUnread, setView, toggleStar } from '../../lib/stores/mail.svelte';
+  import { currentRows, initMail, mail, move, moveTo, moveToFolder, openSettings, pullMail, select, selectedIds, setUnread, setView, toggleStar, type Row } from '../../lib/stores/mail.svelte';
   import { bulkMove, bulkMoveToFolder, bulkSetUnread, bulkSnooze, bulkStar, setTag, togglePin } from '../../lib/stores/bulk.svelte';
   import { checkAll, checkedIds, checkedRows, clearChecked, extendChecked, multi } from '../../lib/stores/selection.svelte';
   import { initLock, isLocked, isOpen, lock } from '../../lib/stores/lock.svelte';
@@ -173,6 +173,15 @@
       return;
     }
     picker = kind;
+  }
+
+  /** Satır bağlam menüsünden: satır işaretli değilse önce o satır seçilir (okundu sayılmaz), sonra seçici açılır. */
+  async function pickFromRow(kind: 'move' | 'tag', row: Row) {
+    if (!(bulk && checkedIds().includes(row.id))) {
+      if (bulk) clearChecked();
+      await select(row.id, { markRead: false });
+    }
+    openPicker(kind);
   }
 
   /** Taşıma hedefi hesabı ve postanın şu anki klasörü. */
@@ -442,7 +451,7 @@
       <Triage bind:this={focusView} onpick={openPicker} />
     {:else}
       {#if !stack || !desk.reading}
-        <MessageList width={stack ? null : listW} />
+        <MessageList width={stack ? null : listW} onpick={pickFromRow} />
       {/if}
       {#if !stack}
         <Splitter label={t('desk.resizeList')} value={listW} min={LIST.min} max={listMax} def={LIST.def} onchange={setListWidth} />
