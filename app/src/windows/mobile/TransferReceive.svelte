@@ -576,4 +576,15 @@
       transform: rotate(360deg);
     }
   }
+
+  @media (prefers-reduced-motion: reduce) {
+    .wait :global(.spin) {
+      animation: none;
+    }
+
+    .check,
+    .check::after {
+      transition: none;
+    }
+  }
 </style>

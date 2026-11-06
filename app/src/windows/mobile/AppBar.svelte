@@ -150,9 +150,9 @@
     color: var(--ink-2);
   }
 
+  /* Vurgu zeminde gri metin yok, saydamlık da yok: alt başlık vurgu metniyle aynı. */
   .select .sub {
     color: inherit;
-    opacity: 0.85;
   }
 
   .center {
