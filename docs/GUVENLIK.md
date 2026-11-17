@@ -90,6 +90,20 @@ Varsayılan **kapalı**; kapalıyken hiçbir akışta parola sorulmaz ve yukarı
 - **Aktarım:** kilit ayarı ve parola QR ile aktarılmaz; aktarımla gelen hesaplar alıcı cihazın kilit durumuna uyar.
 - **Komutlar:** `lock_status`, `lock_enable`, `lock_disable`, `lock_change`, `lock_unlock`, `lock_ui_lock`, `lock_set_relock`, `lock_reset_local` ortak listede; kapatma ve parola değiştirme mevcut parolayı ister ve aynı bekleme sayacına tabidir; kurma, kapatma ve değiştirme yalnız çekirdek açıkken; kilit işlemleri aynı anda tek (ikincisi "bekle" der). Hızlı okuma ve yazma pencereleri yalnız `lock_status` ve `lock_unlock` çağırabilir.
 
+## İstenmeyen koruması ve doğrulama kodları
+
+Sözleşme: [`tasarim/0.11-istenmeyen-ve-kod.md`](tasarim/0.11-istenmeyen-ve-kod.md). Puanlama `crates/mh-mime/src/spam.rs` (saf işlev), sütunlar `crates/mh-store/src/signals.rs`, yeni posta süzgeci ve komutlar `crates/mh-app/src/spam.rs`, kod kolaylıkları `crates/mh-app/src/otp.rs`, pano `src-tauri/src/clipboard.rs`.
+
+- **Hepsi yereldir.** Puan, postanın kendi başlıklarından, göndereninden, yanıt adresinden ve ek adlarından hesaplanır; posta, adres ya da puan hiçbir sunucuya gönderilmez. Başlık adları ve uzantı listeleri bu depoda yazılmıştır (temiz oda).
+- **Neye güvenilir:** alıcı sunucunun eklediği en üstteki `X-Spam-*`, `X-Rspamd-Action`, `X-Forefront-Antispam-Report` ve `Authentication-Results` başlığı. Aynı adlı alttaki başlıklar gönderenin yazdığı (sahte olabilecek) başlıklardır ve sayılmaz. Alıcı sunucu bu başlıkları gelen postadan ayıklamıyor ve kendisi eklemiyorsa gönderen kendi postasını "temiz" gösterebilir; bu durumda posta yalnız öteki işaretlerle (benzetilmiş alan adı, görünen adda başka adres, riskli ek, başka alana yanıt adresi) puan alır.
+- **Varsayılan "uyar":** şüpheli posta silinmez ve taşınmaz; gelen kutusunda uyarıyla durur, yalnız kart ve bildirim göstermez. "İstenmeyen'e taşı" kullanıcı seçimidir; kutu yoksa posta yerinde kalır. Yanlış işaretlenen göndericiye "Güvenli" denince puanı sıfırlanır ve sonraki postaları puan almaz.
+- **Engellenenler** (`Settings.blocked`, en çok 500): tam adres ya da `@alanadi`. Gönderen adresi sahtelenebildiği için engel, kimlik doğrulaması değil kolaylıktır: engellenen adresi taklit eden posta da İstenmeyen'e gider; engellenmemiş bir adresten yazan aynı kişi engellenmez. Kendi adreslerimiz engellenemez. Engellenen posta silinmez (İstenmeyen, kutu yoksa Çöp; geri alınabilir).
+- **Doğrulama kodu** veritabanında (`messages.otp`, SQLCipher altında) durur; günlüğe, hata metnine ve olay adlarına yazılmaz (yalnız posta kimliği ve karar). Köşe kartı kodu gösterir; arayüz kilitliyken kart içeriksizdir ve kod panoya **yazılmaz**.
+- **Kendiliğinden kopyalama varsayılan kapalıdır.** Açıkken yalnız taze (15 dakikadan yeni), okunmamış, şüpheli olmayan, elekten ve kurallardan geçmiş postanın kodu kopyalanır. Pano işletim sisteminin ortak alanıdır: açık oturumdaki öteki uygulamalar ve pano yöneticileri kodu okuyabilir; kod panoda bir sonraki kopyalamaya kadar kalır. Wayland'da pencere odakta değilken oturum yöneticisi yazımı yok sayabilir.
+- **Kod postalarını silme varsayılan kapalıdır.** Açıkken yalnız gelen kutusundaki, kod taşıyan, yıldızsız ve sabitlenmemiş postalar Çöp'e taşınır (kalıcı silme yok).
+- **Komutlar:** `sender_block` ve `spam_trust` ortak listede; parola kilidi açıkken (çekirdek kapalı ya da arayüz kilitli) komut kapısında reddedilir.
+- **Açık kalan:** kod tanıma sezgiseldir; kod olmayan bir sayı (sipariş numarası) kod sanılabilir ve ayar açıksa o posta da süresi dolunca Çöp'e gider. Puanlama içerik (metin, bağlantı) incelemez; sunucu süzgecinin yerini tutmaz.
+
 ## Sunucu itmesi (push)
 
 Telefon uykudayken yeni posta için posta sunucusu Mailhere bildirim aktarıcısına (`crates/mh-relay`, Dokploy'da), aktarıcı Firebase Cloud Messaging ile telefona haber verir. Ayrıntı: [`PUSH.md`](PUSH.md).
