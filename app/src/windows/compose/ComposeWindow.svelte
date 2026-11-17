@@ -25,6 +25,8 @@
   import { showToast } from '../../lib/ui/toast.svelte';
   import WindowControls from '../../lib/ui/WindowControls.svelte';
   import FollowUpMenu from '../../lib/mail/FollowUpMenu.svelte';
+  import { menuKeys } from '../../lib/mail/menukeys';
+  import PickTime from '../../lib/mail/PickTime.svelte';
   import { sendIssues, splitRecipients, type SendIssues } from '../../lib/mail/precheck';
   import { settings } from '../../lib/stores/settings.svelte';
   import { initLock, isLocked, lock } from '../../lib/stores/lock.svelte';
@@ -73,6 +75,8 @@
   let attachments = $state<string[]>([]);
   let original = $state<MessageDetail | null>(null);
   let laterOpen = $state(false);
+  let laterEl = $state<HTMLDivElement>();
+  let moreBtn = $state<HTMLButtonElement>();
   let sendAt = $state<number | null>(null);
   /** Yanıt gelmezse hatırlatma anı; gönderimle birlikte arka uca gider. */
   let followUpAt = $state<number | null>(null);
@@ -575,6 +579,12 @@
       error = t('compose.needRecipient');
       return;
     }
+    // Seçilen an bu arada geçmiş olabilir (pencere açık bekledi): sessizce hemen gönderilmez.
+    if (sendAt != null && sendAt <= Date.now()) {
+      sendAt = null;
+      error = t('compose.schedulePast');
+      return;
+    }
     const msg = outgoing();
     if (!from || !msg) return;
     if (!confirmed) {
@@ -632,14 +642,39 @@
       if (!locked && ready) void saveDraft();
     } else if (e.key === 'Escape' && laterOpen) {
       laterOpen = false;
+      moreBtn?.focus();
     }
   }
 
-  const later = $derived(
-    snoozeOptions(Date.now())
+  /**
+   * "Sonra gönder" seçenekleri. Menü her açıldığında yeniden hesaplanır: uzun
+   * süre açık kalan pencerede dünün "yarın sabah"ı (geçmiş bir an) seçilemez.
+   */
+  function laterOptions() {
+    return snoozeOptions(Date.now())
       .filter((o) => o.key !== 'weekend')
-      .map((o) => ({ ...o, label: `snooze.${o.key}` as MessageKey })),
-  );
+      .map((o) => ({ ...o, label: `snooze.${o.key}` as MessageKey }));
+  }
+
+  function pickLater(at: number) {
+    sendAt = at;
+    laterOpen = false;
+    if (!embedded) moreBtn?.focus();
+  }
+
+  // Açılır menü (masaüstü): odak ilk seçeneğe gider, ok tuşlarıyla gezilir;
+  // dışarı tıklayınca kapanır. Alt sayfada (gömülü) odağı Sheet yönetir.
+  $effect(() => {
+    const el = laterEl;
+    if (!laterOpen || embedded || !el) return;
+    el.querySelector<HTMLButtonElement>('button')?.focus();
+    const onDoc = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (!el.contains(target) && !moreBtn?.contains(target)) laterOpen = false;
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  });
 
   const seconds = $derived(queued ? Math.max(1, Math.round((queued.at - Date.now()) / 1000)) : 0);
 </script>
@@ -647,13 +682,22 @@
 <svelte:window onkeydown={onKey} />
 
 {#snippet laterItems()}
-  {#each later as o (o.key)}
-    <button class="menu-item" role="menuitem" onclick={() => ((sendAt = o.at), (laterOpen = false))}>
+  {@const options = laterOptions()}
+  {#each options as o (o.key)}
+    <button class="menu-item" role="menuitem" onclick={() => pickLater(o.at)}>
       <Icon name="clock" size={embedded ? 20 : 16} />
       <span class="grow">{t(o.label)}</span>
       <span class="meta num">{when(o.at)}</span>
     </button>
   {/each}
+  <PickTime
+    row={t('compose.pickTime')}
+    label={t('time.pickSend')}
+    action={t('act.schedule')}
+    initial={sendAt ?? options[0].at}
+    iconSize={embedded ? 20 : 16}
+    onpick={pickLater}
+  />
   <FollowUpMenu
     embedded
     current={followUpAt}
@@ -851,17 +895,19 @@
       </button>
       {#if laterOpen}
         <Sheet title={t('compose.later')} onclose={() => (laterOpen = false)}>
-          <div class="sheet-later" role="menu" aria-label={t('compose.later')}>{@render laterItems()}</div>
+          <div class="sheet-later" role="menu" tabindex="-1" aria-label={t('compose.later')} bind:this={laterEl} onkeydown={(e) => menuKeys(e, laterEl)}>
+            {@render laterItems()}
+          </div>
         </Sheet>
       {/if}
     {:else}
       <div class="split">
         <button class="send" onclick={send} disabled={locked}><Icon name="send" size={16} />{sendAt ? t('act.schedule') : t('act.send')}<span class="kbd on-accent">Ctrl Enter</span></button>
-        <button class="more" aria-label={t('compose.later')} title={t('compose.later')} aria-haspopup="menu" aria-expanded={laterOpen} disabled={locked} onclick={() => (laterOpen = !laterOpen)}>
+        <button class="more" aria-label={t('compose.later')} title={t('compose.later')} aria-haspopup="menu" aria-expanded={laterOpen} disabled={locked} bind:this={moreBtn} onclick={() => (laterOpen = !laterOpen)}>
           <Icon name="chevronDown" size={16} />
         </button>
         {#if laterOpen}
-          <div class="popover later" role="menu">
+          <div class="popover later" role="menu" tabindex="-1" aria-label={t('compose.later')} bind:this={laterEl} onkeydown={(e) => menuKeys(e, laterEl)}>
             <div class="menu-title">{t('compose.later')}</div>
             {@render laterItems()}
           </div>
@@ -1215,7 +1261,7 @@
   .later {
     right: 0;
     bottom: 44px;
-    width: 280px;
+    width: 300px;
   }
 
   .later-btn {

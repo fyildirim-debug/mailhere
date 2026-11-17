@@ -21,6 +21,8 @@ test.beforeEach(async ({ page }) => {
   await expect(heading(page, 'Gelen Kutusu')).toBeVisible();
   await page.getByRole('button', { name: 'Yeni posta' }).click();
   await expect(heading(page, 'Yeni posta')).toBeVisible();
+  // Ekran hazır olunca odağı Kime alanına verir; yazmaya ondan sonra başlanır.
+  await expect(page.locator('#compose-to')).toBeFocused();
   await page.locator('#compose-to').fill('kerem.aydin@ornek.com.tr');
   await page.locator('#compose-to').press('Enter');
 });

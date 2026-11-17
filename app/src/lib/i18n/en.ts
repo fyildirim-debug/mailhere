@@ -1195,4 +1195,9 @@ export const en: Record<MessageKey, string> = {
   'compose.check.bothTitle': 'Send without a subject or an attachment?',
   'compose.check.sendAnyway': 'Send anyway',
   'compose.check.scheduleAnyway': 'Schedule anyway',
+  // Kendi tarih-saatini seçme (ertele, sonra gönder).
+  'time.pickSend': 'Send date and time',
+  'time.pickSnooze': 'Snooze date and time',
+  'time.past': 'That moment has already passed. Pick a later date and time.',
+  'compose.schedulePast': 'The send time you picked has passed, so scheduling was removed. Pick a new time or send now.',
 };

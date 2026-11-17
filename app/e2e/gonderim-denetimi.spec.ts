@@ -19,6 +19,9 @@ const outbox = (page: Page) => page.evaluate(() => window.__mh.call('outbox_list
 
 async function compose(page: Page, fields: { to?: string; subject?: string; body?: string }) {
   await page.goto('/#/compose/new/0');
+  // Pencere hazır olunca odağı Kime alanına verir; yazmaya ondan sonra başlanır
+  // (erken yazılan metin, geciken odakla başka alana düşebilir).
+  await expect(page.locator('#compose-to')).toBeFocused();
   if (fields.to) {
     await page.locator('#compose-to').fill(fields.to);
     await page.locator('#compose-to').press('Enter');
@@ -124,6 +127,7 @@ test('alıntılanan önceki ileti ek sözcüğü sayılmaz; iletilen ek varken s
   });
   await page.goto('/#/compose/reply/3');
   await expect(body(page)).toHaveValue(/> Bütçe taslağı ekte\./);
+  await expect(body(page)).toBeFocused();
   await body(page).press('Control+Home');
   await body(page).pressSequentially('Teşekkürler, aldım.');
   await page.keyboard.press('Control+Enter');
@@ -133,6 +137,7 @@ test('alıntılanan önceki ileti ek sözcüğü sayılmaz; iletilen ek varken s
   // İletmede özgün ekler taşınır: metinde sözcük geçse de sorulmaz.
   await page.goto('/#/compose/forward/3');
   await expect(page.getByText('Butce_Q4_taslak.xlsx')).toBeVisible();
+  await expect(page.locator('#compose-to')).toBeFocused();
   await page.locator('#compose-to').fill('ayse.demir@eposta.com');
   await page.locator('#compose-to').press('Enter');
   await body(page).press('Control+Home');

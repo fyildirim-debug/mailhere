@@ -1211,6 +1211,11 @@ export const tr = {
   'compose.check.bothTitle': 'Konu ve ek olmadan gönderilsin mi?',
   'compose.check.sendAnyway': 'Yine de gönder',
   'compose.check.scheduleAnyway': 'Yine de zamanla',
+  // Kendi tarih-saatini seçme (ertele, sonra gönder).
+  'time.pickSend': 'Gönderim tarihi ve saati',
+  'time.pickSnooze': 'Erteleme tarihi ve saati',
+  'time.past': 'Bu an geçmişte kaldı. İleri bir tarih ve saat seç.',
+  'compose.schedulePast': 'Seçtiğin gönderim zamanı geçti; zamanlama kaldırıldı. Yeni bir zaman seç ya da şimdi gönder.',
 } as const;
 
 export type MessageKey = keyof typeof tr;
