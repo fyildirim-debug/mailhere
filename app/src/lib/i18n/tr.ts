@@ -1289,6 +1289,11 @@ export const tr = {
   'mob.att.openFailed': '{name} açılamadı: {message}',
   'mob.att.saveFailed': '{name} kaydedilemedi: {message}',
   'mob.att.shareFailed': '{name} paylaşılamadı: {message}',
+  // Mobil 0.11: AMOLED siyah (yalnız bu telefonda tutulan tercih).
+  'mob.amoled.section': 'Koyu tema',
+  'mob.amoled.name': 'AMOLED siyah',
+  'mob.amoled.hint': 'Koyu temada zeminler tam siyah olur; OLED ekranda pil tasarrufu sağlar. Yalnız bu telefonda tutulur.',
+  'mob.amoled.lightHint': 'Şu an açık tema etkin; ayar koyu temaya geçince görünür.',
 } as const;
 
 export type MessageKey = keyof typeof tr;

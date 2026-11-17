@@ -88,6 +88,23 @@
   --seg-on-shadow: none;
 }
 
+/*
+ * AMOLED siyah (yalnız mobil kabuk, kişisel tercih; docs/TASARIM.md §2.2, §12):
+ * koyu temanın zemin katmanları tam siyaha iner, yükseltilmiş katman (alt sayfa,
+ * alt şerit) ve çizgiler siyahın üstünde seçilecek kadar açık kalır. Metin,
+ * vurgu ve durum renkleri koyu temadakiyle aynıdır; her metin / zemin çifti
+ * yine en az 4.5:1.
+ */
+:root[data-theme='dark'][data-amoled] {
+  --ground: #000000;
+  --surface: #000000;
+  --paper: #000000;
+  --raised: #16181d;
+  --line: #20232a;
+  --line-strong: #383d49;
+  --hover: rgba(230, 232, 237, 0.09);
+}
+
 :root {
   /* Yazı ölçeği: yalnız bu beş adım. */
   --fs-meta: 12px;

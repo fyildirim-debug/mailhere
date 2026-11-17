@@ -36,6 +36,8 @@
   import { tagById } from '../../lib/stores/tags.svelte';
   import Onboarding from '../main/Onboarding.svelte';
   import ScheduledView from '../main/ScheduledView.svelte';
+  // AMOLED siyah tercihi kabukla birlikte yüklenir ve kök öğeye uygulanır.
+  import './amoled.svelte';
   import AppBar from './AppBar.svelte';
   import ConfirmSheet from './ConfirmSheet.svelte';
   import Drawer from './Drawer.svelte';
@@ -421,6 +423,13 @@
     display: flex;
     flex-direction: column;
     background: var(--paper);
+  }
+
+  /* AMOLED siyah: segment izi (`--ground`) kâğıtla aynı siyaha iner; iz ince
+     kenarla belirir (ölçü değişmez: 3 px iç boşluğun 1 px'i kenar olur). */
+  :global(:root[data-theme='dark'][data-amoled] .m-shell .seg-track) {
+    padding: 2px;
+    border: 1px solid var(--line);
   }
 
   /* Toast yüzen düğmenin ve alt çubuğun üstünde durur. */

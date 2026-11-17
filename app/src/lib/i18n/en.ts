@@ -1273,4 +1273,9 @@ export const en: Record<MessageKey, string> = {
   'mob.att.openFailed': 'Could not open {name}: {message}',
   'mob.att.saveFailed': 'Could not save {name}: {message}',
   'mob.att.shareFailed': 'Could not share {name}: {message}',
+  // Mobile 0.11: AMOLED black (a preference kept on this phone only).
+  'mob.amoled.section': 'Dark theme',
+  'mob.amoled.name': 'AMOLED black',
+  'mob.amoled.hint': 'Backgrounds turn true black in the dark theme, which saves battery on OLED screens. Kept on this phone only.',
+  'mob.amoled.lightHint': 'The light theme is active now; this shows once you switch to the dark theme.',
 };
