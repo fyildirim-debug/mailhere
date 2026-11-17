@@ -28,7 +28,7 @@
     snooze,
     unsubscribe,
   } from '../../lib/stores/mail.svelte';
-  import { blockSenderOf } from '../../lib/stores/guard.svelte';
+  import { blockSenderOf, trustSenderOf } from '../../lib/stores/guard.svelte';
   import { settings } from '../../lib/stores/settings.svelte';
   import { bulkMove, senderMessages, setTag, togglePin } from '../../lib/stores/bulk.svelte';
   import { tagStore, tagsOf } from '../../lib/stores/tags.svelte';
@@ -58,9 +58,13 @@
   /** Konuşma görünümü: ayar açık ve taslak değil. */
   const conversation = $derived(settings.value.conversationView && !isDraft);
   const isSent = $derived(d ? mail.mailboxes.find((b) => b.id === d.mailboxId)?.role === 'sent' : false);
+  /** İstenmeyen kutusundaki posta: çubukta ve menüde "İstenmeyen değil". */
+  const inJunk = $derived(d ? mail.mailboxes.find((b) => b.id === d.mailboxId)?.role === 'junk' : false);
   /** Çöp ya da İstenmeyen'deki postada "Sil" kalıcı siler (onaylı). */
   const purge = $derived(d ? purgeable(selectedIds()) : false);
   const deleteLabel = $derived(t(purge ? 'purge.delete' : 'act.delete'));
+  /** Kendi adresimiz engellenemez (Gönderilenler, Taslaklar, kendimize yazdığımız posta). */
+  const ownSender = $derived(d ? isSent || isDraft || mail.accounts.some((a) => a.email.trim().toLowerCase() === d.from.email.trim().toLowerCase()) : false);
   /** Elek görünümünde: gönderici için kabul / engelle kararı. */
   const screening = $derived(mail.view.kind === 'screener' && mail.search == null);
   /** Göndericiye göre temizlik yalnız arka ucun kapsadığı görünümlerde: gelen kutusu, klasör, etiket (arama dışı). */
@@ -234,7 +238,13 @@
               stop: false,
             }),
         },
-        { label: t('read.block', { email: sender }), icon: 'block', danger: true, onclick: () => void blockSenderOf(msg.id) },
+        // İstenmeyen'deki posta gelen kutusuna döner; şüpheli postada uyarı kalkar.
+        ...(inJunk
+          ? [{ label: t('spam.notJunk'), icon: 'inbox' as const, onclick: () => void trustSenderOf(msg.id) }]
+          : msg.spamVerdict
+            ? [{ label: t('spam.markSafe'), icon: 'shield' as const, onclick: () => void trustSenderOf(msg.id) }]
+            : []),
+        ...(ownSender ? [] : [{ label: t('read.block', { email: sender }), icon: 'block' as const, danger: true, onclick: () => void blockSenderOf(msg.id) }]),
       ],
     };
   }
@@ -248,7 +258,7 @@
 <main class="reader" class:focus onclick={starTeach}>
   {#if d}
     {#if !focus}
-      <div class="toolbar">
+      <div class="toolbar" class:has-junk={inJunk}>
         {#if onback}
           <button class="btn-icon back" aria-label={t('desk.back')} title="{t('desk.back')} · Esc" onclick={onback}>
             <Icon name="arrowLeft" />
@@ -326,18 +336,23 @@
           <Icon name="tag" />
         </button>
         <span class="grow"></span>
+        {#if inJunk}
+          <button class="btn-soft junk-btn" aria-label={t('spam.notJunk')} title={t('spam.notJunkHint')} onclick={() => void trustSenderOf(d.id)}>
+            <Icon name="inbox" size={16} /><span class="lbl">{t('spam.notJunk')}</span>
+          </button>
+        {/if}
         {#if isDraft}
           <button class="btn-primary small" aria-label={t('read.editDraft')} title="{t('read.editDraft')} · R" onclick={editDraft}>
             <Icon name="pen" size={16} /><span class="lbl">{t('read.editDraft')}</span>
           </button>
         {:else}
-          <button class="btn-soft" aria-label={t('act.reply')} title="{t('act.reply')} · R" onclick={replyClick}>
+          <button class="btn-soft r-btn" aria-label={t('act.reply')} title="{t('act.reply')} · R" onclick={replyClick}>
             <Icon name="reply" size={16} /><span class="lbl">{t('act.reply')}</span>
           </button>
-          <button class="btn-soft" aria-label={t('act.replyAllLong')} title="{t('act.replyAllLong')} · A" onclick={() => compose('replyAll')}>
+          <button class="btn-soft r-btn" aria-label={t('act.replyAllLong')} title="{t('act.replyAllLong')} · A" onclick={() => compose('replyAll')}>
             <Icon name="replyAll" size={16} /><span class="lbl">{t('act.replyAll')}</span>
           </button>
-          <button class="btn-soft" aria-label={t('act.forward')} title="{t('act.forward')} · F" onclick={() => compose('forward')}>
+          <button class="btn-soft r-btn" aria-label={t('act.forward')} title="{t('act.forward')} · F" onclick={() => compose('forward')}>
             <Icon name="forward" size={16} /><span class="lbl">{t('act.forward')}</span>
           </button>
         {/if}
@@ -571,6 +586,28 @@
     color: var(--ink-3);
   }
 
+  /* İstenmeyen kutusunda çubuğa "İstenmeyen değil" eklenir: 860 px'ten dar
+     alanda yanıt düğmeleri ikona iner, etiket asıl eyleme kalır. */
+  @container reader (max-width: 860px) {
+    .toolbar.has-junk .r-btn .lbl {
+      display: none;
+    }
+
+    .toolbar.has-junk .r-btn {
+      width: 34px;
+      margin-left: 2px;
+      padding: 0;
+      border-color: transparent;
+      background: transparent;
+      color: var(--ink-2);
+    }
+
+    .toolbar.has-junk .r-btn:hover {
+      background: var(--hover);
+      color: var(--ink);
+    }
+  }
+
   /* Dar okuma alanı (ray ve yığın kipleri): yanıt düğmeleri yalnız ikon. Kap
      sorgusu temel kurallardan sonra gelir: aynı özgüllükte sonraki kazanır. */
   @container reader (max-width: 680px) {
@@ -626,6 +663,13 @@
 
     .reply-wrap {
       padding: 8px 24px 12px;
+    }
+  }
+
+  /* En dar okuma alanında çubuğa sığmaz; "İstenmeyen değil" Diğer eylemler menüsünde durur. */
+  @container reader (max-width: 500px) {
+    .toolbar .junk-btn {
+      display: none;
     }
   }
 </style>

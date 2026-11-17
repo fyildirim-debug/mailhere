@@ -34,7 +34,10 @@ export async function blockSenderOf(id: MessageId): Promise<boolean> {
   try {
     const r = await call('sender_block', { id });
     if (r.ids.length && mail.view.kind === 'inbox') takeOut(r.ids);
-    void refreshList();
+    // Okunan posta yerinde kaldıysa (arşiv, arama sonucu) yeniden yüklenir: uyarı "engelledin" der.
+    void refreshList().then(() => {
+      if (selected != null && mail.selectedId === selected) void select(selected, { markRead: false });
+    });
     void refreshCounts();
     showToast({
       text: r.moved ? t('block.doneMoved', { email: r.address, n: r.moved }) : t('block.done', { email: r.address }),

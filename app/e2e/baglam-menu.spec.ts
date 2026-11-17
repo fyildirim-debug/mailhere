@@ -11,7 +11,7 @@ test('sağ tık menüsü: satır eylemleri, Esc kapatır, Arşivle satırı kald
   const menu = page.getByRole('menu', { name: 'Cumartesi kahvaltı?' });
   await expect(menu).toBeVisible();
   await expect(menu.getByRole('menuitem').first()).toBeFocused();
-  await expect(menu.getByRole('menuitem')).toHaveCount(8);
+  await expect(menu.getByRole('menuitem')).toHaveCount(9);
   // Sağ tık seçimi değiştirmez.
   await expect(page.getByRole('heading', { level: 2, name: 'Cumartesi kahvaltı?' })).toHaveCount(0);
   await page.keyboard.press('Escape');

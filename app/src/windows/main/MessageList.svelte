@@ -11,7 +11,7 @@
   import { call } from '../../lib/api';
   import { displayName, snoozeOptions } from '../../lib/util/format';
   import { loadMore, mail, markAllRead, moveTo, pullMail, rowsOf, setCategory, setOnly, setUnread, setView, snooze, syncing, toggleStar, type Row } from '../../lib/stores/mail.svelte';
-  import { loadOlder, older, olderAvailable, olderDone } from '../../lib/stores/guard.svelte';
+  import { blockSenderOf, loadOlder, older, olderAvailable, olderDone, trustSenderOf } from '../../lib/stores/guard.svelte';
   import { settings, updateSettings } from '../../lib/stores/settings.svelte';
   import { tagById } from '../../lib/stores/tags.svelte';
   import MessageRow from './MessageRow.svelte';
@@ -138,7 +138,10 @@
     if (!rowMenu) return [];
     const m = rowMenu.row;
     const tomorrow = snoozeOptions(now).find((o) => o.key === 'tomorrow')!.at;
+    const role = mail.mailboxes.find((b) => b.id === m.mailboxId)?.role;
     const purge = purgeBox(m.mailboxId);
+    // Kendi adresimiz engellenemez (Gönderilenler, Taslaklar, kendimize yazdığımız posta).
+    const own = role === 'sent' || role === 'drafts' || mail.accounts.some((a) => a.email.trim().toLowerCase() === m.from.email.trim().toLowerCase());
     return [
       { label: t('read.openQuick'), icon: 'external', onclick: () => void call('open_quick', { id: m.id }) },
       { label: m.unread ? t('act.markRead') : t('act.markUnread'), icon: 'mail', kbd: m.unread ? undefined : 'U', onclick: () => void setUnread(m.ids, !m.unread) },
@@ -151,6 +154,13 @@
           ] as MenuItem[])
         : []),
       { label: t('snooze.tomorrow'), icon: 'clock', kbd: 'H', onclick: () => void snooze(m.ids, tomorrow) },
+      // İstenmeyen'deki posta gelen kutusuna döner; şüpheli satırda uyarı kalkar.
+      ...(role === 'junk'
+        ? ([{ label: t('spam.notJunk'), icon: 'inbox', onclick: () => void trustSenderOf(m.id) }] as MenuItem[])
+        : m.spam
+          ? ([{ label: t('spam.markSafe'), icon: 'shield', onclick: () => void trustSenderOf(m.id) }] as MenuItem[])
+          : []),
+      ...(own ? [] : ([{ label: t('spam.block'), icon: 'block', hint: m.from.email, onclick: () => void blockSenderOf(m.id) }] as MenuItem[])),
       { label: t(purge ? 'purge.delete' : 'act.delete'), icon: 'trash', kbd: '#', danger: true, onclick: () => void removeMessages(m.ids) },
     ];
   });

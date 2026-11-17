@@ -1213,6 +1213,23 @@ export const en: Record<MessageKey, string> = {
   // Code chip on a list row.
   'otp.chipLabel': 'Verification code {code}; copy',
   'otp.chipTitle': 'Copy code',
+  // Junk protection: warning box in the reader, menus and the row mark.
+  'spam.title': 'This message looks suspicious',
+  'spam.reason.blocked': 'You blocked this sender.',
+  'spam.reason.serverFlagged': 'Your mail server marked this message as junk.',
+  'spam.reason.authFailed': 'The message could not prove it came from the address it shows.',
+  'spam.reason.nameHasOtherAddress': 'The display name shows another address; that is not the real sender.',
+  'spam.reason.lookalikeDomain': 'The sender\'s domain imitates a familiar address.',
+  'spam.reason.riskyAttachment': 'An attachment can run a program when opened.',
+  'spam.reason.replyToMismatch': 'Your reply would go to a different address, not to the sender.',
+  'spam.moveJunk': 'Move to Junk',
+  'spam.block': 'Block sender',
+  'spam.safe': 'Safe',
+  'spam.safeHint': 'Trust this sender; the warning goes away',
+  'spam.notJunk': 'Not junk',
+  'spam.notJunkHint': 'Trust this sender and move the message to the inbox',
+  'spam.markSafe': 'Mark as safe',
+  'spam.rowMark': 'Suspicious message',
   // Permanent delete confirmation and emptying a mailbox (desktop).
   'purge.delete': 'Delete permanently',
   'purge.confirmOneTitle': 'Delete this message permanently?',

@@ -70,6 +70,7 @@
         <span class="sender trunc">{displayName(who)}</span>
         {#if awaiting}<span class="tag">{t('follow.awaiting')}</span>{/if}
         {#if message.count > 1}<span class="count num">{message.count}</span>{/if}
+        {#if message.spam}<span class="warn"><Icon name="alert" size={14} label={t('spam.rowMark')} /></span>{/if}
         {#if message.hasAttachments}<Icon name="paperclip" size={14} label={t('list.attachment')} class="quiet" />{/if}
         {#if message.starred}<span class="star"><Icon name="star" size={14} filled label={t('list.starred')} /></span>{/if}
         {#if message.pinned}<Icon name="pin" size={14} label={t('list.pinnedMark')} class="quiet" />{/if}
@@ -192,7 +193,8 @@
     color: var(--ink-3);
   }
 
-  .star {
+  .star,
+  .warn {
     display: inline-flex;
     color: var(--amber);
   }

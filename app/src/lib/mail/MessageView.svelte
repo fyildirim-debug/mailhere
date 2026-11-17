@@ -8,13 +8,15 @@
   import Icon from '../ui/Icon.svelte';
   import { showToast } from '../ui/toast.svelte';
   import { displayName, fileSize } from '../util/format';
+  import { copyCode } from '../stores/guard.svelte';
   import { allowRemote, mail, toggleStar, unsubscribe } from '../stores/mail.svelte';
   import { darkMailWanted, settings } from '../stores/settings.svelte';
   import ContactCard from './ContactCard.svelte';
   import { openCompose } from './open';
   import InviteCard from './InviteCard.svelte';
   import MailBody from './MailBody.svelte';
-  import { copyText, groupCode } from './otp';
+  import { groupCode } from './otp';
+  import SpamNotice from './SpamNotice.svelte';
   import { isMobileShell } from '../shell';
 
   interface Props {
@@ -111,10 +113,11 @@
     return d.cleanedLinks > 0 ? `${text} ${t('read.linksCleaned', { n: d.cleanedLinks })}` : text;
   }
 
+  /** Kodu kopyalar; "kopyalayınca okundu say" açıksa okunmamış posta okundu sayılır (ortak yardımcı). */
   async function copyOtp() {
     if (!d.otp) return;
-    const ok = await copyText(d.otp);
-    showToast({ text: ok ? t('read.otpCopied') : t('read.otpCopyFailed') });
+    const unread = d.unread;
+    if ((await copyCode(d.id, d.otp, unread)) && unread && settings.value.otpMarkRead) onupdate?.({ ...d, unread: false });
   }
 </script>
 
@@ -155,7 +158,10 @@
   <ContactCard address={d.from} accountId={d.accountId} at={card} onclose={closeCard} />
 {/if}
 
-{#if warning}
+{#if d.spamVerdict}
+  <!-- Şüpheli posta: neden satırları ve eylemler; tek satırlık gönderen uyarısının yerine geçer. -->
+  <SpamNotice detail={d} verdict={d.spamVerdict} {onupdate} />
+{:else if warning}
   <!-- Dar alanda (telefon, dar okuma bölmesi) kısa metin; kap sorgusu karar verir. -->
   <div class="trust">
     <p class="trust-row">

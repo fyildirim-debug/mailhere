@@ -1229,6 +1229,23 @@ export const tr = {
   // Liste satırındaki kod çipi.
   'otp.chipLabel': 'Doğrulama kodu {code}; kopyala',
   'otp.chipTitle': 'Kodu kopyala',
+  // İstenmeyen koruması: okuma alanındaki uyarı kutusu, menüler ve satır işareti.
+  'spam.title': 'Bu posta şüpheli görünüyor',
+  'spam.reason.blocked': 'Bu göndericiyi sen engelledin.',
+  'spam.reason.serverFlagged': 'Posta sunucun bu postayı istenmeyen olarak işaretledi.',
+  'spam.reason.authFailed': 'Posta, yazdığı adresten geldiğini kanıtlayamadı.',
+  'spam.reason.nameHasOtherAddress': 'Görünen adda başka bir adres yazıyor; gerçek gönderen o değil.',
+  'spam.reason.lookalikeDomain': 'Gönderenin alan adı tanıdık bir adrese benzetilmiş.',
+  'spam.reason.riskyAttachment': 'Ekinde, açılınca program çalıştırabilen bir dosya var.',
+  'spam.reason.replyToMismatch': 'Yanıtın gönderene değil, başka bir adrese gidecek.',
+  'spam.moveJunk': 'İstenmeyen\'e taşı',
+  'spam.block': 'Göndereni engelle',
+  'spam.safe': 'Güvenli',
+  'spam.safeHint': 'Göndereni güvenli say; uyarı kalkar',
+  'spam.notJunk': 'İstenmeyen değil',
+  'spam.notJunkHint': 'Göndereni güvenli say ve postayı gelen kutusuna taşı',
+  'spam.markSafe': 'Güvenli say',
+  'spam.rowMark': 'Şüpheli posta',
   // Kalıcı silme onayı ve kutuyu boşaltma (masaüstü).
   'purge.delete': 'Kalıcı sil',
   'purge.confirmOneTitle': 'Bu posta kalıcı silinsin mi?',
