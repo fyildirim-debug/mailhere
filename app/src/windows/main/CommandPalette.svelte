@@ -141,7 +141,8 @@
     'set-compose': 'yazma gönderme imza geri al undo send signature compose ayar settings',
     'set-accounts': 'hesap sunucu imap smtp parola account server password ayar settings',
     'set-devices': 'cihaz aktar qr telefon device transfer phone ayar settings',
-    'set-privacy': 'gizlilik güvenlik kilit parola uzak içerik privacy security lock remote content ayar settings',
+    'set-privacy':
+      'gizlilik güvenlik kilit parola uzak içerik istenmeyen spam şüpheli engelle engellenen gönderici doğrulama kodu privacy security lock remote content junk suspicious block blocked sender verification code otp ayar settings',
     'set-about': 'güncelleme sürüm hakkında update version about ayar settings',
     tags: 'etiket label',
     templates: 'şablon hazır yanıt template snippet',
