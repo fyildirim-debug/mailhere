@@ -30,6 +30,7 @@ pub mod lock;
 pub mod logging;
 pub mod notify;
 pub mod notify_actions;
+pub mod otp;
 pub mod platform;
 pub mod push;
 pub mod routes;
@@ -37,7 +38,10 @@ pub mod rules;
 pub mod screener;
 pub mod signatures;
 pub mod sink;
+pub mod spam;
 pub mod state;
+#[cfg(test)]
+pub(crate) mod testutil;
 pub mod transfer;
 pub mod wake;
 
@@ -152,6 +156,8 @@ define_shared_commands! { $
     lock::lock_ui_lock,
     lock::lock_set_relock,
     lock::lock_reset_local,
+    spam::sender_block,
+    spam::spam_trust,
 }
 
 /// `commands.txt` içindeki adlar (yorum ve boş satırlar atılır).

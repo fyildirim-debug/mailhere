@@ -959,6 +959,13 @@ mod tests {
         assert!(!allows("notify_pending", true, true));
         assert!(!allows("settings_get", true, true));
         assert!(!allows("counts", true, true));
+        // Gönderici engelleme ve "güvenli" posta içeriğine ve ayarlara
+        // dokunur: kilitliyken (çekirdek kapalı ya da arayüz kilitli) çalışmaz.
+        for cmd in ["sender_block", "spam_trust"] {
+            assert!(!allows(cmd, false, false), "{cmd}");
+            assert!(!allows(cmd, true, true), "{cmd}");
+            assert!(allows(cmd, true, false), "{cmd}");
+        }
         // Açık: her şey.
         assert!(allows("messages_list", true, false));
         assert!(allows("settings_get", true, false));

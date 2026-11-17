@@ -98,6 +98,8 @@
     "allow-lock-unlock",
     "allow-lock-ui-lock",
     "allow-lock-set-relock",
-    "allow-lock-reset-local"
+    "allow-lock-reset-local",
+    "allow-sender-block",
+    "allow-spam-trust"
   ]
 }

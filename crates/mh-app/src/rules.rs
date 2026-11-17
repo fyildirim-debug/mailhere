@@ -34,6 +34,12 @@ thread_local! {
     static AFTER_RULES: Cell<bool> = const { Cell::new(false) };
 }
 
+/// Kurallardan geçmiş postalar `new_mail`e yeniden mi veriliyor? İlk girişe
+/// özgü adımlar (istenmeyen süzgeci) ikinci kez çalışmaz.
+pub(crate) fn after_rules() -> bool {
+    AFTER_RULES.get()
+}
+
 /// Kuralların kullandığı yöneticiler.
 pub struct Engines<'a> {
     pub store: &'a Store,

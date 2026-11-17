@@ -298,7 +298,8 @@ impl Core {
 }
 
 /// Çekirdeği açar, `AppState` olarak Tauri durumuna bağlar ve
-/// zamanlayıcıları (erteleme, hatırlatma, elek, önizleme onarımı) başlatır.
+/// zamanlayıcıları (erteleme, hatırlatma, elek, önizleme onarımı, kod süresi)
+/// başlatır.
 /// Kabuk bundan sonra pencerelerini açar; duruma `app.state::<AppState>()`
 /// ile erişir. Kabuğa özgü ön ve son işler `Platform::core_starting` /
 /// `core_ready` ile çağrılır (iki açılış yolu da: olağan açılış ve parola
@@ -366,6 +367,23 @@ pub fn setup_core(app: &AppHandle, boot: Boot, key: Option<&DbKey>) -> AppResult
             Err(e) => tracing::warn!(error = %e.message, "önizlemeler onarılamadı"),
         });
     }
+    // Önceki sürümlerden kalan son 30 günün postalarında doğrulama kodu ve
+    // istenmeyen puanı bir kez hesaplanır (liste çipi, uyarı ikonu, arama).
+    {
+        let (store, app) = (core.store.clone(), handle.clone());
+        rt.spawn_blocking(move || match store.backfill_signals(now_ms()) {
+            Ok(0) => {}
+            Ok(n) => {
+                tracing::info!(n, "kod ve istenmeyen puanı geri dolduruldu");
+                crate::sink::changed(&app, Vec::new());
+            }
+            Err(e) => {
+                tracing::warn!(error = %e.message, "kod ve istenmeyen puanı geri doldurulamadı")
+            }
+        });
+    }
+    // Süresi dolan kod postaları: açılışta ve saatte bir çöpe taşınır.
+    rt.spawn(crate::otp::expire_ticker(handle.clone()));
     crate::lock::core_opened(&handle);
     platform.core_ready(&handle);
     Ok(())

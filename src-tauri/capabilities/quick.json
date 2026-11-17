@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "quick",
-  "description": "Hızlı okuma: tek postayı okuma, işaretleme, taşıma, hızlı yanıt, ek açma.",
+  "description": "Hızlı okuma: tek postayı okuma, işaretleme, taşıma, hızlı yanıt, ek açma, göndereni engelleme ve güvenli sayma.",
   "windows": [
     "quick-*"
   ],
@@ -27,6 +27,8 @@
     "allow-open-main",
     "allow-attachment-open",
     "allow-lock-status",
-    "allow-lock-unlock"
+    "allow-lock-unlock",
+    "allow-sender-block",
+    "allow-spam-trust"
   ]
 }

@@ -3,8 +3,9 @@
 //! hizmeti süreçsiz uyandı, JobScheduler yoklaması) bunu açar; masaüstü
 //! kullanmaz.
 //!
-//! Bildirim kararı pencereli çekirdekle aynı hattan geçer: kurallar →
-//! yanıt hatırlatmaları → yeni gönderici eleği → bildirim kararı
+//! Bildirim kararı pencereli çekirdekle aynı hattan geçer: engellenen/şüpheli
+//! süzgeci ([`crate::spam::filter_new`]) → kurallar → yanıt hatırlatmaları →
+//! yeni gönderici eleği → bildirim kararı
 //! ([`crate::sink::decide`]: hesabın bildirimi, kime, sessiz saat, VIP,
 //! susturma). Kabuk yalnız [`HeadlessShell`] ile bildirimi çizer ve sayaç
 //! değişimini öğrenir; pencere, tepsi ya da `AppHandle` yoktur.
@@ -40,6 +41,12 @@ pub trait HeadlessShell: Send + Sync + 'static {
     fn notify(&self, ev: NotifyEvent, settings: &Settings);
     /// Kutular değişti; okunan postaların bildirimleri kaldırılabilir.
     fn counts_changed(&self);
+    /// Metni sistem panosuna yazar (yeni postadaki doğrulama kodu,
+    /// pencereli `Platform::copy_text` ile aynı); yazıldıysa `true`.
+    /// Varsayılanı panoya dokunmaz.
+    fn copy_text(&self, _text: &str) -> bool {
+        false
+    }
 }
 
 /// Hiçbir pencereye dokunmayan `Platform`: penceresiz çekirdekte
@@ -169,14 +176,18 @@ impl EventSink for HeadlessSink {
     }
 }
 
-/// Pencereli `TauriSink::new_mail` ile aynı sıra: kurallar → yanıt
-/// hatırlatmaları → elek → bildirim kararı → sayaç.
+/// Pencereli `TauriSink::new_mail` ile aynı sıra: engellenen/şüpheli süzgeci
+/// → kurallar → yanıt hatırlatmaları → elek → bildirim kararı → sayaç.
 async fn pipeline(
     state: &AppState,
     account: &Account,
     messages: Vec<MessageSummary>,
     shell: &dyn HeadlessShell,
 ) {
+    let (messages, touched) = crate::spam::filter_new(state, account, messages);
+    if !touched.is_empty() {
+        shell.counts_changed();
+    }
     let rules: Vec<CompiledRule> = state
         .store
         .rules()
@@ -200,9 +211,13 @@ async fn pipeline(
     // Yeni posta bir yanıt olabilir: yanıtlanan hatırlatmalar kapanır.
     let _ = crate::followups::close_answered(state);
     let (kept, _touched) = crate::screener::screen_with(state, account, messages);
-    crate::sink::decide(state, account, kept, |ev, settings| {
-        shell.notify(ev, settings)
-    });
+    crate::sink::decide(
+        state,
+        account,
+        kept,
+        |code| shell.copy_text(code),
+        |ev, settings| shell.notify(ev, settings),
+    );
     shell.counts_changed();
 }
 
@@ -295,10 +310,17 @@ impl Headless {
         }));
         let push = crate::push::start(&self.state, &self.handle);
         let canli = crate::canli::start(&self.state, &self.handle);
+        // Süresi dolan kod postaları: açılışta ve saatte bir çöpe taşınır.
+        let shell = self.sink.shell.clone();
+        let kod = self
+            .handle
+            .spawn(crate::otp::expire_loop(self.state.clone(), move || {
+                shell.counts_changed()
+            }));
         self.tasks
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .extend([watch, push, canli]);
+            .extend([watch, push, canli, kod]);
         Ok(())
     }
 

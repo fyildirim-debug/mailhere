@@ -78,6 +78,14 @@ pub trait Platform: Send + Sync + 'static {
         req: Confirm,
     ) -> BoxFut<'a, AppResult<bool>>;
 
+    /// Metni sistem panosuna yazar (yeni postadaki doğrulama kodu,
+    /// `Settings::otp_auto_copy`); yazıldıysa `true`. Varsayılanı panoya
+    /// dokunmaz: pano kabuğa özgüdür (GTK / Windows panosu, Android
+    /// `ClipboardManager`).
+    fn copy_text(&self, _app: &AppHandle, _text: &str) -> bool {
+        false
+    }
+
     /// Açılış başarısız: sorunu ve çözümü gösterir, uygulamayı kapatır.
     fn fatal(&self, app: &AppHandle, e: &AppError);
 

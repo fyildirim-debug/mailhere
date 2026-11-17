@@ -84,3 +84,5 @@ lock_unlock
 lock_ui_lock
 lock_set_relock
 lock_reset_local
+sender_block
+spam_trust

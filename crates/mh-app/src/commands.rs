@@ -519,6 +519,8 @@ pub fn normalize_settings(mut s: Settings) -> Settings {
     s.templates = crate::signatures::normalize_templates(s.templates);
     s.saved_searches = crate::cmd_list::normalize_saved_searches(s.saved_searches);
     s.notify_actions = mh_core::normalize_notify_actions(s.notify_actions);
+    s.blocked = mh_core::normalize_blocked(s.blocked);
+    s.otp_expire_hours = s.otp_expire_hours.min(crate::otp::EXPIRE_HOURS_MAX);
     s
 }
 
@@ -802,6 +804,30 @@ mod tests {
         assert_eq!(s.vip, vec!["ayse@eposta.com".to_string()]);
         let d = normalize_settings(Settings::default());
         assert_eq!(d, Settings::default());
+    }
+
+    #[test]
+    fn engellenenler_ve_kod_suresi_sinirlanir() {
+        let s = normalize_settings(Settings {
+            blocked: vec![
+                " Reklam@Firma.com ".into(),
+                "reklam@firma.com".into(),
+                "@Kotu.Example".into(),
+                "firma.com".into(),
+                "@com".into(),
+                "".into(),
+            ],
+            otp_expire_hours: 100_000,
+            ..Settings::default()
+        });
+        // Sıra korunur; yinelenen ve geçersiz girdiler atılır.
+        assert_eq!(s.blocked, ["reklam@firma.com", "@kotu.example"]);
+        assert_eq!(s.otp_expire_hours, crate::otp::EXPIRE_HOURS_MAX);
+        let s = normalize_settings(Settings {
+            otp_expire_hours: 24,
+            ..Settings::default()
+        });
+        assert_eq!(s.otp_expire_hours, 24);
     }
 
     #[test]
