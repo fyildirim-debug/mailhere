@@ -1,40 +1,38 @@
 //! Gönderen güveni: görünen adda başka adres, benzetilmiş alan adı ve
 //! alıcı sunucunun kimlik doğrulama sonucu (`Authentication-Results`).
 
-use mail_parser::MessageParser;
 use mh_core::{Address, SenderWarning};
 
+use crate::headers;
 use crate::privacy::same_site;
 
-/// Başlıkta incelenen en uzun `Authentication-Results` değeri (bayt).
-const MAX_AUTH_VALUE: usize = 4096;
+/// Alıcı sunucunun kimlik doğrulama sonucunu yazdığı başlık.
+pub(crate) const AUTH_RESULTS: &str = "Authentication-Results";
 
 /// Gönderen için uyarı; birden çok işaret varsa en güçlüsü: kimlik
 /// doğrulama başarısızlığı, görünen adda başka adres, benzetilmiş alan adı.
 ///
 /// `raw` verilmişse en üstteki `Authentication-Results` başlığı (alıcı
 /// sunucunun eklediği) okunur; yalnız başlık indirilmiş posta da yeter.
+/// İstenmeyen puanı (`crate::spam`) aynı işaretleri aynı işlevlerle okur.
 pub fn sender_warning(raw: Option<&[u8]>, from: &Address) -> Option<SenderWarning> {
-    let auth = raw.and_then(first_auth_results);
+    let auth = raw
+        .and_then(|r| headers::with_raw(r, |h| headers::first(h, AUTH_RESULTS)))
+        .flatten();
     if auth.as_deref().is_some_and(auth_failed) {
         return Some(SenderWarning::AuthFailed);
     }
     if name_has_other_address(from) {
         return Some(SenderWarning::NameHasOtherAddress);
     }
-    let domain = from.email.rsplit_once('@').map(|(_, d)| d)?;
-    lookalike_domain(domain).then_some(SenderWarning::LookalikeDomain)
+    lookalike_sender(from).then_some(SenderWarning::LookalikeDomain)
 }
 
-/// En üstteki `Authentication-Results` değeri (katlama boşlukları tek boşluk).
-fn first_auth_results(raw: &[u8]) -> Option<String> {
-    let msg = MessageParser::default().parse_headers(raw)?;
-    let value = msg
-        .headers_raw()
-        .find(|(name, _)| name.trim().eq_ignore_ascii_case("Authentication-Results"))
-        .map(|(_, v)| v)?;
-    let value = &value[..value.len().min(MAX_AUTH_VALUE)];
-    Some(value.split_whitespace().collect::<Vec<_>>().join(" "))
+/// Gönderen adresinin alan adı aldatıcı mı ([`lookalike_domain`])?
+pub fn lookalike_sender(from: &Address) -> bool {
+    from.email
+        .rsplit_once('@')
+        .is_some_and(|(_, domain)| lookalike_domain(domain))
 }
 
 /// Parantez içindeki yorumları atar (`dkim=pass (imza geçti; dmarc=fail değil)`).

@@ -2,12 +2,14 @@
 //! kategori. Ağ ya da depo bilmez; saf işlevlerdir.
 
 pub mod category;
+mod headers;
 pub mod html;
 pub mod ics;
 pub mod otp;
 pub mod parse;
 mod prescan;
 pub mod privacy;
+pub mod spam;
 pub mod text;
 pub mod trust;
 pub mod unsubscribe;
@@ -19,6 +21,7 @@ pub use otp::find_otp;
 pub use parse::{
     attachment, otp_of, parse, render, visible_attachments, AttachmentData, ParsedMessage, Rendered,
 };
+pub use spam::{score as spam_score, SpamInput};
 pub use text::{
     clean_display_name, clean_line, collapse_ws, fold_tr, html_to_text, looks_like_html,
     normalize_subject, snippet,

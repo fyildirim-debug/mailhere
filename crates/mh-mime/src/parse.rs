@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use base64::Engine as _;
 use mail_parser::{HeaderValue, Message, MessageParser, MessagePart, MimeHeaders, PartType};
-use mh_core::{Address, Attachment, Category, Millis};
+use mh_core::{Address, Attachment, Category, Millis, SpamVerdict};
 
 use crate::category::classify;
 use crate::html::{normalize_cid, sanitize_html};
@@ -37,6 +37,13 @@ pub struct ParsedMessage {
     pub body_text: Option<String>,
     pub has_attachments: bool,
     pub category: Category,
+    /// Konu ve metinde bulunan doğrulama kodu (boşluksuz); yalnız başlık
+    /// geldiyse yalnız konudan aranır.
+    pub otp: Option<String>,
+    /// İstenmeyen puanı ve nedenleri (`crate::spam`); engellenenler listesi
+    /// ve kabul edilen göndericiler burada bilinmez (depo ve uygulama katmanı
+    /// uygular). Yalnız başlık geldiyse ek adları puana girmez.
+    pub spam: SpamVerdict,
 }
 
 /// Okuma alanı için işlenmiş gövde.
@@ -267,23 +274,42 @@ pub fn parse(raw: &[u8], headers_only: bool) -> Option<ParsedMessage> {
         .as_deref()
         .map(tidy_lines)
         .or_else(|| html.as_deref().map(html_to_text));
+    let attachments = if headers_only {
+        Vec::new()
+    } else {
+        list_attachments(&msg, html.as_deref())
+    };
     let has_attachments = if headers_only {
         top_is_mixed(&msg)
     } else {
-        !list_attachments(&msg, html.as_deref()).is_empty()
+        !attachments.is_empty()
     };
-    let category = classify(&headers_of(&msg), &from.email);
+    let headers = headers_of(&msg);
+    let category = classify(&headers, &from.email);
     let mut references = id_list(msg.references());
     let in_reply_to = id_list(msg.in_reply_to()).into_iter().next();
     references.dedup();
+    let reply_to = convert_addresses(msg.reply_to());
+    let subject = clean_line(msg.subject().unwrap_or(""));
+    let otp = crate::otp::find_otp(&subject, plain.as_deref().unwrap_or(""));
+    let names: Vec<&str> = attachments.iter().map(|a| a.name.as_str()).collect();
+    let spam = crate::spam::score(&crate::spam::SpamInput {
+        headers: &headers,
+        from: &from,
+        reply_to: &reply_to,
+        attachments: &names,
+        blocked: false,
+    });
     Some(ParsedMessage {
         message_id: msg.message_id().map(clean_id).filter(|s| !s.is_empty()),
         in_reply_to,
         references,
         to: convert_addresses(msg.to()),
         cc: convert_addresses(msg.cc()),
-        reply_to: convert_addresses(msg.reply_to()),
-        subject: truncate_chars(&clean_line(msg.subject().unwrap_or("")), SUBJECT_LIMIT),
+        reply_to,
+        subject: truncate_chars(&subject, SUBJECT_LIMIT),
+        otp,
+        spam,
         date: msg.date().map(|d| d.to_timestamp() * 1000),
         snippet: plain.as_deref().map(snippet).unwrap_or_default(),
         body_text: if headers_only {
@@ -647,8 +673,53 @@ x\r\n\
         assert!(!html.contains("<style") && !html.contains("<!DOCTYPE"));
         assert!(r.has_remote_content);
         assert!(!r.text.unwrap().contains("<!DOCTYPE"));
-        assert_eq!(otp_of(HTML_AS_TEXT.as_bytes()).as_deref(), Some("482913"));
-        assert_eq!(otp_of(ALTERNATIVE.as_bytes()), None);
+        assert_eq!(p.otp.as_deref(), Some("482913"));
+        assert_eq!(parse(ALTERNATIVE.as_bytes(), false).unwrap().otp, None);
+    }
+
+    #[test]
+    fn kod_yalniz_basliktan_da_bulunur() {
+        let raw = "From: Banka <bildirim@banka.example>\r\nSubject: Dogrulama kodunuz: 604218\r\n\r\nKodunuz 731 004, kimseyle paylasmayin.\r\n";
+        // Yalnız başlık: konudaki kod.
+        let p = parse(raw.as_bytes(), true).unwrap();
+        assert_eq!(p.otp.as_deref(), Some("604218"));
+        // Konuda kod yoksa gövde gelene kadar boş.
+        let raw = "From: Banka <bildirim@banka.example>\r\nSubject: Giris bildirimi\r\n\r\nDogrulama kodunuz: 731004\r\n";
+        assert_eq!(parse(raw.as_bytes(), true).unwrap().otp, None);
+        assert_eq!(
+            parse(raw.as_bytes(), false).unwrap().otp.as_deref(),
+            Some("731004")
+        );
+    }
+
+    #[test]
+    fn istenmeyen_puani_basliklardan_ve_eklerden() {
+        // Temiz posta.
+        let p = parse(ALTERNATIVE.as_bytes(), false).unwrap();
+        // Yanıt adresi başka alan adında: tek başına eşiğin altında.
+        assert_eq!(p.spam.reasons, [mh_core::SpamReason::ReplyToMismatch]);
+        assert!(!p.spam.is_spam());
+        assert_eq!(
+            parse(MIXED.as_bytes(), false).unwrap().spam,
+            SpamVerdict::default()
+        );
+
+        // Sunucu işareti (katlanmış, küçük harfli başlık) + çift uzantılı ek.
+        let raw = "x-spam-status: Yes,\r\n\tscore=8.2 required=5.0\r\nFrom: Kargo <takip@kargo.example>\r\nSubject: Teslimat\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"b\"\r\n\r\n--b\r\nContent-Type: text/plain\r\n\r\nEkte.\r\n--b\r\nContent-Type: application/octet-stream\r\nContent-Disposition: attachment; filename=\"fatura.pdf.exe\"\r\n\r\nMZ\r\n--b--\r\n";
+        let p = parse(raw.as_bytes(), false).unwrap();
+        assert_eq!(
+            p.spam.reasons,
+            [
+                mh_core::SpamReason::ServerFlagged,
+                mh_core::SpamReason::RiskyAttachment
+            ]
+        );
+        assert_eq!(p.spam.score, 100);
+        assert!(p.spam.is_spam());
+        // Yalnız başlık indirildiyse ek adı bilinmez; sunucu işareti yine sayılır.
+        let p = parse(raw.as_bytes(), true).unwrap();
+        assert_eq!(p.spam.reasons, [mh_core::SpamReason::ServerFlagged]);
+        assert_eq!(p.spam.score, 60);
     }
 
     #[test]
