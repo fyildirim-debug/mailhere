@@ -2732,7 +2732,7 @@ dependencies = [
 
 [[package]]
 name = "mailhere"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "dbus",
  "gtk",
@@ -2811,7 +2811,7 @@ dependencies = [
 
 [[package]]
 name = "mh-app"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -2840,7 +2840,7 @@ dependencies = [
 
 [[package]]
 name = "mh-core"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2849,7 +2849,7 @@ dependencies = [
 
 [[package]]
 name = "mh-jmap"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -2876,7 +2876,7 @@ dependencies = [
 
 [[package]]
 name = "mh-mime"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "ammonia",
  "base64 0.22.1",
@@ -2888,7 +2888,7 @@ dependencies = [
 
 [[package]]
 name = "mh-notify"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "mh-core",
  "windows-sys 0.61.2",
@@ -2897,7 +2897,7 @@ dependencies = [
 
 [[package]]
 name = "mh-oauth"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "base64 0.22.1",
  "mh-core",
@@ -2912,7 +2912,7 @@ dependencies = [
 
 [[package]]
 name = "mh-relay"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -2930,7 +2930,7 @@ dependencies = [
 
 [[package]]
 name = "mh-send"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -2952,7 +2952,7 @@ dependencies = [
 
 [[package]]
 name = "mh-store"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "argon2",
  "base64 0.22.1",
@@ -2970,7 +2970,7 @@ dependencies = [
 
 [[package]]
 name = "mh-sync"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "async-imap",
  "base64 0.22.1",
@@ -2998,7 +2998,7 @@ dependencies = [
 
 [[package]]
 name = "mh-transfer"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "base64 0.22.1",
  "if-addrs",
