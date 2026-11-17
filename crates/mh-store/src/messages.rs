@@ -235,6 +235,9 @@ pub(crate) fn row_to_summary(r: &Row<'_>) -> rusqlite::Result<MessageSummary> {
             .get::<_, Option<String>>(16)?
             .map(|s| s.split('\n').map(str::to_owned).collect())
             .unwrap_or_default(),
+        // Sütunları bir sonraki adımda (depo geçişi) gelir.
+        otp: None,
+        spam: false,
     })
 }
 
@@ -1299,8 +1302,8 @@ impl Store {
             unsubscribe,
             invite,
             sender_warning,
-            otp,
-            summary,
+            spam_verdict: None,
+            summary: MessageSummary { otp, ..summary },
         })
     }
 
@@ -1856,7 +1859,7 @@ pub(crate) mod tests {
         assert_eq!((d.trackers, d.cleaned_links), (1, 1));
         assert!(!d.has_remote_content);
         assert_eq!(d.sender_warning, Some(mh_core::SenderWarning::AuthFailed));
-        assert_eq!(d.otp.as_deref(), Some("604218"));
+        assert_eq!(d.summary.otp.as_deref(), Some("604218"));
         assert_eq!(s.otp(id).unwrap().as_deref(), Some("604218"));
         assert_eq!(s.otp(9999).unwrap(), None);
 
@@ -1865,7 +1868,7 @@ pub(crate) mod tests {
         m.uid = Some(2);
         let id = s.upsert_message(&m).unwrap().id;
         let d = s.detail(id, &[]).unwrap();
-        assert_eq!((d.sender_warning, d.otp), (None, None));
+        assert_eq!((d.sender_warning, d.summary.otp), (None, None));
         assert_eq!(d.trackers, 1);
 
         // Gövdesi inmemiş postada kod konu ve önizlemeden aranır.

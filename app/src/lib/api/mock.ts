@@ -42,6 +42,11 @@ import {
   type TransferStateKind,
   type Vacation,
   type View,
+  type SpamVerdict,
+  BLOCKED_MAX,
+  isBlocked,
+  normalizeBlocked,
+  normalizeBlockedEntry,
   LOCK_PASSWORD_MIN,
   QUICK_REPLIES_MAX,
   QUICK_REPLY_CHARS,
@@ -80,6 +85,8 @@ export interface MockBackend {
     screened: MessageId[];
     /** Bilinen göndericiler: "hesap|adres". */
     known: string[];
+    /** Kabul edilmiş göndericiler ("Güvenli" ya da elekten kabul): "hesap|adres". */
+    trusted: string[];
     tags: Tag[];
     /** Mobil kabuğun istediği titreşimler (yalnız kayıt; sahte arka uçta titreşim yok). */
     haptics: HapticKind[];
@@ -193,9 +200,9 @@ function lower(s: string): string {
 
 function summary(m: MessageDetail, followUp: number | null = m.followUp): MessageSummary {
   const {
-    id, accountId, mailboxId, threadId, from, to, subject, snippet, date, unread, starred, hasAttachments, category, snoozedUntil, pinned, tags,
+    id, accountId, mailboxId, threadId, from, to, subject, snippet, date, unread, starred, hasAttachments, category, snoozedUntil, pinned, tags, otp, spam,
   } = m;
-  return { id, accountId, mailboxId, threadId, from, to, subject, snippet, date, unread, starred, hasAttachments, category, snoozedUntil, followUp, pinned, tags };
+  return { id, accountId, mailboxId, threadId, from, to, subject, snippet, date, unread, starred, hasAttachments, category, snoozedUntil, followUp, pinned, tags, otp, spam };
 }
 
 /** Arka uçtaki `normalize_tag_name` ile aynı: denetim/yön karakterleri atılır, boşluklar teke iner, en çok 40 karakter. */
@@ -454,6 +461,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     followUps: {} as Record<number, { at: number; createdAt: number }>,
     screened: [] as MessageId[],
     known: [] as string[],
+    trusted: [] as string[],
     tags: empty ? [] : data.tags,
     haptics: [] as HapticKind[],
     lock: loadLock(!!opts.persist),
@@ -569,7 +577,40 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     const allowed = m.remoteAllowed || state.settings.remoteAllow.includes(lower(m.from.email));
     let bodyHtml = m.bodyHtml;
     if (bodyHtml && allowed) bodyHtml = bodyHtml.replace(/data-mh-src=/g, 'src=');
-    return structuredClone({ ...m, thread, remoteAllowed: allowed, bodyHtml, followUp: followUpOf(m.id) });
+    const spamVerdict = verdictOf(m);
+    return structuredClone({ ...m, thread, remoteAllowed: allowed, bodyHtml, followUp: followUpOf(m.id), spamVerdict, spam: !!spamVerdict });
+  }
+
+  /** Kendi yazdığımız posta mı (Gönderilenler, Taslaklar)? Onlarda kod ve şüpheli işareti yoktur. */
+  function isOwn(m: MessageDetail): boolean {
+    const role = roleOf(m.mailboxId);
+    return role === 'sent' || role === 'drafts';
+  }
+
+  /** Gönderen engelli mi: listede, kendi adresimiz değil ve bu hesapta kabul edilmemiş. */
+  function senderBlocked(m: MessageDetail): boolean {
+    return (
+      isBlocked(state.settings.blocked, m.from.email) &&
+      !state.accounts.some((a) => lower(a.email) === lower(m.from.email.trim())) &&
+      !state.trusted.includes(knownKey(m.accountId, m.from.email))
+    );
+  }
+
+  /** Okuma alanı kararı: postanın kendi kararı; gönderen engelliyse `blocked` nedeni başa eklenir, puan 100. */
+  function verdictOf(m: MessageDetail): SpamVerdict | null {
+    if (isOwn(m)) return null;
+    if (!senderBlocked(m)) return m.spamVerdict;
+    return { score: 100, reasons: ['blocked', ...(m.spamVerdict?.reasons ?? []).filter((r) => r !== 'blocked')] };
+  }
+
+  /** Postaları hesabın İstenmeyen kutusuna, kutu yoksa Çöp'e taşır. */
+  function moveToJunk(ids: MessageId[]) {
+    for (const id of ids) {
+      const m = find(id);
+      const junk = state.mailboxes.find((b) => b.accountId === m.accountId && b.role === 'junk');
+      m.mailboxId = junk ? junk.id : boxFor(m.accountId, 'trash');
+      m.snoozedUntil = null;
+    }
   }
 
   /** Süresi dolan hatırlatmaların postaları, gelen kutusunun ilk sayfasının üstüne (en eski önce). */
@@ -704,7 +745,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       snippet: msg.bodyText.replace(/\s+/g, ' ').slice(0, 200), date: now(), unread: false, starred: false,
       hasAttachments: msg.attachments.length > 0, category: 'people', snoozedUntil: null, followUp: null, pinned: false, tags: [], cc: msg.cc, bcc: msg.bcc, replyTo: [],
       messageIdHeader: null, references: [], bodyText: msg.bodyText, bodyHtml: null, hasRemoteContent: false,
-      remoteAllowed: false, attachments: [], thread: [], unsubscribe: null, invite: null, trackers: 0, cleanedLinks: 0, senderWarning: null, otp: null,
+      remoteAllowed: false, attachments: [], thread: [], unsubscribe: null, invite: null, trackers: 0, cleanedLinks: 0, senderWarning: null, otp: null, spam: false, spamVerdict: null,
     };
   }
 
@@ -743,7 +784,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
         snippet: msg.bodyText.replace(/\s+/g, ' ').slice(0, 200), date: now(), unread: false, starred: false,
         hasAttachments: msg.attachments.length > 0, category: 'people', snoozedUntil: null, followUp: null, pinned: false, tags: [], cc: msg.cc, bcc: [], replyTo: [],
         messageIdHeader: null, references: [], bodyText: msg.bodyText, bodyHtml: null, hasRemoteContent: false,
-        remoteAllowed: false, attachments: [], thread: [], unsubscribe: null, invite: null, trackers: 0, cleanedLinks: 0, senderWarning: null, otp: null,
+        remoteAllowed: false, attachments: [], thread: [], unsubscribe: null, invite: null, trackers: 0, cleanedLinks: 0, senderWarning: null, otp: null, spam: false, spamVerdict: null,
       });
       // Alıcılar bilinen gönderici olur; istenmişse yanıt hatırlatması kurulur.
       for (const a of [...msg.to, ...msg.cc]) {
@@ -889,9 +930,10 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       return null;
     },
     search: ({ q, limit }) => {
-      // Arka uçtaki işleçlerin sade karşılığı: from:, to:, konu:, has:ek, is:okunmamış, is:yıldızlı, in:, tag:, after:, before:.
+      // Arka uçtaki işleçlerin sade karşılığı: from:, to:, konu:, has:ek, has:kod, is:okunmamış, is:yıldızlı, is:şüpheli, in:, tag:, after:, before:.
       const tests: ((m: MessageDetail) => boolean)[] = [];
       let inBox = false;
+      let junkToo = false;
       const free = q.replace(/(\S+?):("([^"]*)"|\S+)/g, (all, op: string, _v: string, quoted: string | undefined) => {
         const v = lower(quoted ?? _v);
         const o = lower(op);
@@ -906,6 +948,12 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
         else if (o === 'to') tests.push((m) => [...m.to, ...m.cc].some((a) => lower(`${a.name ?? ''} ${a.email}`).includes(v)));
         else if (o === 'subject' || o === 'konu') tests.push((m) => lower(m.subject).includes(v));
         else if (o === 'has' && ['ek', 'attachment'].includes(v)) tests.push((m) => m.hasAttachments);
+        else if (o === 'has' && ['kod', 'code'].includes(v)) tests.push((m) => m.otp != null);
+        else if (o === 'is' && ['spam', 'şüpheli', 'supheli'].includes(v)) {
+          // Şüpheli postalar İstenmeyen kutusunda da aranır (taşınanlar oradadır).
+          junkToo = true;
+          tests.push((m) => m.spam);
+        }
         else if (o === 'is' && ['okunmamış', 'okunmamis', 'unread'].includes(v)) tests.push((m) => m.unread);
         else if (o === 'is' && ['yıldızlı', 'yildizli', 'starred'].includes(v)) tests.push((m) => m.starred);
         else if (['after', 'sonra', 'before', 'önce', 'once'].includes(o) && /^\d{4}[-/]\d{2}[-/]\d{2}$/.test(v)) {
@@ -927,7 +975,8 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       const needle = lower(free.trim());
       if (!needle && !tests.length) return [];
       return state.messages
-        .filter((m) => inBox || roleOf(m.mailboxId) !== 'trash')
+        // `in:` verilmedikçe çöp ve istenmeyen hariç (arka uçla aynı).
+        .filter((m) => inBox || (roleOf(m.mailboxId) !== 'trash' && (junkToo || roleOf(m.mailboxId) !== 'junk')))
         .filter((m) => tests.every((f) => f(m)))
         .filter((m) => !needle || [m.subject, m.from.name ?? '', m.from.email, m.bodyText ?? ''].some((f) => lower(f).includes(needle)))
         .sort((a, b) => b.date - a.date)
@@ -971,6 +1020,8 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
         templates: cleanTemplates(settings.templates ?? []),
         quickReplies: cleanQuickReplies(settings.quickReplies),
         savedSearches: cleanSavedSearches(settings.savedSearches ?? []),
+        blocked: normalizeBlocked(settings.blocked ?? []),
+        otpExpireHours: Math.min(Math.max(0, Math.trunc(settings.otpExpireHours ?? 0)), 24 * 30),
       };
       if (opts.persist) {
         try {
@@ -1379,7 +1430,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
         hasAttachments: false, category: 'people', snoozedUntil: null, cc: [], bcc: [], replyTo: [],
         messageIdHeader: null, references: [], bodyText: `${account.displayName} daveti yanıtladı: ${m.invite.summary}`, bodyHtml: null,
         hasRemoteContent: false, remoteAllowed: false, attachments: [], thread: [], unsubscribe: null, invite: null, followUp: null, pinned: false, tags: [],
-        trackers: 0, cleanedLinks: 0, senderWarning: null, otp: null,
+        trackers: 0, cleanedLinks: 0, senderWarning: null, otp: null, spam: false, spamVerdict: null,
       });
       emit(EVENTS.changed, { mailboxIds: [] });
       return null;
@@ -1433,9 +1484,63 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       state.screened = state.screened.filter((id) => !ids.includes(id));
       if (allow) {
         if (!state.known.includes(key)) state.known.push(key);
+        // Elekten kabul edilen gönderici "güvenli" sayılır (arka uçta `accepted`).
+        if (!state.trusted.includes(key)) state.trusted.push(key);
       } else {
         for (const id of ids) find(id).mailboxId = boxFor(accountId, 'trash');
       }
+      emit(EVENTS.changed, { mailboxIds: [] });
+      return null;
+    },
+    sender_block: ({ id }) => {
+      const m = find(id);
+      const address = normalizeBlockedEntry(m.from.email);
+      if (!address || address.startsWith('@')) {
+        fail('invalid', 'Gönderenin adresi eksik ya da bozuk; engellenemedi. Bu postayı silebilir ya da gönderen adına göre bir kural oluşturabilirsin.');
+      }
+      if (state.accounts.some((a) => lower(a.email) === address)) {
+        fail('invalid', 'Kendi adresini engelleyemezsin. Bu postadan kurtulmak için onu sil ya da arşivle.');
+      }
+      if (!state.settings.blocked.includes(address)) {
+        if (state.settings.blocked.length >= BLOCKED_MAX) {
+          fail('invalid', `Engellenenler listesi dolu (en çok ${BLOCKED_MAX}). Ayarlar › Gizlilik ve güvenlik'ten kullanmadığın girdileri kaldırıp yeniden dene.`);
+        }
+        state.settings = { ...state.settings, blocked: normalizeBlocked([...state.settings.blocked, address]) };
+      }
+      // Son açık karar geçerli: önceki "Güvenli" geri alınır, elekte bekleyen postaları elekten çıkar.
+      const key = knownKey(m.accountId, address);
+      state.trusted = state.trusted.filter((k) => k !== key);
+      const mine = (x: MessageDetail) => x.accountId === m.accountId && lower(x.from.email.trim()) === address;
+      state.screened = state.screened.filter((sid) => !mine(find(sid)));
+      const ids = state.messages
+        .filter((x) => mine(x) && roleOf(x.mailboxId) === 'inbox')
+        .sort((a, b) => b.date - a.date || b.id - a.id)
+        .map((x) => x.id);
+      moveToJunk(ids);
+      emit(EVENTS.settings, structuredClone(state.settings));
+      emit(EVENTS.changed, { mailboxIds: [] });
+      return { address, moved: ids.length, ids };
+    },
+    spam_trust: ({ id }) => {
+      const m = find(id);
+      const email = lower(m.from.email.trim());
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        fail('invalid', 'Gönderenin adresi eksik ya da bozuk; güvenli sayılamadı. Postayı gelen kutusuna elle taşıyabilirsin.');
+      }
+      const key = knownKey(m.accountId, email);
+      if (!state.known.includes(key)) state.known.push(key);
+      if (!state.trusted.includes(key)) state.trusted.push(key);
+      // Göndericinin bu hesaptaki postalarında şüpheli işareti kalkar.
+      for (const x of state.messages) {
+        if (x.accountId === m.accountId && lower(x.from.email.trim()) === email) {
+          x.spam = false;
+          x.spamVerdict = null;
+        }
+      }
+      // Adres engellenenlerden çıkar; alan adı girdisine dokunulmaz.
+      state.settings = { ...state.settings, blocked: state.settings.blocked.filter((e) => e !== email) };
+      if (roleOf(m.mailboxId) === 'junk') m.mailboxId = boxFor(m.accountId, 'inbox');
+      emit(EVENTS.settings, structuredClone(state.settings));
       emit(EVENTS.changed, { mailboxIds: [] });
       return null;
     },
@@ -1669,6 +1774,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       state.followUps = {};
       state.screened = [];
       state.known = [];
+      state.trusted = [];
       state.settings = { ...defaultSettings };
       state.lock = { enabled: false, locked: false, uiLocked: false, relockOnOpen: true, failures: 0, retryAfter: 0, password: null };
       saveLock();

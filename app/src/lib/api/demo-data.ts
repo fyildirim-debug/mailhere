@@ -1,7 +1,7 @@
 // Tarayıcı modu, testler ve ekran görüntüleri için örnek veri.
 // İçerik onaylı tasarımdaki postalarla aynıdır; gerçek kişi ya da kurum değildir.
 
-import type { Account, Address, Attachment, Category, Invite, Mailbox, MailboxRole, MessageDetail, SenderWarning, Tag, Unsubscribe } from './types';
+import type { Account, Address, Attachment, Category, Invite, Mailbox, MailboxRole, MessageDetail, SenderWarning, SpamVerdict, Tag, Unsubscribe } from './types';
 
 export interface DemoData {
   accounts: Account[];
@@ -82,6 +82,9 @@ interface Seed {
   cleanedLinks?: number;
   senderWarning?: SenderWarning;
   otp?: string;
+  /** Arka ucun hesapladığı istenmeyen kararı (eşik ve üstü); verilirse posta şüphelidir. */
+  spam?: SpamVerdict;
+  replyTo?: Address[];
 }
 
 function snippetOf(text: string): string {
@@ -328,6 +331,30 @@ export function createDemoData(now = new Date()): DemoData {
       body:
         'Merhaba,\n\nGönderinizin teslim edilebilmesi için gümrük ücreti ödenmelidir. Ödeme yapılmazsa gönderi iade edilecektir.\n\nDerin Kargo',
       date: at(now, -8, 13, 25), category: 'notifications', senderWarning: 'authFailed',
+      // Kimlik doğrulama başarısızlığı tek başına eşiği geçer: posta şüphelidir.
+      spam: { score: 50, reasons: ['authFailed'] },
+    },
+    // İstenmeyen koruması ve kod kolaylığı örnekleri: gelen kutusu dışında ve okunmuş
+    // (gelen kutusu listeleri ve sayaçları değişmez).
+    {
+      // Şüpheli posta, İstenmeyen kutusunda: sunucu işaretlemiş, alan adı benzetilmiş
+      // (Kiril "а" ile "bаnka"), yanıt adresi başka alan adında.
+      key: 'g6', account: A_HOME, role: 'junk',
+      from: { name: 'Banka Güvenlik', email: 'guvenlik@xn--bnka-53d.example' }, to: [ME_HOME],
+      replyTo: [{ name: null, email: 'dogrulama@hesap-onay.example' }],
+      subject: 'Kartınız geçici olarak kapatıldı',
+      body:
+        'Değerli müşterimiz,\n\nKartınızda şüpheli bir işlem tespit edildi ve kartınız geçici olarak kapatıldı. Yeniden açmak için bu postayı yanıtlayarak kart bilgilerinizi doğrulayın.\n\nBanka Güvenlik Birimi',
+      date: at(now, -2, 3, 14), category: 'notifications', senderWarning: 'lookalikeDomain',
+      spam: { score: 100, reasons: ['serverFlagged', 'lookalikeDomain', 'replyToMismatch'] },
+    },
+    {
+      // Taze doğrulama kodu (beş dakika önce geldi): liste satırında kod çipi.
+      key: 'g7', account: A_HOME, role: 'archive', from: { name: 'Bulut Fatura', email: 'guvenlik@bulutfatura.com.tr' }, to: [ME_HOME],
+      subject: 'Yeni cihazdan giriş kodun',
+      body:
+        'Merhaba,\n\nYeni bir cihazdan giriş yapılıyor. Doğrulama kodun:\n\n731 004\n\nKod 10 dakika geçerli. Bu girişi sen yapmadıysan parolanı değiştir.\n\nBulut Fatura',
+      date: now.getTime() - 5 * 60_000, category: 'notifications', otp: '731004',
     },
   ];
 
@@ -352,9 +379,11 @@ export function createDemoData(now = new Date()): DemoData {
       followUp: null,
       pinned: false,
       tags: s.tags ?? [],
+      otp: s.otp ?? null,
+      spam: !!s.spam,
       cc: s.cc ?? [],
       bcc: [],
-      replyTo: [],
+      replyTo: s.replyTo ?? [],
       messageIdHeader: `<${s.key}@mailhere.demo>`,
       references: [],
       bodyText: s.body,
@@ -368,7 +397,7 @@ export function createDemoData(now = new Date()): DemoData {
       trackers: s.trackers ?? 0,
       cleanedLinks: s.cleanedLinks ?? 0,
       senderWarning: s.senderWarning ?? null,
-      otp: s.otp ?? null,
+      spamVerdict: s.spam ?? null,
     };
   });
 

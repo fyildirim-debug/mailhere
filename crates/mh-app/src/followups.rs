@@ -252,6 +252,8 @@ mod tests {
             follow_up: Some(10),
             pinned: false,
             tags: Vec::new(),
+            otp: None,
+            spam: false,
         }
     }
 

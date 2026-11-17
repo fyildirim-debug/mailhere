@@ -79,7 +79,7 @@ describe('arayüz ölçeği', () => {
 function m(id: number, thread = `t${id}`): MessageSummary {
   return {
     id, accountId: 'a', mailboxId: 'a:INBOX', threadId: thread, from: { name: null, email: 'x@y.z' }, to: [], subject: `K${id}`,
-    snippet: '', date: 1000 - id, unread: false, starred: false, hasAttachments: false, category: 'people', snoozedUntil: null, followUp: null, pinned: false, tags: [],
+    snippet: '', date: 1000 - id, unread: false, starred: false, hasAttachments: false, category: 'people', snoozedUntil: null, followUp: null, pinned: false, tags: [], otp: null, spam: false,
   };
 }
 

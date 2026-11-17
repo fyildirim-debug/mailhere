@@ -154,6 +154,8 @@ mod tests {
             follow_up: None,
             pinned: false,
             tags: Vec::new(),
+            otp: None,
+            spam: false,
         }
     }
 

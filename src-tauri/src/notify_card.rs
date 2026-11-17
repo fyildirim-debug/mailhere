@@ -187,6 +187,8 @@ pub fn show_demo_card(app: &AppHandle) -> AppResult<()> {
             follow_up: None,
             pinned: false,
             tags: Vec::new(),
+            otp: None,
+            spam: false,
         },
     };
     let account = state.store.account(&message.account_id)?;

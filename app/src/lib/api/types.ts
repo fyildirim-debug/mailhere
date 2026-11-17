@@ -170,6 +170,10 @@ export interface MessageSummary {
   pinned: boolean;
   /** Postanın etiketlerinin kimlikleri (`Tag.id`). Yalnız yereldir. */
   tags: string[];
+  /** Postadaki doğrulama kodu (boşluksuz); yoksa null. Kendi postamızda (gönderilmiş, taslak) hep null. */
+  otp: string | null;
+  /** Posta şüpheli: istenmeyen puanı SPAM_THRESHOLD ve üstü. Nedenler `MessageDetail.spamVerdict` içindedir. */
+  spam: boolean;
 }
 
 /** Kullanıcının yerel, renkli etiketi. Sunucuya yazılmaz; hesaplar arası ortaktır. */
@@ -224,8 +228,12 @@ export interface MessageDetail extends MessageSummary {
   cleanedLinks: number;
   /** Gönderenin kimliğinden kuşku duyduran işaret. */
   senderWarning: SenderWarning | null;
-  /** Konu ya da metinde bulunan doğrulama kodu (boşluksuz). */
-  otp: string | null;
+  /**
+   * Postanın neden şüpheli sayıldığı; yalnız puan SPAM_THRESHOLD ve üstüyse (ya da gönderen
+   * engelliyse) dolu, kendi postamızda null. Doluysa arayüz `senderWarning` yerine bunu gösterir.
+   * Doğrulama kodu (`otp`) ve şüpheli işareti (`spam`) özetten gelir.
+   */
+  spamVerdict: SpamVerdict | null;
 }
 
 /**
@@ -233,6 +241,97 @@ export interface MessageDetail extends MessageSummary {
  * (punycode ya da karışık alfabe), alıcı sunucuda kimlik doğrulama başarısız.
  */
 export type SenderWarning = 'nameHasOtherAddress' | 'lookalikeDomain' | 'authFailed';
+
+/**
+ * Postanın neden şüpheli sayıldığı (okuma alanında neden satırları): alıcı sunucu işaretlemiş,
+ * kimlik doğrulama başarısız, benzetilmiş alan adı, görünen adda başka adres, yanıt adresi başka
+ * alan adında, çalıştırılabilir ya da çift uzantılı ek, gönderen engellenenler listesinde.
+ */
+export type SpamReason =
+  | 'serverFlagged'
+  | 'authFailed'
+  | 'lookalikeDomain'
+  | 'nameHasOtherAddress'
+  | 'replyToMismatch'
+  | 'riskyAttachment'
+  | 'blocked';
+
+/** İstenmeyen puanı (0–100) ve nedenleri (en ağırı önce, yinelenmeden). */
+export interface SpamVerdict {
+  score: number;
+  reasons: SpamReason[];
+}
+
+/** Bu puan ve üstü "şüpheli" (arka uçla aynı). */
+export const SPAM_THRESHOLD = 50;
+
+/**
+ * Şüpheli postaya ne yapılır. `off`: puan hesaplanır ama uyarı ve taşıma yok (engellenenler yine
+ * çalışır). `warn`: posta gelen kutusunda kalır, satırda ve okumada uyarı, kart ve bildirim yok.
+ * `move`: İstenmeyen'e taşınır (kutu yoksa `warn` gibi), bildirim yok.
+ */
+export type SpamFilter = 'off' | 'warn' | 'move';
+
+/** `sender_block` sonucu. */
+export interface BlockResult {
+  /** Engellenenler listesine yazılan adres (küçük harf). */
+  address: string;
+  /** Gelen kutusundan İstenmeyen'e (kutu yoksa Çöp'e) taşınan posta sayısı. */
+  moved: number;
+  /** Taşınan postaların kimlikleri ("Geri al" bunları gelen kutusuna döndürür). */
+  ids: MessageId[];
+}
+
+/** Engellenenler listesinin üst sınırı (arka uçla aynı). */
+export const BLOCKED_MAX = 500;
+
+const BAD_ADDRESS_CHAR = /[\s\p{Cc}@,;<>]/u;
+
+function blockableDomain(d: string): boolean {
+  return d.includes('.') && d.split('.').every((p) => p.length > 0) && !BAD_ADDRESS_CHAR.test(d);
+}
+
+function blockableAddress(e: string): boolean {
+  const at = e.lastIndexOf('@');
+  if (at < 0) return false;
+  const local = e.slice(0, at);
+  return local.length > 0 && !BAD_ADDRESS_CHAR.test(local) && blockableDomain(e.slice(at + 1));
+}
+
+/**
+ * Engellenenler listesinin tek öğesini sadeleştirir (arka uçtaki `normalize_blocked_entry`):
+ * kırpılır, küçültülür; tam adres (`a@b.com`) ya da alan adı (`@b.com`) değilse null.
+ */
+export function normalizeBlockedEntry(entry: string): string | null {
+  const e = entry.trim().toLowerCase();
+  const ok = e.startsWith('@') ? blockableDomain(e.slice(1)) : blockableAddress(e);
+  return ok ? e : null;
+}
+
+/**
+ * Engellenenler listesini sadeleştirir (arka uçtaki `normalize_blocked`): geçersizler ve
+ * yinelenenler atılır (ilk gelen kalır, sıra korunur), en çok BLOCKED_MAX öğe.
+ */
+export function normalizeBlocked(list: string[]): string[] {
+  const out: string[] = [];
+  for (const entry of list) {
+    const e = normalizeBlockedEntry(entry);
+    if (e && !out.includes(e)) out.push(e);
+    if (out.length === BLOCKED_MAX) break;
+  }
+  return out;
+}
+
+/**
+ * Gönderen engellenenler listesinde mi (arka uçtaki `is_blocked`)? Alan adı girdisi (`@b.com`)
+ * alt alan adlarını da kapsar; bozuk adresli gönderen hiçbir öğeyle eşleşmez.
+ */
+export function isBlocked(list: string[], email: string): boolean {
+  const e = email.trim().toLowerCase();
+  if (!list.length || !blockableAddress(e)) return false;
+  const domain = e.slice(e.lastIndexOf('@') + 1);
+  return list.some((entry) => (entry.startsWith('@') ? domain === entry.slice(1) || domain.endsWith(`.${entry.slice(1)}`) : entry === e));
+}
 
 /** Takvim davetinin amacı (iTIP METHOD). */
 export type InviteMethod = 'request' | 'cancel';
@@ -539,6 +638,22 @@ export interface Settings {
   swipeRight: SwipeAction;
   /** Bildirim düğmeleri (köşe kartı ve Android bildirimi), en çok üç, sıra korunur. */
   notifyActions: NotifyAction[];
+  /**
+   * Engellenen göndericiler: tam adres (`a@b.com`) ya da alan adı (`@b.com`), küçük harf, en çok
+   * BLOCKED_MAX (`normalizeBlocked`). Engellenenin yeni postası İstenmeyen'e (kutu yoksa Çöp'e) gider.
+   */
+  blocked: string[];
+  /** Şüpheli postaya ne yapılır (varsayılan: uyar). */
+  spamFilter: SpamFilter;
+  /** Kod içeren yeni posta gelince kod panoya kendiliğinden kopyalanır. */
+  otpAutoCopy: boolean;
+  /** Kod kopyalanınca (kart, okuma, satır çipi, kendiliğinden) posta okundu sayılır. */
+  otpMarkRead: boolean;
+  /**
+   * 0 kapalı. >0: kod içeren, gelen kutusunda duran ve bu kadar saatten eski postalar Çöp'e
+   * taşınır (saatte bir ve açılışta; yıldızlı ve sabitlenmiş postalar hariç). Arayüz 0 / 1 / 24 sunar.
+   */
+  otpExpireHours: number;
 }
 
 /** Kayıtlı arama: ad ve arama sorgusu (işleçler dahil). */
@@ -724,6 +839,11 @@ export const defaultSettings: Settings = {
   swipeLeft: 'archive',
   swipeRight: 'snooze',
   notifyActions: ['reply', 'trash', 'spam'],
+  blocked: [],
+  spamFilter: 'warn',
+  otpAutoCopy: false,
+  otpMarkRead: true,
+  otpExpireHours: 0,
 };
 
 // ------------------------------------------------------------------- olaylar
@@ -952,6 +1072,22 @@ export interface Commands {
   screener_list: [Record<string, never>, ScreenedSender[]];
   /** Kabul: gönderici bilinir, postaları gelen kutusuna döner. Engelle: elekteki postalar çöpe gider. */
   screener_decide: [{ email: string; accountId: AccountId; allow: boolean }, null];
+
+  // İstenmeyen koruması
+  /**
+   * Postanın göndericisini engeller: adres `Settings.blocked` listesine girer (zaten varsa
+   * yinelenmez), bu hesabın gelen kutusundaki o göndericiden gelen postalar İstenmeyen'e (kutu
+   * yoksa Çöp'e) taşınır. `mh:settings` ve `mh:changed` yayar. Kendi adresimiz ya da bozuk adres
+   * engellenemez (`invalid`). Engeli kaldırmak `settings_set` ile yapılır.
+   */
+  sender_block: [{ id: MessageId }, BlockResult];
+  /**
+   * "Güvenli / İstenmeyen değil": gönderici bu hesapta kabul edilmiş sayılır (sonraki postaları
+   * puan almaz, alan adı engelinden muaftır), postalarındaki şüpheli işareti kalkar, adresi
+   * `Settings.blocked` listesinden çıkar (alan adı girdisine dokunulmaz); posta İstenmeyen
+   * kutusundaysa gelen kutusuna döner. `mh:settings` ve `mh:changed` yayar.
+   */
+  spam_trust: [{ id: MessageId }, null];
 
   // Liste: göndericiye göre seçim, sabitleme, etiketler (hepsi yerel)
   /**

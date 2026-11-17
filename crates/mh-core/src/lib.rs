@@ -369,6 +369,14 @@ pub struct MessageSummary {
     /// Postanın etiketlerinin kimlikleri (`Tag::id`). Yalnız yereldir.
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Postadaki doğrulama kodu (boşluksuz); yoksa `None`. Alımda hesaplanır;
+    /// kendi postamızda (gönderilmiş, taslak) hep `None`.
+    #[serde(default)]
+    pub otp: Option<String>,
+    /// Posta şüpheli: istenmeyen puanı [`SPAM_THRESHOLD`] ve üstü. Nedenler
+    /// `MessageDetail::spam_verdict` içindedir.
+    #[serde(default)]
+    pub spam: bool,
 }
 
 /// Kullanıcının yerel, renkli etiketi. Sunucuya yazılmaz; hesaplar arası
@@ -454,9 +462,11 @@ pub struct MessageDetail {
     /// Gönderenin kimliğinden kuşku duyduran işaret; yoksa `None`.
     #[serde(default)]
     pub sender_warning: Option<SenderWarning>,
-    /// Konu ya da metinde bulunan doğrulama kodu (boşluksuz); yoksa `None`.
+    /// Postanın neden şüpheli sayıldığı; yalnız puan [`SPAM_THRESHOLD`] ve
+    /// üstüyse (ya da gönderen engelliyse) dolu, kendi postamızda `None`.
+    /// Doğrulama kodu (`otp`) ve şüpheli işareti (`spam`) özetten gelir.
     #[serde(default)]
-    pub otp: Option<String>,
+    pub spam_verdict: Option<SpamVerdict>,
 }
 
 /// Gönderen güveni uyarısı (okuma alanında gönderen satırının altında).
@@ -472,6 +482,207 @@ pub enum SenderWarning {
     /// Alıcı sunucunun `Authentication-Results` başlığında DMARC başarısız
     /// ya da DKIM ve SPF birlikte başarısız.
     AuthFailed,
+}
+
+/// Postanın neden şüpheli sayıldığı (okuma alanında neden satırları).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[serde(rename_all = "camelCase")]
+pub enum SpamReason {
+    /// Alıcı sunucu postayı istenmeyen diye işaretlemiş (`X-Spam-Flag` vb.).
+    ServerFlagged,
+    /// DMARC başarısız ya da DKIM ve SPF birlikte başarısız.
+    AuthFailed,
+    /// Punycode ya da karışık alfabe alan adı.
+    LookalikeDomain,
+    /// Görünen adda başka alan adına ait adres.
+    NameHasOtherAddress,
+    /// Yanıt adresi gönderenin alan adı dışında.
+    ReplyToMismatch,
+    /// Çalıştırılabilir ya da çift uzantılı ek.
+    RiskyAttachment,
+    /// Gönderen engellenenler listesinde.
+    Blocked,
+}
+
+impl SpamReason {
+    /// Tüm nedenler, gösterim sırasıyla (en ağırı önce).
+    pub const ALL: [SpamReason; 7] = [
+        SpamReason::Blocked,
+        SpamReason::ServerFlagged,
+        SpamReason::AuthFailed,
+        SpamReason::NameHasOtherAddress,
+        SpamReason::LookalikeDomain,
+        SpamReason::RiskyAttachment,
+        SpamReason::ReplyToMismatch,
+    ];
+
+    /// JSON'daki (ve veritabanındaki) adı.
+    pub fn key(self) -> &'static str {
+        match self {
+            SpamReason::ServerFlagged => "serverFlagged",
+            SpamReason::AuthFailed => "authFailed",
+            SpamReason::LookalikeDomain => "lookalikeDomain",
+            SpamReason::NameHasOtherAddress => "nameHasOtherAddress",
+            SpamReason::ReplyToMismatch => "replyToMismatch",
+            SpamReason::RiskyAttachment => "riskyAttachment",
+            SpamReason::Blocked => "blocked",
+        }
+    }
+
+    /// [`SpamReason::key`] adından neden; bilinmeyen ad `None`.
+    pub fn from_key(key: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|r| r.key() == key)
+    }
+}
+
+/// İstenmeyen puanı ve nedenleri.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SpamVerdict {
+    /// 0–100.
+    pub score: u8,
+    /// [`SpamReason::ALL`] sırasıyla, yinelenmeden.
+    pub reasons: Vec<SpamReason>,
+}
+
+impl SpamVerdict {
+    /// Puan eşiğin üstünde mi ("şüpheli")?
+    pub fn is_spam(&self) -> bool {
+        self.score >= SPAM_THRESHOLD
+    }
+
+    /// Nedenlerin veritabanı metni: adlar virgülle ayrılır; neden yoksa boş.
+    pub fn reasons_text(&self) -> String {
+        self.reasons
+            .iter()
+            .map(|r| r.key())
+            .collect::<Vec<_>>()
+            .join(",")
+    }
+
+    /// [`SpamVerdict::reasons_text`] metninden nedenler; bilinmeyen ad atılır.
+    pub fn reasons_from_text(text: &str) -> Vec<SpamReason> {
+        text.split(',')
+            .filter_map(|k| SpamReason::from_key(k.trim()))
+            .collect()
+    }
+
+    /// Engellenen göndericinin kararı: `Blocked` nedeni başa eklenir, puan 100.
+    pub fn with_blocked(mut self) -> Self {
+        self.reasons.retain(|r| *r != SpamReason::Blocked);
+        self.reasons.insert(0, SpamReason::Blocked);
+        self.score = 100;
+        self
+    }
+}
+
+/// Bu puan ve üstü "şüpheli".
+pub const SPAM_THRESHOLD: u8 = 50;
+
+/// Şüpheli postaya ne yapılır (`Settings::spam_filter`).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum SpamFilter {
+    /// Puan hesaplanır ama uyarı ve taşıma yok (engellenenler yine çalışır).
+    Off,
+    /// İstenmeyen kutusuna taşınır (kutu yoksa `Warn` gibi); bildirim yok.
+    Move,
+    /// Posta gelen kutusunda kalır; satırda ve okumada uyarı, kart ve
+    /// bildirim gösterilmez. Bilinmeyen değer (yeni sürümden gelen ayar) de
+    /// buraya düşer.
+    #[default]
+    #[serde(other)]
+    Warn,
+}
+
+/// `sender_block` komutunun sonucu.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockResult {
+    /// Engellenenler listesine yazılan adres (küçük harf).
+    pub address: String,
+    /// Gelen kutusundan İstenmeyen'e (kutu yoksa Çöp'e) taşınan posta sayısı.
+    pub moved: u32,
+    /// Taşınan postaların kimlikleri ("Geri al" bunları gelen kutusuna döndürür).
+    #[serde(default)]
+    pub ids: Vec<MessageId>,
+}
+
+/// Engellenenler listesinin üst sınırı.
+pub const BLOCKED_MAX: usize = 500;
+
+/// Adres tam mı: boş olmayan yerel kısım, `@` ve en az iki parçalı alan adı.
+fn is_blockable_address(e: &str) -> bool {
+    match e.rsplit_once('@') {
+        Some((local, domain)) => {
+            !local.is_empty() && !local.contains(bad_address_char) && is_blockable_domain(domain)
+        }
+        None => false,
+    }
+}
+
+/// Adreste bulunamayacak karakter: boşluk, denetim, ikinci `@`, ayırıcılar.
+fn bad_address_char(c: char) -> bool {
+    c.is_whitespace() || c.is_control() || matches!(c, '@' | ',' | ';' | '<' | '>')
+}
+
+/// En az iki parçalı, boş parçası, boşluğu ve denetim karakteri olmayan alan
+/// adı ("com" gibi tek parça herkesi engellerdi).
+fn is_blockable_domain(d: &str) -> bool {
+    d.contains('.') && d.split('.').all(|p| !p.is_empty()) && !d.contains(bad_address_char)
+}
+
+/// Engellenenler listesinin tek öğesini sadeleştirir: kırpılır, küçültülür;
+/// tam adres (`a@b.com`) ya da alan adı (`@b.com`) değilse `None`.
+pub fn normalize_blocked_entry(entry: &str) -> Option<String> {
+    let e = entry.trim().to_lowercase();
+    let ok = match e.strip_prefix('@') {
+        Some(domain) => is_blockable_domain(domain),
+        None => is_blockable_address(&e),
+    };
+    ok.then_some(e)
+}
+
+/// Engellenenler listesini sadeleştirir: her öğe kırpılır ve küçültülür,
+/// geçersizler ve yinelenenler atılır (ilk gelen kalır, sıra korunur), en çok
+/// [`BLOCKED_MAX`] öğe.
+pub fn normalize_blocked(list: Vec<String>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for entry in list {
+        let Some(e) = normalize_blocked_entry(&entry) else {
+            continue;
+        };
+        if !out.contains(&e) {
+            out.push(e);
+        }
+        if out.len() == BLOCKED_MAX {
+            break;
+        }
+    }
+    out
+}
+
+/// Gönderen engellenenler listesinde mi? Liste öğesi tam adres ya da
+/// `@alanadi` biçimindedir (alan adı girdisi alt alan adlarını da kapsar).
+/// Bozuk adresli gönderen hiçbir öğeyle eşleşmez.
+pub fn is_blocked(list: &[String], email: &str) -> bool {
+    if list.is_empty() {
+        return false;
+    }
+    let email = email.trim().to_lowercase();
+    if !is_blockable_address(&email) {
+        return false;
+    }
+    let domain = email.rsplit_once('@').map_or("", |(_, d)| d);
+    list.iter().any(|entry| match entry.strip_prefix('@') {
+        Some(d) => {
+            domain == d
+                || domain
+                    .strip_suffix(d)
+                    .is_some_and(|rest| rest.ends_with('.'))
+        }
+        None => *entry == email,
+    })
 }
 
 /// Takvim davetinin amacı (iTIP METHOD).
@@ -1056,6 +1267,19 @@ pub struct Settings {
     pub swipe_right: SwipeAction,
     /// Bildirim düğmeleri (köşe kartı ve Android bildirimi), en çok üç.
     pub notify_actions: Vec<NotifyAction>,
+    /// Engellenen göndericiler: tam adres (`a@b.com`) ya da alan adı
+    /// (`@b.com`), küçük harf, en çok [`BLOCKED_MAX`] ([`normalize_blocked`]).
+    pub blocked: Vec<String>,
+    /// Şüpheli postaya ne yapılır (varsayılan: uyar).
+    pub spam_filter: SpamFilter,
+    /// Kod içeren yeni posta gelince kod panoya kendiliğinden kopyalanır.
+    pub otp_auto_copy: bool,
+    /// Kod kopyalanınca (kart, okuma, satır çipi, kendiliğinden) posta
+    /// okundu sayılır.
+    pub otp_mark_read: bool,
+    /// 0 kapalı. >0: kod içeren, gelen kutusunda duran ve bu kadar saatten
+    /// eski postalar Çöp'e taşınır (saatte bir ve açılışta).
+    pub otp_expire_hours: u32,
 }
 
 /// Kayıtlı arama: ad ve arama sorgusu (işleçler dahil).
@@ -1355,6 +1579,11 @@ impl Default for Settings {
             swipe_left: SwipeAction::Archive,
             swipe_right: SwipeAction::Snooze,
             notify_actions: default_notify_actions(),
+            blocked: Vec::new(),
+            spam_filter: SpamFilter::Warn,
+            otp_auto_copy: false,
+            otp_mark_read: true,
+            otp_expire_hours: 0,
         }
     }
 }
@@ -1612,6 +1841,8 @@ mod tests {
             follow_up: None,
             pinned: false,
             tags: Vec::new(),
+            otp: Some("482913".into()),
+            spam: true,
         };
         let d = MessageDetail {
             summary: s,
@@ -1646,13 +1877,21 @@ mod tests {
             trackers: 3,
             cleaned_links: 2,
             sender_warning: Some(SenderWarning::NameHasOtherAddress),
-            otp: Some("482913".into()),
+            spam_verdict: Some(SpamVerdict {
+                score: 90,
+                reasons: vec![SpamReason::AuthFailed, SpamReason::NameHasOtherAddress],
+            }),
         };
         let v = serde_json::to_value(&d).unwrap();
         assert_eq!(v["trackers"], 3);
         assert_eq!(v["cleanedLinks"], 2);
         assert_eq!(v["senderWarning"], "nameHasOtherAddress");
         assert_eq!(v["otp"], "482913");
+        assert_eq!(v["spam"], true);
+        assert_eq!(
+            v["spamVerdict"],
+            serde_json::json!({"score": 90, "reasons": ["authFailed", "nameHasOtherAddress"]})
+        );
         assert_eq!(
             serde_json::to_value(SenderWarning::LookalikeDomain).unwrap(),
             "lookalikeDomain"
@@ -1684,6 +1923,8 @@ mod tests {
             "cleanedLinks",
             "senderWarning",
             "otp",
+            "spam",
+            "spamVerdict",
         ] {
             old.as_object_mut().unwrap().remove(k);
         }
@@ -1691,7 +1932,8 @@ mod tests {
         assert_eq!(back.unsubscribe, None);
         assert_eq!(back.invite, None);
         assert_eq!((back.trackers, back.cleaned_links), (0, 0));
-        assert_eq!((back.sender_warning, back.otp), (None, None));
+        assert_eq!((back.sender_warning, back.summary.otp), (None, None));
+        assert_eq!((back.summary.spam, back.spam_verdict), (false, None));
         assert!(!back.summary.pinned);
         assert!(back.summary.tags.is_empty());
         assert_eq!(
@@ -2070,6 +2312,151 @@ mod tests {
         assert_eq!(s.swipe_left, SwipeAction::None);
         assert_eq!(s.after_remove, AfterRemove::List);
         assert!(s.screener);
+    }
+
+    #[test]
+    fn istenmeyen_ve_kod_ayarlari() {
+        // Eski kayıtta alan yok: uyar, engellenen yok, kod kopyalanmaz ama
+        // kopyalanınca okundu sayılır, kod postaları silinmez.
+        let s: Settings = serde_json::from_str(r#"{"screener":true,"theme":"dark"}"#).unwrap();
+        assert!(s.blocked.is_empty());
+        assert_eq!(s.spam_filter, SpamFilter::Warn);
+        assert!(!s.otp_auto_copy);
+        assert!(s.otp_mark_read);
+        assert_eq!(s.otp_expire_hours, 0);
+        assert_eq!(s.theme, Theme::Dark, "diğer alanlar korunur");
+        let v = serde_json::to_value(Settings::default()).unwrap();
+        assert_eq!(v["blocked"], serde_json::json!([]));
+        assert_eq!(v["spamFilter"], "warn");
+        assert_eq!(v["otpAutoCopy"], false);
+        assert_eq!(v["otpMarkRead"], true);
+        assert_eq!(v["otpExpireHours"], 0);
+        let s: Settings = serde_json::from_str(
+            r#"{"blocked":["a@b.com","@c.org"],"spamFilter":"move","otpAutoCopy":true,
+                "otpMarkRead":false,"otpExpireHours":24}"#,
+        )
+        .unwrap();
+        assert_eq!(s.blocked, ["a@b.com", "@c.org"]);
+        assert_eq!(s.spam_filter, SpamFilter::Move);
+        assert!(s.otp_auto_copy && !s.otp_mark_read);
+        assert_eq!(s.otp_expire_hours, 24);
+        for (f, name) in [
+            (SpamFilter::Off, "off"),
+            (SpamFilter::Warn, "warn"),
+            (SpamFilter::Move, "move"),
+        ] {
+            assert_eq!(serde_json::to_value(f).unwrap(), serde_json::json!(name));
+        }
+        // Bilinmeyen değer tüm ayarları düşürmez; "uyar"a iner.
+        let s: Settings =
+            serde_json::from_str(r#"{"spamFilter":"karantina","screener":true}"#).unwrap();
+        assert_eq!(s.spam_filter, SpamFilter::Warn);
+        assert!(s.screener);
+    }
+
+    #[test]
+    fn istenmeyen_nedenleri_ve_karar() {
+        // Veritabanı adı JSON adıyla aynıdır; her neden bir kez listelenir.
+        for r in SpamReason::ALL {
+            assert_eq!(serde_json::to_value(r).unwrap(), serde_json::json!(r.key()));
+            assert_eq!(SpamReason::from_key(r.key()), Some(r));
+        }
+        let mut keys: Vec<&str> = SpamReason::ALL.iter().map(|r| r.key()).collect();
+        keys.sort_unstable();
+        keys.dedup();
+        assert_eq!(keys.len(), 7);
+        assert_eq!(SpamReason::from_key("bilinmeyen"), None);
+
+        let v = SpamVerdict {
+            score: 55,
+            reasons: vec![SpamReason::LookalikeDomain, SpamReason::ReplyToMismatch],
+        };
+        assert!(v.is_spam());
+        assert_eq!(v.reasons_text(), "lookalikeDomain,replyToMismatch");
+        assert_eq!(
+            SpamVerdict::reasons_from_text("lookalikeDomain, replyToMismatch,yeni"),
+            v.reasons
+        );
+        assert!(SpamVerdict::reasons_from_text("").is_empty());
+        assert_eq!(
+            serde_json::to_value(&v).unwrap(),
+            serde_json::json!({"score": 55, "reasons": ["lookalikeDomain", "replyToMismatch"]})
+        );
+        let below = SpamVerdict {
+            score: SPAM_THRESHOLD - 1,
+            reasons: vec![SpamReason::RiskyAttachment],
+        };
+        assert!(!below.is_spam());
+        assert!(!SpamVerdict::default().is_spam());
+        // Engelli gönderen: neden başa gelir, puan 100; ikinci kez eklenmez.
+        let b = below.with_blocked().with_blocked();
+        assert_eq!(b.score, 100);
+        assert_eq!(
+            b.reasons,
+            [SpamReason::Blocked, SpamReason::RiskyAttachment]
+        );
+        assert_eq!(
+            serde_json::to_value(BlockResult {
+                address: "a@b.com".into(),
+                moved: 3,
+                ids: vec![7, 8, 9],
+            })
+            .unwrap(),
+            serde_json::json!({"address": "a@b.com", "moved": 3, "ids": [7, 8, 9]})
+        );
+    }
+
+    #[test]
+    fn engellenenler_listesi() {
+        let list = normalize_blocked(
+            [
+                "  Reklam@Firma.COM ",
+                "reklam@firma.com",
+                "@Kotu.Example",
+                "kotu.example",
+                "@com",
+                "a@",
+                "@",
+                "",
+                "a b@c.com",
+                "x@y",
+                "a@b@c.com",
+                "@iki..nokta.com",
+                "ÖZEL@şirket.com.tr",
+            ]
+            .map(String::from)
+            .to_vec(),
+        );
+        assert_eq!(
+            list,
+            ["reklam@firma.com", "@kotu.example", "özel@şirket.com.tr"]
+        );
+        assert_eq!(
+            normalize_blocked_entry(" @Firma.com "),
+            Some("@firma.com".into())
+        );
+        assert_eq!(normalize_blocked_entry("firma.com"), None);
+
+        assert!(is_blocked(&list, " REKLAM@firma.com "));
+        assert!(
+            !is_blocked(&list, "baska@firma.com"),
+            "tam adres yalnız kendini engeller"
+        );
+        assert!(is_blocked(&list, "herkes@kotu.example"));
+        assert!(is_blocked(&list, "x@posta.kotu.example"), "alt alan adı");
+        assert!(
+            !is_blocked(&list, "x@cokkotu.example"),
+            "son ek benzerliği yetmez"
+        );
+        assert!(!is_blocked(&list, "kotu.example"), "bozuk adres eşleşmez");
+        assert!(!is_blocked(&list, ""));
+        assert!(!is_blocked(&[], "reklam@firma.com"));
+
+        // Üst sınır.
+        let many: Vec<String> = (0..BLOCKED_MAX + 20)
+            .map(|i| format!("a{i}@b.com"))
+            .collect();
+        assert_eq!(normalize_blocked(many).len(), BLOCKED_MAX);
     }
 
     #[test]

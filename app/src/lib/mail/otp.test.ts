@@ -22,9 +22,10 @@ describe('güven örnekleri (sahte arka uç)', () => {
     expect(bySubject('Giriş doğrulama kodun').otp).toBe('482913');
     expect(bySubject('Haftalık özet: üç görev tamamlandı').hasRemoteContent).toBe(false);
     const samples = messages.filter((m) => m.trackers || m.senderWarning || m.otp);
-    expect(samples).toHaveLength(5);
+    // Beş güven örneği + şüpheli posta (İstenmeyen kutusunda) + taze kodlu posta.
+    expect(samples).toHaveLength(7);
     for (const m of samples) {
-      expect(m.mailboxId.endsWith(':Archive')).toBe(true);
+      expect(m.mailboxId.endsWith(m.subject === 'Kartınız geçici olarak kapatıldı' ? ':Junk' : ':Archive')).toBe(true);
       expect(m.unread).toBe(false);
     }
     // Diğer postalarda alanlar boş.
