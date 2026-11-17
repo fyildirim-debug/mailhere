@@ -22,6 +22,7 @@ import {
   type View,
 } from '../api';
 import { t, when } from '../i18n/index.svelte';
+import { bindComposeAccount } from '../mail/open';
 import { accountScope } from '../mail/query';
 import { showToast } from '../ui/toast.svelte';
 import { baseSubject, displayName, replyTargets } from '../util/format';
@@ -379,6 +380,10 @@ export function move(delta: 1 | -1) {
   const next = rows[Math.min(Math.max(i + delta, 0), rows.length - 1)] ?? rows[0];
   if (next && next.id !== mail.selectedId) void select(next.id, { markRead: false });
 }
+
+// Postadaki `mailto:` bağlantısından açılan yeni posta, okunan postanın
+// hesabından (yoksa seçili hesap kapsamından) gönderilir.
+bindComposeAccount(() => mail.detail?.accountId ?? mail.accountId);
 
 // ---------------------------------------------------------- eylemler
 
