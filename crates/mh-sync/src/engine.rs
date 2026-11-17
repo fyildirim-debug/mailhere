@@ -466,6 +466,7 @@ impl SyncManager {
                         uid: l.server_uid,
                         uidvalidity: l.server_uidvalidity,
                         message_id: l.message_id_header.clone(),
+                        fallback_path: None,
                     })
                     .collect();
                 self.queue(&account, &Action::Delete { items }, None)?;
@@ -910,6 +911,8 @@ async fn run_action(
         Action::Draft { path, remove } => {
             drafts::apply(conn, path, qa.raw.as_deref(), remove).await
         }
+        // Kutu boşaltma ve JMAP silme: uygulaması bir sonraki adımda.
+        Action::Empty { .. } | Action::Purge { .. } => Ok(Vec::new()),
     }
 }
 
@@ -1835,6 +1838,7 @@ mod tests {
             uidnext: None,
             highest_uid: 0,
             nosync,
+            older_done: false,
         }
     }
 

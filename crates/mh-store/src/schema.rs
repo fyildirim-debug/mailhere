@@ -292,6 +292,13 @@ const MIGRATIONS: &[&str] = &[
         done_at  INTEGER NOT NULL
     );
     "#,
+    // 12: "daha eski postalar" (`messages_older`). İlk eşitleme kutu başına en
+    // yeni postaları indirir; daha eskisi istenince gelir.
+    r#"
+    -- Kutunun başına ulaşıldı: sunucuda yereldekinden daha eski posta kalmadı
+    -- (1). UIDVALIDITY değişince ve JMAP baştan eşitlenince sıfırlanır.
+    ALTER TABLE mailboxes ADD COLUMN older_done INTEGER NOT NULL DEFAULT 0;
+    "#,
 ];
 
 /// "Yalnız Kişiler" varsayılanını "her posta"ya taşıyan geçişin sürümü.
@@ -531,6 +538,43 @@ mod tests {
             assert_eq!(n, 1, "{index}");
         }
         // İkinci açılışta yeniden uygulanmaz (sütunlar zaten var).
+        migrate(&mut conn).unwrap();
+    }
+
+    #[test]
+    fn daha_eski_postalar_gecisi_eski_kutulari_korur() {
+        // 11. sürümde bir kutu; 12. geçiş sonradan uygulanır.
+        let mut conn = Connection::open_in_memory().unwrap();
+        for sql in &MIGRATIONS[..11] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 11i64).unwrap();
+        conn.execute_batch(
+            "INSERT INTO accounts (id, name, email, display_name, color, kind, created_at)
+             VALUES ('a', 'İş', 'a@ornek.com', 'A', '#4C6FD8', 'imap', 1);
+             INSERT INTO mailboxes (id, account_id, path, name, role, uidvalidity, highest_uid)
+             VALUES ('a:INBOX', 'a', 'INBOX', 'INBOX', 'inbox', 7, 420);",
+        )
+        .unwrap();
+        migrate(&mut conn).unwrap();
+        assert_eq!(
+            conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+                .unwrap() as usize,
+            latest_version()
+        );
+        let (done, validity, highest): (i64, i64, i64) = conn
+            .query_row(
+                "SELECT older_done, uidvalidity, highest_uid FROM mailboxes WHERE id = 'a:INBOX'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            (done, validity, highest),
+            (0, 7, 420),
+            "eski kutuda daha eskisi sorulmamış sayılır; eşitleme durumu korunur"
+        );
+        // İkinci açılışta yeniden uygulanmaz (sütun zaten var).
         migrate(&mut conn).unwrap();
     }
 

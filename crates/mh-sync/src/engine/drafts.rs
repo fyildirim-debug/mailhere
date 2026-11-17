@@ -22,6 +22,7 @@ fn old_draft(l: &MessageLocation) -> ServerRef {
         uid: l.server_uid,
         uidvalidity: l.server_uidvalidity,
         message_id: l.message_id_header.clone(),
+        fallback_path: None,
     }
 }
 
