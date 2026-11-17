@@ -5,6 +5,9 @@
   import Icon from '../../lib/ui/Icon.svelte';
   import { followUpDue } from '../../lib/util/followup';
   import { displayName, listTime, snoozeOptions } from '../../lib/util/format';
+  import OtpChip from '../../lib/mail/OtpChip.svelte';
+  import { groupCode } from '../../lib/mail/otp';
+  import { otpFresh } from '../../lib/stores/guard.svelte';
   import { mail, moveTo, snooze, type Row } from '../../lib/stores/mail.svelte';
   import { clickRow, isChecked, toggleCheck } from '../../lib/stores/selection.svelte';
   import { tagsOf } from '../../lib/stores/tags.svelte';
@@ -29,6 +32,8 @@
   // Yanıt hatırlatmalı (gönderilmiş) satırda beklenen kişi, yani ilk alıcı görünür.
   const who = $derived(message.followUp != null && message.to[0] ? message.to[0] : message.from);
   const awaiting = $derived(followUpDue(message.followUp, now));
+  /** Taze doğrulama kodu: satırın son metin satırında kopyalama çipi. */
+  const code = $derived(message.otp && otpFresh(message.date, now) ? message.otp : null);
   /** Çöp ya da İstenmeyen'deki satırda "Sil" kalıcı siler (onaylı). */
   const purge = $derived(purgeBox(message.mailboxId));
   const deleteLabel = $derived(t(purge ? 'purge.delete' : 'act.delete'));
@@ -50,7 +55,7 @@
   }
 </script>
 
-<div class="row" class:selected class:checked class:unread={message.unread} class:compact data-id={message.id}>
+<div class="row" class:selected class:checked class:unread={message.unread} class:compact class:has-otp={code != null} data-id={message.id}>
   <button
     class="main"
     aria-current={selected ? 'true' : undefined}
@@ -82,8 +87,19 @@
         {/if}
         <span class="time num">{listTime(message.date, now, locale())}</span>
       </span>
-      <span class="subject trunc">{message.subject || '—'}</span>
-      {#if !compact}<span class="snippet trunc">{message.snippet}</span>{/if}
+      <!-- Kod çipi son metin satırının sağında durur; görünmez eşi metne yer açar (çip ana düğmenin dışındadır). -->
+      {#if compact}
+        <span class="last">
+          <span class="subject trunc">{message.subject || '—'}</span>
+          {#if code}<span class="otp-space num" aria-hidden="true">{groupCode(code)}</span>{/if}
+        </span>
+      {:else}
+        <span class="subject trunc">{message.subject || '—'}</span>
+        <span class="last">
+          <span class="snippet trunc">{message.snippet}</span>
+          {#if code}<span class="otp-space num" aria-hidden="true">{groupCode(code)}</span>{/if}
+        </span>
+      {/if}
     </span>
   </button>
   <!-- Avatarın üstünde seçim düğmesi: üzerine gelince ya da seçiliyken görünür. -->
@@ -95,22 +111,32 @@
   >
     <Icon name="check" size={16} />
   </button>
-  <div class="acts">
-    <button class="btn-icon small" aria-label={t('act.archive')} title="{t('act.archive')} · E" onclick={(e) => void teach('archive', e, moveTo(message.ids, 'archive'))}>
-      <Icon name="archive" size={16} />
-    </button>
-    <button class="btn-icon small" aria-label={t('act.snooze')} title="{t('snooze.tomorrow')} · H" onclick={(e) => void teach('snooze', e, snooze(message.ids, tomorrow))}>
-      <Icon name="clock" size={16} />
-    </button>
-    <button
-      class="btn-icon small"
-      aria-label={deleteLabel}
-      title="{deleteLabel} · #"
-      onclick={(e) => (purge ? void removeMessages(message.ids) : void teach('delete', e, removeMessages(message.ids)))}
-    >
-      <Icon name="trash" size={16} />
-    </button>
-  </div>
+  {#snippet actions()}
+    <div class="acts">
+      <button class="btn-icon small" aria-label={t('act.archive')} title="{t('act.archive')} · E" onclick={(e) => void teach('archive', e, moveTo(message.ids, 'archive'))}>
+        <Icon name="archive" size={16} />
+      </button>
+      <button class="btn-icon small" aria-label={t('act.snooze')} title="{t('snooze.tomorrow')} · H" onclick={(e) => void teach('snooze', e, snooze(message.ids, tomorrow))}>
+        <Icon name="clock" size={16} />
+      </button>
+      <button
+        class="btn-icon small"
+        aria-label={deleteLabel}
+        title="{deleteLabel} · #"
+        onclick={(e) => (purge ? void removeMessages(message.ids) : void teach('delete', e, removeMessages(message.ids)))}
+      >
+        <Icon name="trash" size={16} />
+      </button>
+    </div>
+  {/snippet}
+  <!-- Sıkı görünümde çip ikinci satırdadır; satır eylemleri onu örtmesin diye solunda açılır. -->
+  {#if code}
+    <div class="otp-slot">
+      {#if compact}{@render actions()}{/if}
+      <OtpChip id={message.id} {code} unread={message.unread} />
+    </div>
+  {/if}
+  {#if !(code && compact)}{@render actions()}{/if}
 </div>
 
 <style>
@@ -237,6 +263,55 @@
     color: var(--ink-3);
   }
 
+  /* Son metin satırı: metin kısalır, kod çipine yer kalır. */
+  .last {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .last > .trunc {
+    flex: 1;
+    min-width: 0;
+  }
+
+  /* Çipin görünmez eşi: aynı metin ve ölçülerle çipin genişliğini ayırır. */
+  .otp-space {
+    flex: none;
+    visibility: hidden;
+    height: 20px;
+    padding: 0 27px 0 9px;
+    font-size: var(--fs-meta);
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+  }
+
+  /* Çip son metin satırının sağında (24 px çip, 20 px satır). Kap tıklamayı
+     geçirir: çipin solundaki boşluk satırı açmaya devam eder. */
+  .otp-slot {
+    position: absolute;
+    right: 12px;
+    bottom: 9px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    pointer-events: none;
+  }
+
+  .otp-slot :global(.otp-chip) {
+    pointer-events: auto;
+  }
+
+  .compact .otp-slot {
+    bottom: 2px;
+  }
+
+  .otp-slot .acts {
+    position: static;
+  }
+
   .pick {
     position: absolute;
     top: 11px;
@@ -296,5 +371,11 @@
   .row:hover .time,
   .row:focus-within .time {
     visibility: hidden;
+  }
+
+  /* Sıkı görünümde kodlu satırın eylemleri ikinci satırda açılır; saat görünür kalır. */
+  .row.compact.has-otp:hover .time,
+  .row.compact.has-otp:focus-within .time {
+    visibility: visible;
   }
 </style>
