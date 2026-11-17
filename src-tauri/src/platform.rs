@@ -65,6 +65,11 @@ impl Platform for DesktopPlatform {
         crate::notify_card::show_card(app, ev, settings.native_notifications);
     }
 
+    /// Yeni postadaki doğrulama kodu panoya (GTK / Win32 panosu).
+    fn copy_text(&self, app: &AppHandle, text: &str) -> bool {
+        crate::clipboard::set_text(app, text)
+    }
+
     /// Çekirdek açıldı (olağan açılış ya da kilit açıldı): tepsi sayacı.
     fn core_ready(&self, app: &AppHandle) {
         crate::tray::refresh(app);
