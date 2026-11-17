@@ -131,7 +131,7 @@
           <select class="input small op" aria-label={t('rule.operator')} bind:value={c.op}>
             {#each ops as [k, label] (k)}<option value={k}>{t(label)}</option>{/each}
           </select>
-          <input class="input small grow" aria-label={t('rule.value')} maxlength="500" placeholder={c.kind === 'from' || c.kind === 'to' ? 'ad@alanadi.com' : ''} bind:value={c.value} />
+          <input class="input small grow" aria-label={t('rule.value')} maxlength="500" placeholder={c.kind === 'from' || c.kind === 'to' ? t('placeholder.email') : ''} bind:value={c.value} />
         {:else}
           <span class="grow"></span>
         {/if}
@@ -157,7 +157,7 @@
             {#each folders as n (n.mailbox.id)}<option value={n.mailbox.id}>{'· '.repeat(n.depth)}{folderLabel(n.mailbox)}</option>{/each}
           </select>
         {:else if a.kind === 'forward'}
-          <input class="input small grow" type="email" aria-label={t('rule.forwardTo')} placeholder="ad@alanadi.com" bind:value={a.to} />
+          <input class="input small grow" type="email" aria-label={t('rule.forwardTo')} placeholder={t('placeholder.email')} bind:value={a.to} />
         {:else if a.kind === 'tag'}
           <select class="input small grow" aria-label={t('tag.name')} bind:value={a.tagId} disabled={!tagStore.list.length}>
             {#each tagStore.list as tg (tg.id)}<option value={tg.id}>{tg.name}</option>{/each}

@@ -1200,4 +1200,7 @@ export const en: Record<MessageKey, string> = {
   'time.pickSnooze': 'Snooze date and time',
   'time.past': 'That moment has already passed. Pick a later date and time.',
   'compose.schedulePast': 'The send time you picked has passed, so scheduling was removed. Pick a new time or send now.',
+  // Girdi yer tutucuları (örnek adres ve sunucu).
+  'placeholder.email': 'name@example.com',
+  'placeholder.jmapUrl': 'https://mail.example.com',
 };

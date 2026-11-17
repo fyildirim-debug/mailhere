@@ -357,7 +357,7 @@
           class="input"
           type="email"
           autocomplete="email"
-          placeholder="ad@alanadi.com"
+          placeholder={t('placeholder.email')}
           bind:value={email}
           onkeydown={(e) => e.key === 'Enter' && find()}
           autofocus
@@ -456,7 +456,7 @@
           class="input"
           type="email"
           autocomplete="email"
-          placeholder="ad@alanadi.com"
+          placeholder={t('placeholder.email')}
           bind:value={email}
           onblur={() => {
             if (!valid) return;
@@ -468,7 +468,7 @@
 
         <label class="label gap" for="jmap-url">{t('onb.sessionUrl')}</label>
         <div class="with-btn">
-          <input id="jmap-url" class="input" type="url" spellcheck="false" placeholder="https://posta.alanadi.com" bind:value={sessionUrl} />
+          <input id="jmap-url" class="input" type="url" spellcheck="false" placeholder={t('placeholder.jmapUrl')} bind:value={sessionUrl} />
           <button class="btn-soft" disabled={!valid || jmapFinding} onclick={discoverJmap}>{jmapFinding ? t('onb.finding') : t('onb.find')}</button>
         </div>
         {#if notice}<p class="note top" role="status">{notice}</p>{/if}

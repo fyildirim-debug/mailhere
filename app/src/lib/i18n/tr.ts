@@ -1216,6 +1216,9 @@ export const tr = {
   'time.pickSnooze': 'Erteleme tarihi ve saati',
   'time.past': 'Bu an geçmişte kaldı. İleri bir tarih ve saat seç.',
   'compose.schedulePast': 'Seçtiğin gönderim zamanı geçti; zamanlama kaldırıldı. Yeni bir zaman seç ya da şimdi gönder.',
+  // Girdi yer tutucuları (örnek adres ve sunucu).
+  'placeholder.email': 'ad@alanadi.com',
+  'placeholder.jmapUrl': 'https://posta.alanadi.com',
 } as const;
 
 export type MessageKey = keyof typeof tr;
