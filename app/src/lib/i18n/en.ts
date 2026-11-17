@@ -1297,4 +1297,5 @@ export const en: Record<MessageKey, string> = {
   'palette.op.read': 'Read messages',
   'palette.op.larger': 'Larger than a size, e.g. larger:5mb (büyük: also works)',
   'palette.op.smaller': 'Smaller than a size, e.g. smaller:100kb (küçük: also works)',
+  'older.retry': 'Older mail is not ready yet. Try again in a moment.',
 };

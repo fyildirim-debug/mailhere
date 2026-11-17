@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createMockBackend } from '../api/mock';
-import { useBackend } from '../api';
+import { useBackend, type OlderResult } from '../api';
+import { t } from '../i18n/index.svelte';
 import { dismissToast, toasts } from '../ui/toast.svelte';
 import { loadOlder, older, olderAvailable, olderDone, otpFresh, OTP_CHIP_MS, purgeRole } from './guard.svelte';
 import { loadMore, mail, refreshList, reloadMailboxes } from './mail.svelte';
@@ -78,8 +79,35 @@ describe('daha eski postalar ve liste derinliği', () => {
     dismissToast();
     older.done = false;
     await loadOlder();
-    expect(toasts.current?.text).toBeTruthy();
+    expect(toasts.current?.text).toBe(t('older.none'));
     expect(olderDone()).toBe(true);
+  });
+
+  /** `messages_older` yanıtı sabitlenmiş sahte arka uç. */
+  function olderReturns(result: OlderResult) {
+    useBackend({
+      call: ((name: string, args: unknown) => (name === 'messages_older' ? Promise.resolve(result) : backend.call(name as never, args as never))) as typeof backend.call,
+      on: backend.on.bind(backend),
+    });
+  }
+
+  it('posta inmedi ama sunucuda daha eskisi var: düğme kalır, "biraz sonra yeniden dene" denir', async () => {
+    olderReturns({ fetched: 0, more: true });
+    const before = mail.items.length;
+    await loadOlder();
+    expect(toasts.current?.text).toBe(t('older.retry'));
+    expect(mail.items).toHaveLength(before);
+    expect(older.busy).toBe(false);
+    expect(olderDone()).toBe(false);
+    expect(olderAvailable()).toBe(true);
+  });
+
+  it('posta inmedi ve sunucuda da kalmadı: "daha eski posta yok" denir, liste sonu "hepsi bu kadar"', async () => {
+    olderReturns({ fetched: 0, more: false });
+    await loadOlder();
+    expect(toasts.current?.text).toBe(t('older.none'));
+    expect(olderDone()).toBe(true);
+    expect(olderAvailable()).toBe(false);
   });
 
   it('yenileme yüklenmiş derinliği korur: aşağı kaydırılmış liste ilk sayfaya kısalmaz', async () => {

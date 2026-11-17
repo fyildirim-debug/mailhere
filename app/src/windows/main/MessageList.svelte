@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { toAppError, SAVED_SEARCHES_MAX, SAVED_SEARCH_NAME_CHARS, type Category, type ListOnly } from '../../lib/api';
   import { t, type MessageKey } from '../../lib/i18n/index.svelte';
   import Icon from '../../lib/ui/Icon.svelte';
@@ -87,13 +87,22 @@
   // Çöp / İstenmeyen görünümü: başlıkta "Çöpü boşalt" / "İstenmeyen'i boşalt".
   const purgeTarget = $derived(emptyTarget());
 
-  // Klavyeyle seçim değişince satırı görünür tut.
+  // Seçim değişince (klavye, bildirimden açma) ya da seçili satır listeye girince
+  // (geri alma) satır görünür tutulur. Liste yalnız içerik değiştiği için (yeni
+  // posta, sıradaki sayfa, daha eski postalar) seçili satıra geri sarılmaz:
+  // aşağı kaydırmış kullanıcı yerinde kalır.
+  const selectedPresent = $derived.by(() => {
+    const id = mail.selectedId;
+    return id != null && rows.some((r) => r.ids.includes(id));
+  });
   $effect(() => {
     const id = mail.selectedId;
-    if (id == null || !scroller) return;
-    const i = rows.findIndex((r) => r.ids.includes(id));
-    const target = scrollToReveal(layout, i, scroller.scrollTop, viewport);
-    if (target != null) scroller.scrollTop = target;
+    if (id == null || !selectedPresent || !scroller) return;
+    untrack(() => {
+      const i = rows.findIndex((r) => r.ids.includes(id));
+      const target = scrollToReveal(layout, i, scroller.scrollTop, viewport);
+      if (target != null) scroller.scrollTop = target;
+    });
   });
 
   const tabs: { key: Category | null; label: MessageKey }[] = [

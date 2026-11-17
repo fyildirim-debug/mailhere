@@ -174,12 +174,15 @@ export async function loadOlder(): Promise<void> {
     const r = await call('messages_older', { view: mail.view, accountId: mail.accountId });
     if (olderKey() !== key) return;
     if (r.fetched) {
-      // İnen postalar yerel listenin sonuna eklenir; sıradaki sayfa da yüklenir ki hemen görünsünler.
+      // Yenileme yüklenmiş sayfaları korur (liste ilk sayfaya dönmez, kaydırma konumu kalır);
+      // inen postalar listenin sonuna eklenir, sıradaki sayfa da yüklenir ki hemen görünsünler.
       await refreshList();
       await loadMore();
     }
     older.done = !r.more;
-    if (!r.fetched) showToast({ text: t('older.none') });
+    // Hiç posta inmediyse nedeni söylenir: sunucuda kalmadı ("Hepsi bu kadar") ya da kutu henüz
+    // hazır değil (eşitlenmedi, bir hesap yanıt vermedi); ikincisinde düğme yerinde kalır.
+    if (!r.fetched) showToast({ text: t(r.more ? 'older.retry' : 'older.none') });
   } catch (e) {
     errorToast(e);
   } finally {

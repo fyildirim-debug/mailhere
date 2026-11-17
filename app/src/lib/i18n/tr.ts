@@ -1313,6 +1313,7 @@ export const tr = {
   'palette.op.read': 'Okunmuşlar',
   'palette.op.larger': 'Bu boyuttan büyük, ör. larger:5mb (büyük: de olur)',
   'palette.op.smaller': 'Bu boyuttan küçük, ör. smaller:100kb (küçük: de olur)',
+  'older.retry': 'Daha eski postalar henüz hazır değil. Biraz sonra yeniden dene.',
 } as const;
 
 export type MessageKey = keyof typeof tr;

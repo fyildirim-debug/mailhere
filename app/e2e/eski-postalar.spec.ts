@@ -60,3 +60,76 @@ test('Daha eski postalar: beklerken düğme meşgul görünür; çevrimdışıys
   await expect(toast(page)).toContainText('Sunucuya ulaşılamadı. Bağlantını denetleyip yeniden dene.');
   await expect(more).toBeEnabled();
 });
+
+test('Daha eski postalar: kutu henüz hazır değilse düğme kalır ve yeniden denemek söylenir; sunucuda kalmadıysa "Hepsi bu kadar"', async ({ page }) => {
+  await openArchive(page);
+  const more = list(page).getByRole('button', { name: 'Daha eski postalar' });
+  const before = await list(page).locator('.row').count();
+  /** `messages_older` yanıtını sabitler (çekirdek: kutu eşitlenmedi ya da bir hesap yanıt vermedi). */
+  const stub = (result: { fetched: number; more: boolean }) =>
+    page.evaluate((r) => {
+      const mh = window.__mh as unknown as { call: (name: string, args: unknown) => Promise<unknown>; __call?: (name: string, args: unknown) => Promise<unknown> };
+      mh.__call ??= mh.call.bind(mh);
+      const real = mh.__call;
+      mh.call = (name, args) => (name === 'messages_older' ? Promise.resolve(r) : real(name, args));
+    }, result);
+
+  // Posta inmedi ama sunucuda daha eskisi var: "yok" denmez, düğme yerinde kalır.
+  await stub({ fetched: 0, more: true });
+  await more.click();
+  await expect(toast(page)).toContainText('Daha eski postalar henüz hazır değil. Biraz sonra yeniden dene.');
+  await expect(more).toBeEnabled();
+  await expect(list(page).getByText('Hepsi bu kadar')).toHaveCount(0);
+  expect(await list(page).locator('.row').count()).toBe(before);
+
+  // Posta inmedi ve sunucuda da kalmadı: nedeni söylenir, liste sonu "Hepsi bu kadar".
+  await stub({ fetched: 0, more: false });
+  await more.click();
+  await expect(toast(page)).toContainText('Sunucuda daha eski posta yok');
+  await expect(list(page).getByRole('status').filter({ hasText: 'Hepsi bu kadar' })).toBeVisible();
+  await expect(more).toHaveCount(0);
+});
+
+test('Daha eski postalar: inen postalar listenin sonuna eklenir; çok sayfalı liste başa dönmez', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 620 });
+  await page.goto('/#/main');
+  // Tek hesap (inen postalar o kutunun en eskisinden de eskidir) ve iki sayfalık arşiv.
+  await nav(page).getByRole('button', { name: /^Kişisel eposta/ }).click();
+  await nav(page).getByRole('button', { name: /^Arşiv/ }).first().click();
+  await expect(list(page).getByRole('heading', { level: 1 })).toContainText('Arşiv');
+  await page.evaluate(() => {
+    const mh = window.__mh;
+    const box = mh.state.mailboxes.find((b) => b.accountId === 'demo-kisisel' && b.role === 'archive')!;
+    const mine = mh.state.messages.filter((m) => m.mailboxId === box.id);
+    const sample = mine[mine.length - 1];
+    const oldest = Math.min(...mine.map((m) => m.date));
+    let id = Math.max(...mh.state.messages.map((m) => m.id)) + 1;
+    for (let i = 1; i <= 150; i++) {
+      mh.state.messages.push({ ...structuredClone(sample), id: id++, threadId: `dolgu-${i}`, subject: `Dolgu ${i}`, date: oldest - i * 3_600_000, unread: false, otp: null, spam: false, spamVerdict: null });
+    }
+    mh.emit('mh:changed', { mailboxIds: [box.id] });
+  });
+  await expect(list(page).getByText('Dolgu 1', { exact: true })).toBeAttached();
+  const scroller = list(page).locator('.scroller');
+  const more = list(page).getByRole('button', { name: 'Daha eski postalar' });
+  // Sona kadar kaydır: ikinci yerel sayfa yüklenir, düğme ancak ondan sonra çıkar.
+  await expect(async () => {
+    await scroller.evaluate((el) => (el.scrollTop = el.scrollHeight));
+    await expect(more).toBeVisible({ timeout: 500 });
+  }).toPass();
+  // Düğme içeriğin sonundadır; görünür alana gelene dek kaydırılır (son yerel satır da görünür).
+  await more.scrollIntoViewIfNeeded();
+  await expect(list(page).getByText('Dolgu 150', { exact: true })).toBeInViewport();
+  const top = await scroller.evaluate((el) => el.scrollTop);
+  expect(top).toBeGreaterThan(8000);
+
+  await more.click();
+  // İlk inen posta, kullanıcının bulunduğu yerin hemen altında görünür; liste başa dönmedi.
+  await expect(list(page).getByText('Eski yazışma 1', { exact: true })).toBeInViewport();
+  await expect(list(page).getByText('Dolgu 150', { exact: true })).toBeInViewport();
+  expect(await scroller.evaluate((el) => el.scrollTop)).toBeGreaterThanOrEqual(top - 1);
+  // Yenileme olayı (mh:changed) gecikmeli gelir; ondan sonra da konum korunur.
+  await page.waitForTimeout(400);
+  expect(await scroller.evaluate((el) => el.scrollTop)).toBeGreaterThanOrEqual(top - 1);
+  await expect(list(page).getByText('Eski yazışma 1', { exact: true })).toBeInViewport();
+});
