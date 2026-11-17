@@ -155,7 +155,7 @@ test('bildirim kartı: doğrulama kodunda "Kodu kopyala" birincil eylem', async 
     }).__mh;
     const m = mh.state.messages.find((x) => x.subject === 'Giriş doğrulama kodun')!;
     const d = (await mh.call('message_get', { id: m.id })) as { otp: string };
-    mh.emit('mh:notify', { message: d, accountName: 'Kişisel', accountColor: '#2E9A61', otp: d.otp });
+    mh.emit('mh:notify', { message: d, accountName: 'Kişisel', accountColor: '#2E9A61', otp: d.otp, otpCopied: false });
   });
   const card = page.getByRole('alertdialog', { name: 'Yeni posta: Bulut Fatura' });
   const copy = card.getByRole('button', { name: 'Kodu kopyala' });

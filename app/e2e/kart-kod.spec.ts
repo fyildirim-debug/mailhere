@@ -4,16 +4,16 @@ import { CODE, state } from './koruma';
 // 0.11 (masaüstü): bildirim kartında büyük, öbekli doğrulama kodu; kopyalayınca
 // "Kod kopyalandı" durumu ve "kopyalayınca okundu say".
 
-async function notifyCode(page: Page, unread = true) {
+async function notifyCode(page: Page, unread = true, copied = false) {
   await page.evaluate(
-    async ([subject, u]) => {
+    async ([subject, u, c]) => {
       const mh = window.__mh;
       const m = mh.state.messages.find((x) => x.subject === subject)!;
       m.unread = u as boolean;
       const d = await mh.call('message_get', { id: m.id });
-      mh.emit('mh:notify', { message: d, accountName: 'Kişisel', accountColor: '#2E9A61', otp: d.otp });
+      mh.emit('mh:notify', { message: d, accountName: 'Kişisel', accountColor: '#2E9A61', otp: d.otp, otpCopied: c as boolean });
     },
-    [CODE, unread] as const,
+    [CODE, unread, copied] as const,
   );
 }
 
@@ -53,7 +53,7 @@ test('bildirim kartı: "okundu say" kapalıysa kopyalamak postayı okundu yapmaz
   await page.goto('/#/notify');
   await expect(page.getByRole('alertdialog', { name: 'Yeni posta: Ayşe Demir' })).toBeVisible();
   await page.evaluate(() => window.__mh.call('settings_set', { settings: { ...window.__mh.state.settings, otpMarkRead: false, otpAutoCopy: true } }));
-  await notifyCode(page);
+  await notifyCode(page, true, true);
   const card = page.getByRole('alertdialog', { name: 'Yeni posta: Bulut Fatura' });
   // Çekirdek kodu kart çıkmadan kopyalamıştır: durum baştan yazar, düğme yeniden kopyalamaya hazır.
   await expect(card.getByRole('status')).toHaveText('Kod kopyalandı');

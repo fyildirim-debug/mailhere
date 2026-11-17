@@ -107,7 +107,7 @@
         busy: false,
         error: null,
         done: null,
-        copied: !!e.otp && settings.value.otpAutoCopy,
+        copied: !!e.otp && e.otpCopied === true,
       },
     ];
     // Fazlası özete düşer; yanıt yazılan ya da geri alma bekleyen kart düşmez.

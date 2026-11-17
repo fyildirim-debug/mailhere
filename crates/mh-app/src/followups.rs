@@ -123,6 +123,7 @@ pub fn card_event(mut message: MessageSummary, account: &Account, lang: Language
         account_name: account.name.clone(),
         account_color: account.color.clone(),
         otp: None,
+        otp_copied: false,
     }
 }
 

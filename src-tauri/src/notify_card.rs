@@ -198,6 +198,7 @@ pub fn show_demo_card(app: &AppHandle) -> AppResult<()> {
             .map_or_else(|| "Kişisel".into(), |a| a.name.clone()),
         account_color: account.map_or_else(|| "#2E9A61".into(), |a| a.color),
         otp: None,
+        otp_copied: false,
         message,
     };
     show_card(app, ev, false);

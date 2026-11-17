@@ -1640,6 +1640,10 @@ pub struct NotifyEvent {
     /// Postadaki doğrulama kodu ("Kodu kopyala" düğmesi); yoksa `None`.
     #[serde(default)]
     pub otp: Option<String>,
+    /// Kod bu bildirimden önce kendiliğinden panoya kopyalandı
+    /// (`Settings::otp_auto_copy` açık ve kabuğun panosu yazmayı kabul etti).
+    #[serde(default)]
+    pub otp_copied: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]

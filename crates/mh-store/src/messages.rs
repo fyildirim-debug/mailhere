@@ -1347,9 +1347,13 @@ impl Store {
         let thread = self.thread(id)?;
         // Kendi yazdığımız postada (gönderilmiş, taslak) güven işaretleri yok.
         let own = matches!(role.as_deref(), Some("sent" | "drafts"));
-        let sender_warning = (!own)
-            .then(|| mh_mime::sender_warning(raw.as_deref(), &summary.from))
-            .flatten();
+        // "Güvenli" denmiş (bu hesapta kabul edilmiş) göndericide uyarı satırı da çıkmaz.
+        let sender_warning =
+            if own || self.sender_accepted(&summary.account_id, &summary.from.email)? {
+                None
+            } else {
+                mh_mime::sender_warning(raw.as_deref(), &summary.from)
+            };
         // Kod okuma anında yeniden aranır: geri doldurmanın erişmediği eski
         // postalarda da (sütun boş) "Kodu kopyala" çıkar.
         summary.otp = (!own)
@@ -1930,6 +1934,12 @@ pub(crate) mod tests {
             s.summary(id).unwrap().unwrap().otp.as_deref(),
             Some("604218")
         );
+
+        // "Güvenli" denmiş göndericide uyarı satırı kalkar; kod durur.
+        s.trust_sender("a", "bildirim@banka.com", 10).unwrap();
+        let d = s.detail(id, &[]).unwrap();
+        assert_eq!(d.sender_warning, None);
+        assert_eq!(d.summary.otp.as_deref(), Some("604218"));
 
         // Taslakta (kendi postamız) uyarı ve kod gösterilmez.
         let mut m = NewMessage::from_raw(raw, false, "a", "a:Drafts", 6).unwrap();

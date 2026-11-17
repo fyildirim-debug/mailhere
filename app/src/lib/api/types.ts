@@ -876,6 +876,8 @@ export interface NotifyEvent {
   accountColor: string;
   /** Postadaki doğrulama kodu ("Kodu kopyala"). */
   otp: string | null;
+  /** Kod bu bildirimden önce kendiliğinden panoya kopyalandı (`otpAutoCopy` açık ve pano yazıldı). */
+  otpCopied: boolean;
 }
 
 /** Ana pencere bu postayı açmalı (karttan ya da hızlı okumadan). */

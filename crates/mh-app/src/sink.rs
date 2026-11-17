@@ -151,7 +151,7 @@ pub(crate) fn decide(
         tracing::info!(id = m.id, kart = false, supheli = true, "yeni posta");
     }
     let now = now_ms();
-    let touched = crate::otp::auto_copy(state, &settings, &messages, now, copy);
+    let (copied, touched) = crate::otp::auto_copy(state, &settings, &messages, now, copy);
     // Kartta hesabın güncel adı ve rengi görünsün (`account_update` sonrası).
     let fresh = state.store.account(&account.id).ok().flatten();
     let account = fresh.as_ref().unwrap_or(account);
@@ -187,12 +187,14 @@ pub(crate) fn decide(
                 let fresh = state.store.summary(message.id).ok().flatten();
                 fresh.and_then(|m| m.otp)
             });
+            let otp_copied = otp.is_some() && copied == Some(message.id);
             notify(
                 NotifyEvent {
                     message,
                     account_name: account.name.clone(),
                     account_color: account.color.clone(),
                     otp,
+                    otp_copied,
                 },
                 &settings,
             );
@@ -400,5 +402,43 @@ mod tests {
         let (cards, copied, _) = run(&st, vec![m2.clone()], true);
         assert!(cards.is_empty());
         assert_eq!(copied, ["604218"]);
+    }
+
+    #[tokio::test]
+    async fn kart_kodun_kopyalandigini_tasir() {
+        let st = state();
+        st.store
+            .set_settings(&Settings {
+                otp_auto_copy: true,
+                ..base()
+            })
+            .unwrap();
+        let m = deliver(
+            &st,
+            "a",
+            raw_mail(
+                "Banka <bildirim@banka.example>",
+                "Giriş bildirimi",
+                "kk1@x",
+                "",
+                "Doğrulama kodunuz: 604218",
+            ),
+            now_ms(),
+        );
+        let account = st.store.account("a").unwrap().unwrap();
+        let flags = |ok: bool| {
+            let out = RefCell::new(Vec::new());
+            decide(
+                &st,
+                &account,
+                vec![m.clone()],
+                |_| ok,
+                |ev, _| out.borrow_mut().push(ev.otp_copied),
+            );
+            out.into_inner()
+        };
+        // Pano yazıldıysa kart bunu bilir; yazılamadıysa "kopyalandı" demez.
+        assert_eq!(flags(true), [true]);
+        assert_eq!(flags(false), [false]);
     }
 }

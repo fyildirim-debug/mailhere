@@ -7,7 +7,7 @@
 
 use std::time::Duration;
 
-use mh_core::{MessageSummary, Millis, MoveTarget, Settings};
+use mh_core::{MessageId, MessageSummary, Millis, MoveTarget, Settings};
 use tauri::{AppHandle, Manager};
 
 use crate::state::{now_ms, AppState};
@@ -40,34 +40,35 @@ pub fn auto_copy_candidate<'a>(
 }
 
 /// Yeni postalardaki en taze kodu panoya kopyalar (`copy` kabuğun panosu);
-/// başarılıysa ve `otp_mark_read` açıksa postayı okundu sayar. İçeriği
-/// değişen kutuları döner.
+/// başarılıysa ve `otp_mark_read` açıksa postayı okundu sayar. Kodu
+/// kopyalanan postanın kimliğini (kopyalanmadıysa `None`) ve içeriği değişen
+/// kutuları döner.
 pub(crate) fn auto_copy(
     state: &AppState,
     settings: &Settings,
     messages: &[MessageSummary],
     now: Millis,
     copy: impl FnOnce(&str) -> bool,
-) -> Vec<String> {
+) -> (Option<MessageId>, Vec<String>) {
     let Some(message) = auto_copy_candidate(settings, messages, now) else {
-        return Vec::new();
+        return (None, Vec::new());
     };
     let Some(code) = message.otp.as_deref() else {
-        return Vec::new();
+        return (None, Vec::new());
     };
     if !copy(code) {
         tracing::debug!(id = message.id, "doğrulama kodu panoya kopyalanamadı");
-        return Vec::new();
+        return (None, Vec::new());
     }
     tracing::info!(id = message.id, "doğrulama kodu panoya kopyalandı");
     if !settings.otp_mark_read {
-        return Vec::new();
+        return (Some(message.id), Vec::new());
     }
     match crate::cmd_jmap::set_flags(state, &[message.id], Some(false), None) {
-        Ok(touched) => touched,
+        Ok(touched) => (Some(message.id), touched),
         Err(e) => {
             tracing::warn!(id = message.id, code = %e.code, "kodu kopyalanan posta okundu sayılamadı");
-            Vec::new()
+            (Some(message.id), Vec::new())
         }
     }
 }
@@ -248,7 +249,7 @@ mod tests {
             now,
             copy(false),
         );
-        assert!(touched.is_empty());
+        assert_eq!(touched, (None, Vec::new()));
         assert!(unread(m.id));
         // Kopyalandı ama "okundu say" kapalı.
         let touched = auto_copy(
@@ -258,7 +259,7 @@ mod tests {
             now,
             copy(true),
         );
-        assert!(touched.is_empty());
+        assert_eq!(touched, (Some(m.id), Vec::new()));
         assert!(unread(m.id));
         // Kopyalandı ve okundu sayıldı; kod boşluksuzdur.
         let touched = auto_copy(
@@ -268,14 +269,14 @@ mod tests {
             now,
             copy(true),
         );
-        assert_eq!(touched, ["a:INBOX"]);
+        assert_eq!(touched, (Some(m.id), vec!["a:INBOX".to_owned()]));
         assert!(!unread(m.id));
         assert_eq!(*copied.borrow(), ["604218", "604218", "604218"]);
         // Ayar kapalıyken pano hiç çağrılmaz.
         let touched = auto_copy(&st, &settings(false, true), &[m], now, |_: &str| {
             panic!("ayar kapalıyken pano yazılmaz")
         });
-        assert!(touched.is_empty());
+        assert_eq!(touched, (None, Vec::new()));
     }
 
     #[tokio::test]

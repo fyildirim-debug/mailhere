@@ -1465,7 +1465,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       const m = state.messages.find((x) => x.subject === 'Cumartesi kahvaltı?') ?? state.messages[0];
       if (m) {
         const a = state.accounts.find((x) => x.id === m.accountId);
-        emit(EVENTS.notify, { message: summary(m), accountName: a?.name ?? '', accountColor: a?.color ?? '#4C6FD8', otp: m.otp });
+        emit(EVENTS.notify, { message: summary(m), accountName: a?.name ?? '', accountColor: a?.color ?? '#4C6FD8', otp: m.otp, otpCopied: false });
       }
       return null;
     },
@@ -1556,6 +1556,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
         if (x.accountId === m.accountId && lower(x.from.email.trim()) === email) {
           x.spam = false;
           x.spamVerdict = null;
+          x.senderWarning = null;
         }
       }
       // Adres engellenenlerden çıkar; alan adı girdisine dokunulmaz.
