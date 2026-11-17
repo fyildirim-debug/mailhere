@@ -13,8 +13,7 @@
 <h3 class="set-h">{t('mob.amoled.section')}</h3>
 <div class="set-row top">
   <span class="set-name"
-    >{t('mob.amoled.name')}<span class="set-hint">{t('mob.amoled.hint')}</span>{#if light}<span class="set-hint" role="status">{t('mob.amoled.lightHint')}</span
-      >{/if}</span
+    >{t('mob.amoled.name')}<span class="set-hint">{t('mob.amoled.hint')}</span>{#if light}<span class="set-hint">{t('mob.amoled.lightHint')}</span>{/if}</span
   >
   <input
     type="checkbox"
