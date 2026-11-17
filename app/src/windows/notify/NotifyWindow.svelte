@@ -8,7 +8,7 @@
   import Logo from '../../lib/ui/Logo.svelte';
   import { displayName } from '../../lib/util/format';
   import { settings } from '../../lib/stores/settings.svelte';
-  import { copyText } from '../../lib/mail/otp';
+  import { copyText, groupCode } from '../../lib/mail/otp';
   import { NOTIFY_ACTION_INFO, shownNotifyActions } from '../../lib/notify-actions';
   import NotifyActs from './NotifyActs.svelte';
   import NotifyReply from './NotifyReply.svelte';
@@ -42,6 +42,11 @@
     busy: boolean;
     error: string | null;
     done: Done | null;
+    /**
+     * Kod panoda: elle kopyalandı ya da "kodu kendiliğinden kopyala" açıkken
+     * geldi (çekirdek taze kodu kart çıkmadan kopyalar). Kart kapanana dek kalır.
+     */
+    copied: boolean;
   }
 
   const MAX = 3;
@@ -92,7 +97,18 @@
     if (cards.some((c) => c.message.id === e.message.id)) return;
     const next: Card[] = [
       ...cards,
-      { ...e, key: ++seq, at: Date.now(), mode: 'idle', draft: '', to: displayName(e.message.from), busy: false, error: null, done: null },
+      {
+        ...e,
+        key: ++seq,
+        at: Date.now(),
+        mode: 'idle',
+        draft: '',
+        to: displayName(e.message.from),
+        busy: false,
+        error: null,
+        done: null,
+        copied: !!e.otp && settings.value.otpAutoCopy,
+      },
     ];
     // Fazlası özete düşer; yanıt yazılan ya da geri alma bekleyen kart düşmez.
     while (next.length > MAX) {
@@ -280,11 +296,29 @@
     c.done = { text: t('notify.undoLate'), sub: c.to, icon: 'send', undo: null, ms: INFO_MS };
   }
 
-  /** Kodu kopyalanan kart: düğme kısa süre "Kod kopyalandı" der. */
+  /** Kodu az önce kopyalanan kart: düğme kısa süre "Kod kopyalandı" der. */
   let copied = $state<number | null>(null);
 
+  /**
+   * Kodu kopyalar; "kopyalayınca okundu say" açıksa okunmamış posta okundu
+   * sayılır (ana penceredeki `copyCode` ile aynı kural; kart penceresinde
+   * liste, sayaç ve toast olmadığı için komut doğrudan çağrılır). Kartta "Kod
+   * kopyalandı" durumu kalır; kopyalanamazsa nedenini ve ne yapılabileceğini
+   * kart söyler.
+   */
   async function copyCode(c: Card) {
-    if (!c.otp || !(await copyText(c.otp))) return;
+    if (!c.otp) return;
+    c.error = null;
+    if (!(await copyText(c.otp))) {
+      c.error = t('read.otpCopyFailed');
+      return;
+    }
+    c.copied = true;
+    if (c.message.unread && settings.value.otpMarkRead) {
+      c.message.unread = false;
+      // Okundu sayılamazsa kod yine panodadır; kart bunu hata saymaz.
+      void call('messages_flag', { ids: [c.message.id], unread: false, starred: null }).catch(() => {});
+    }
     copied = c.key;
     setTimeout(() => {
       if (copied === c.key) copied = null;
@@ -351,6 +385,16 @@
             <span class="sender trunc">{displayName(c.message.from)}</span>
             <span class="subject trunc">{c.message.subject}</span>
             <span class="snippet">{c.message.snippet}</span>
+            {#if c.otp}
+              <!-- Doğrulama kodu: büyük ve öbekli; kopyalandıysa durumu yanında yazar. -->
+              <span class="code">
+                <span class="code-label">{t('read.otpLabel')}</span>
+                <span class="code-value num selectable">{groupCode(c.otp)}</span>
+                {#if c.copied}
+                  <span class="code-state" role="status"><Icon name="check" size={14} />{t('notify.codeCopied')}</span>
+                {/if}
+              </span>
+            {/if}
           </div>
         </div>
         {#if c.mode === 'reply'}
@@ -459,6 +503,45 @@
     line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
+  }
+
+  /* Doğrulama kodu: 12 px etiket, 24/600 sabit genişlikli rakam; kutu yok (kart içinde kart olmaz). */
+  .code {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
+    margin-top: 8px;
+  }
+
+  .code-label {
+    font-size: var(--fs-meta);
+    color: var(--ink-3);
+  }
+
+  .code-value {
+    font-size: var(--fs-title);
+    font-weight: 600;
+    line-height: 30px;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+  }
+
+  .code-state {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    margin-left: auto;
+    font-size: var(--fs-meta);
+    font-weight: 500;
+    color: var(--ok-text);
+    white-space: nowrap;
+  }
+
+  .code-state :global(.icon) {
+    align-self: center;
+    color: var(--ok);
   }
 
   /* Hata: ne oldu + ne yapılabilir (arka ucun metni); kart kalır. */
