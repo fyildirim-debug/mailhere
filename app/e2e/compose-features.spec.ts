@@ -19,6 +19,7 @@ async function openSettings(page: Page, section: string) {
 
 test('şablon değişkenleri yazma penceresinde alıcı ve gönderenle doldurulur', async ({ page }) => {
   await page.goto('/#/main');
+  await page.waitForFunction(() => !!window.__mh);
   await page.evaluate(() =>
     window.__mh.call('settings_set', {
       settings: {
