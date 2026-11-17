@@ -1230,4 +1230,14 @@ export const en: Record<MessageKey, string> = {
   // Mobile 0.11: older mail.
   'mob.older.busy': 'Downloading older mail…',
   'mob.older.done': 'That is everything',
+  // Mobile 0.11: saving and sharing attachments.
+  'mob.att.menu': 'Save or share attachments',
+  'mob.att.title': 'Attachments',
+  'mob.att.open': 'Open {name}',
+  'mob.att.save': 'Save {name}',
+  'mob.att.share': 'Share {name}',
+  'mob.att.saved': 'Saved',
+  'mob.att.openFailed': 'Could not open {name}: {message}',
+  'mob.att.saveFailed': 'Could not save {name}: {message}',
+  'mob.att.shareFailed': 'Could not share {name}: {message}',
 };

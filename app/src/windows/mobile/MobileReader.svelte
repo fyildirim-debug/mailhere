@@ -17,6 +17,8 @@
   // postada "Güvenli say" vardır (ikisi de göndereni güvenli sayar).
   // Çöp ya da İstenmeyen kutusundaki postada "Sil" yerine "Kalıcı sil" durur
   // ve onay ister (geri alınamaz, geri alma toast'ı yok).
+  // Ekli postada "Ekleri kaydet ya da paylaş" alt sayfası (MobileAttachments)
+  // açılır.
   import { untrack } from 'svelte';
   import { call, toAppError, type MessageId } from '../../lib/api';
   import { t, when } from '../../lib/i18n/index.svelte';
@@ -54,6 +56,7 @@
   import AppBar from './AppBar.svelte';
   import ConfirmSheet from './ConfirmSheet.svelte';
   import { moveItems } from './folders';
+  import MobileAttachments from './MobileAttachments.svelte';
   import { nav } from './nav.svelte';
   import ReaderStrip from './ReaderStrip.svelte';
 
@@ -88,6 +91,7 @@
   let menu = $state<{ title?: string; items: MenuItem[] } | null>(null);
   let snoozeOpen = $state(false);
   let followOpen = $state(false);
+  let attsOpen = $state(false);
   /** Kalıcı silme onayı açık mı. */
   let purging = $state(false);
   /** Ekrandan çıkılıyor: listenin seçimi değişse de bu ekran onu izlemez. */
@@ -286,6 +290,7 @@
         { label: t('act.snooze'), icon: 'clock', onclick: () => (snoozeOpen = true) },
         // Gönderilmiş posta: yanıt gelmezse hatırlat.
         ...(isSent ? [{ label: t('follow.menu'), icon: 'followUp' as const, onclick: () => (followOpen = true) }] : []),
+        ...(msg.attachments.length ? [{ label: t('mob.att.menu'), icon: 'paperclip' as const, onclick: () => (attsOpen = true) }] : []),
         { label: t('print.saveEml'), icon: 'download', onclick: () => void saveEml() },
         ...(msg.unsubscribe ? [{ label: t('read.unsubscribe'), icon: 'unsubscribe' as const, onclick: () => void unsubscribe(msg) }] : []),
         ...(senderScope
@@ -458,6 +463,12 @@
           <MessageView detail={d} />
         </div>
       {/if}
+      {#if d.attachments.length}
+        <!-- Ek kartı eki açar; kaydetme ve paylaşma alt sayfadadır. -->
+        <button class="btn-soft atts-more" aria-haspopup="dialog" onclick={() => (attsOpen = true)}>
+          <Icon name="download" size={18} />{t('mob.att.menu')}
+        </button>
+      {/if}
     </article>
   {:else if error}
     <div class="m-empty">
@@ -477,6 +488,7 @@
 {/key}
 
 {#if menu}<Menu title={menu.title} label={menu.title ?? t('read.more')} items={menu.items} onclose={() => (menu = null)} />{/if}
+{#if attsOpen && d}<MobileAttachments detail={d} onclose={() => (attsOpen = false)} />{/if}
 {#if purging}
   {@const n = ids().length}
   <ConfirmSheet
@@ -618,6 +630,12 @@
 
   .single {
     margin-top: 10px;
+  }
+
+  /* Eklerin altında: kaydet / paylaş alt sayfasını açar. */
+  .atts-more {
+    margin-top: 12px;
+    width: 100%;
   }
 
   /* Konuşma ve ileti alt öğeleri dar ekrana: ekler tam genişlik, dokunma hedefleri 44. */

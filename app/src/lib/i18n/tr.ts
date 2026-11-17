@@ -1246,6 +1246,16 @@ export const tr = {
   // Mobil 0.11: daha eski postalar.
   'mob.older.busy': 'Daha eski postalar indiriliyor…',
   'mob.older.done': 'Hepsi bu kadar',
+  // Mobil 0.11: ek kaydetme ve paylaşma.
+  'mob.att.menu': 'Ekleri kaydet ya da paylaş',
+  'mob.att.title': 'Ekler',
+  'mob.att.open': '{name} dosyasını aç',
+  'mob.att.save': '{name} dosyasını kaydet',
+  'mob.att.share': '{name} dosyasını paylaş',
+  'mob.att.saved': 'Kaydedildi',
+  'mob.att.openFailed': '{name} açılamadı: {message}',
+  'mob.att.saveFailed': '{name} kaydedilemedi: {message}',
+  'mob.att.shareFailed': '{name} paylaşılamadı: {message}',
 } as const;
 
 export type MessageKey = keyof typeof tr;

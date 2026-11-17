@@ -94,6 +94,8 @@ export const icons = {
   alert: '<path d="M10.4 4.6 3.3 17.2A1.8 1.8 0 0 0 4.9 20h14.2a1.8 1.8 0 0 0 1.6-2.8L13.6 4.6a1.8 1.8 0 0 0-3.2 0z"/><path d="M12 9.5v4.2"/><circle cx="12" cy="16.6" r=".9" fill="currentColor"/>',
   /** Tam ekrana aç: çaprazlara açılan iki ok (mobil yanıt alanı → yazma ekranı). */
   expand: '<path d="M14 4.5h5.5V10"/><path d="M19.5 4.5L13.5 10.5"/><path d="M10 19.5H4.5V14"/><path d="M4.5 19.5l6-6"/>',
+  /** Paylaş (mobil ek sayfası): üç düğüm ve aralarındaki iki bağ. */
+  share: '<circle cx="17.5" cy="6" r="2.5"/><circle cx="6.5" cy="12" r="2.5"/><circle cx="17.5" cy="18" r="2.5"/><path d="M8.7 10.8l6.6-3.6M8.7 13.2l6.6 3.6"/>',
 } as const;
 
 export type IconName = keyof typeof icons;
