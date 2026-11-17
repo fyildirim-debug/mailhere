@@ -162,6 +162,14 @@ function loadLock(persist: boolean): MockLock {
 
 const SETTINGS_KEY = 'mailhere.mock.settings';
 
+/** `larger:` / `smaller:` değeri bayt olarak: `5mb`, `100kb`, `1,5mb`, `2048` (bayt). Tanınmazsa null. */
+function sizeOf(v: string): number | null {
+  const m = /^(\d+(?:[.,]\d+)?)(b|kb|mb)?$/.exec(v);
+  if (!m) return null;
+  const unit = m[2] === 'mb' ? 1024 * 1024 : m[2] === 'kb' ? 1024 : 1;
+  return Math.round(Number(m[1].replace(',', '.')) * unit);
+}
+
 function fail(code: AppError['code'], message: string): never {
   throw { code, message } satisfies AppError;
 }
@@ -933,7 +941,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       return null;
     },
     search: ({ q, limit, accountIds }) => {
-      // Arka uçtaki işleçlerin sade karşılığı: from:, to:, konu:, has:ek, has:kod, is:okunmamış, is:yıldızlı, is:şüpheli, in:, tag:, after:, before:.
+      // Arka uçtaki işleçlerin sade karşılığı: from: (kimden:), to: (kime:), cc:, konu:, has:ek, has:kod, is:okunmamış, is:okunmuş, is:yıldızlı, is:şüpheli, larger: / smaller: (büyük: / küçük:), in:, tag:, after:, before:.
       const tests: ((m: MessageDetail) => boolean)[] = [];
       let inBox = false;
       let junkToo = false;
@@ -947,8 +955,17 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
           tests.push((m) => m.tags.some((id) => ids.includes(id)));
           return ' ';
         }
-        if (o === 'from') tests.push((m) => lower(`${m.from.name ?? ''} ${m.from.email}`).includes(v));
-        else if (o === 'to') tests.push((m) => [...m.to, ...m.cc].some((a) => lower(`${a.name ?? ''} ${a.email}`).includes(v)));
+        if (o === 'from' || o === 'kimden') tests.push((m) => lower(`${m.from.name ?? ''} ${m.from.email}`).includes(v));
+        else if (o === 'to' || o === 'kime') tests.push((m) => [...m.to, ...m.cc].some((a) => lower(`${a.name ?? ''} ${a.email}`).includes(v)));
+        else if (o === 'cc') tests.push((m) => m.cc.some((a) => lower(`${a.name ?? ''} ${a.email}`).includes(v)));
+        else if (['larger', 'smaller', 'büyük', 'buyuk', 'küçük', 'kucuk'].includes(o) && sizeOf(v) != null) {
+          // Sahte veride posta boyutu yok; eklerin toplamı sayılır (arka uçta gerçek boyut).
+          const limit = sizeOf(v)!;
+          const total = (m: MessageDetail) => m.attachments.reduce((n, a) => n + a.size, 0);
+          if (['larger', 'büyük', 'buyuk'].includes(o)) tests.push((m) => total(m) > limit);
+          else tests.push((m) => total(m) < limit);
+        }
+        else if (o === 'is' && ['okunmuş', 'okunmus', 'read'].includes(v)) tests.push((m) => !m.unread);
         else if (o === 'subject' || o === 'konu') tests.push((m) => lower(m.subject).includes(v));
         else if (o === 'has' && ['ek', 'attachment'].includes(v)) tests.push((m) => m.hasAttachments);
         else if (o === 'has' && ['kod', 'code'].includes(v)) tests.push((m) => m.otp != null);
@@ -1591,7 +1608,8 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       return { fetched, more: boxes.some((b) => (olderDone.get(b.id) ?? 0) < OLDER_BATCHES) };
     },
     messages_delete: ({ ids }) => {
-      const gone = ids.map(find);
+      // Artık yerelde olmayan kimlik sessizce atlanır (arka uçla aynı).
+      const gone = state.messages.filter((m) => ids.includes(m.id));
       if (gone.some((m) => !['trash', 'junk'].includes(roleOf(m.mailboxId)))) {
         fail('invalid', 'Yalnız Çöp ya da İstenmeyen kutusundaki postalar kalıcı silinebilir. Postayı önce Çöp\'e taşı.');
       }

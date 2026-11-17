@@ -1105,8 +1105,9 @@ export interface Commands {
   /**
    * İlk eşitleme kutu başına en yeni 300 postayı indirir. Bu komut görünümün karşılık geldiği
    * sunucu kutularında (gelen kutusu: seçili hesabın ya da tüm hesapların gelen kutuları;
-   * `trash`, `sent`, `archive`, `drafts`: o roldeki kutular; `mailbox`: o kutu) yereldeki en
-   * eski postadan daha eski bir sonraki partiyi (kutu başına 300) indirir, `mh:changed` yayar.
+   * `trash`, `sent`, `archive`, `drafts`: o roldeki kutular; `mailbox`: o kutu) sunucuda olup
+   * yerelde bulunmayan postaların en yeni bir sonraki partisini (kutu başına 300) indirir,
+   * `mh:changed` yayar. Kutu henüz eşitlenmediyse `{ fetched: 0, more: true }` dönebilir.
    * Diğer görünümlerde `{ fetched: 0, more: false }`. Çevrimdışıysa `network`.
    */
   messages_older: [{ view: View; accountId: AccountId | null }, OlderResult];
@@ -1116,8 +1117,9 @@ export interface Commands {
    */
   messages_delete: [{ ids: MessageId[] }, null];
   /**
-   * Hesabın (null: tüm hesapların) Çöp ya da İstenmeyen kutusundaki bütün postaları kalıcı siler;
-   * silinen posta sayısını döndürür. Geri alınamaz.
+   * Hesabın (null: tüm hesapların) Çöp ya da İstenmeyen kutusundaki bütün postaları kalıcı siler
+   * (sunucuda henüz indirilmemiş olanlar dahil); yerelde görünen silinmiş posta sayısını döndürür.
+   * Geri alınamaz.
    */
   mailbox_empty: [{ accountId: AccountId | null; role: 'trash' | 'junk' }, number];
 
