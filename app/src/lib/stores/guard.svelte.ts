@@ -107,8 +107,21 @@ export async function deleteForever(ids: MessageId[]): Promise<boolean> {
   }
 }
 
-/** Çöp ya da İstenmeyen kutusunu boşaltır (`mailbox_empty`). Onayı çağıran sorar. */
-export async function emptyMailbox(role: 'trash' | 'junk', accountId: string | null = mail.accountId): Promise<boolean> {
+/**
+ * Boşaltılacak kutunun hesabı: klasör görünümünde o klasörün hesabı (yalnız görünen
+ * kutu boşalsın), diğer görünümlerde hesap kapsamı (null: tüm hesaplar).
+ */
+function emptyScope(): string | null {
+  const view = mail.view;
+  const box = view.kind === 'mailbox' ? mail.mailboxes.find((b) => b.id === view.id) : undefined;
+  return box ? box.accountId : mail.accountId;
+}
+
+/**
+ * Çöp ya da İstenmeyen kutusunu boşaltır (`mailbox_empty`). Onayı çağıran sorar.
+ * Hesap verilmezse açık görünümün kapsamı kullanılır (`emptyScope`).
+ */
+export async function emptyMailbox(role: 'trash' | 'junk', accountId: string | null = emptyScope()): Promise<boolean> {
   try {
     const n = await call('mailbox_empty', { accountId, role });
     showToast({ text: n ? t(role === 'trash' ? 'purge.emptiedTrash' : 'purge.emptiedJunk', { n }) : t('purge.nothing') });
@@ -152,15 +165,20 @@ function olderScope(): boolean {
   return ['inbox', 'mailbox', 'trash', 'sent', 'archive', 'drafts'].includes(mail.view.kind);
 }
 
-/** Bu görünümde sunucudaki postaların sonuna gelindi mi ("Hepsi bu kadar"). */
+/** `older.done` açık görünüme mi ait (anahtarı bu görünümün anahtarı mı)? Yalnız durumu söyler. */
+export function olderDoneHere(): boolean {
+  return older.done && older.key === olderKey();
+}
+
+/** Bu görünümde sunucudaki postaların sonuna gelindi mi ("Hepsi bu kadar" gösterilsin mi). */
 export function olderDone(): boolean {
-  return olderScope() && older.done && older.key === olderKey() && !mail.nextCursor && mail.items.length > 0;
+  return olderScope() && olderDoneHere() && !mail.nextCursor && mail.items.length > 0;
 }
 
 /** Bu görünümde sunucudan daha eski posta istenebilir mi (arama ve sanal görünümlerde hayır). */
 export function olderAvailable(): boolean {
   if (!olderScope()) return false;
-  return !mail.nextCursor && !mail.loading && mail.items.length > 0 && !(older.key === olderKey() && older.done);
+  return !mail.nextCursor && !mail.loading && mail.items.length > 0 && !olderDoneHere();
 }
 
 /** Yerel liste bitince sunucudan bir sonraki eski partiyi indirir (`messages_older`). */
