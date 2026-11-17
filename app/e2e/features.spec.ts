@@ -88,7 +88,7 @@ test('otomatik yanıt: JMAP hesabında ayarlanır, IMAP hesabında desteklenmedi
   await expect(page.getByRole('status')).toContainText('Otomatik yanıt açıldı');
 });
 
-test('kurallar: yeni kural yazılır ve gelen kutusuna uygulanır; göndericiyi engelleme kural oluşturur', async ({ page }) => {
+test('kurallar: yeni kural yazılır ve gelen kutusuna uygulanır; göndericiyi engelleme adresi engellenenlere ekler', async ({ page }) => {
   await page.goto('/#/main');
   await openSettings(page, 'Kurallar');
   await expect(page.getByText('Faturalar klasöre')).toBeVisible();
@@ -118,8 +118,16 @@ test('kurallar: yeni kural yazılır ve gelen kutusuna uygulanır; göndericiyi 
   await page.getByRole('button', { name: 'Diğer eylemler' }).click();
   await page.getByRole('menuitem', { name: 'ayse.demir@eposta.com adresini engelle' }).click();
   await expect(page.getByRole('status')).toContainText('engellendi');
-  const blocked = await page.evaluate(() => window.__mh.state.rules.some((r) => r.name === 'Engellendi: ayse.demir@eposta.com'));
-  expect(blocked).toBe(true);
+  const blocked = await page.evaluate(() => ({
+    listed: window.__mh.state.settings.blocked.includes('ayse.demir@eposta.com'),
+    box: window.__mh.state.messages.find((m) => m.subject === 'Cumartesi kahvaltı?')?.mailboxId,
+  }));
+  expect(blocked.listed).toBe(true);
+  expect(blocked.box).toMatch(/Junk|Trash/);
+  // Geri al: adres listeden çıkar, posta gelen kutusuna döner.
+  await page.getByRole('status').getByRole('button', { name: 'Geri al' }).click();
+  await expect(list(page).getByText('Cumartesi kahvaltı?')).toBeVisible();
+  expect(await page.evaluate(() => window.__mh.state.settings.blocked.includes('ayse.demir@eposta.com'))).toBe(false);
 });
 
 test('planlananlar: sonra gönderilen posta listelenir, iptal edilir', async ({ page }) => {

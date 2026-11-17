@@ -27,13 +27,14 @@ async function newMail(page: Page) {
   await page.getByRole('button', { name: 'Yeni posta' }).click();
   await expect(h1(page, 'Yeni posta')).toBeVisible();
   // Ölçüler ekranın giriş animasyonu (sağdan kayma) bitince alınır; yavaş
-  // makinede kayma sürerken alınan iki ölçü birkaç piksel ayrışırdı.
+  // makinede kayma sürerken alınan iki ölçü birkaç piksel ayrışırdı. İptal edilen
+  // animasyon (öğe kalktı) da bitmiş sayılır.
   await page.evaluate(() =>
     Promise.all(
       document
         .getAnimations()
         .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
-        .map((a) => a.finished),
+        .map((a) => a.finished.catch(() => undefined)),
     ),
   );
 }

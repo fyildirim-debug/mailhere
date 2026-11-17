@@ -132,7 +132,7 @@ test('yanıt bekleyenler: süresi dolan hatırlatma gelen kutusunun üstünde, o
   await expect(side(page).getByRole('button', { name: /Yanıt bekleyenler/ })).toHaveCount(0);
 });
 
-test('elek: ayar açılır, ilk kez yazan bekler; kabul gelen kutusuna döndürür, engelleme çöpe atar ve kural kurar', async ({ page }) => {
+test('elek: ayar açılır, ilk kez yazan bekler; kabul gelen kutusuna döndürür, engelleme çöpe atar ve göndereni engellenenlere ekler', async ({ page }) => {
   await page.goto('/#/main');
   await openSettings(page, 'Bildirimler');
   const sw = page.getByRole('switch', { name: 'İlk kez yazanları elekte beklet' });
@@ -164,10 +164,10 @@ test('elek: ayar açılır, ilk kez yazan bekler; kabul gelen kutusuna döndür�
   await expect(page.getByRole('status')).toContainText('engellendi');
   await expect(page.getByText('Elek boş')).toBeVisible();
   const state = await page.evaluate(() => ({
-    rule: window.__mh.state.rules.some((r) => r.name === 'Engellendi: bilgi@derinkargo.com.tr'),
+    blocked: window.__mh.state.settings.blocked.includes('bilgi@derinkargo.com.tr'),
     box: window.__mh.state.messages.find((m) => m.subject === 'Gönderiniz dağıtıma çıktı')?.mailboxId,
   }));
-  expect(state).toEqual({ rule: true, box: 'demo-kisisel:Trash' });
+  expect(state).toEqual({ blocked: true, box: 'demo-kisisel:Trash' });
 
   // Kabul edilen gelen kutusuna döndü, kenar çubuğundan Elek düştü.
   await side(page).getByRole('button', { name: 'Gelen Kutusu' }).click();

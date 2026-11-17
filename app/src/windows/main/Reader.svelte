@@ -16,7 +16,6 @@
   import { openCompose } from '../../lib/mail/open';
   import { displayName, fileSize } from '../../lib/util/format';
   import {
-    blockSender,
     mail,
     moveTo,
     moveToFolder,
@@ -29,6 +28,7 @@
     snooze,
     unsubscribe,
   } from '../../lib/stores/mail.svelte';
+  import { blockSenderOf } from '../../lib/stores/guard.svelte';
   import { settings } from '../../lib/stores/settings.svelte';
   import { bulkMove, senderMessages, setTag, togglePin } from '../../lib/stores/bulk.svelte';
   import { tagStore, tagsOf } from '../../lib/stores/tags.svelte';
@@ -229,7 +229,7 @@
               stop: false,
             }),
         },
-        { label: t('read.block', { email: sender }), icon: 'block', danger: true, onclick: () => void blockSender(msg.accountId, sender) },
+        { label: t('read.block', { email: sender }), icon: 'block', danger: true, onclick: () => void blockSenderOf(msg.id) },
       ],
     };
   }

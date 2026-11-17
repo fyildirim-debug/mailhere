@@ -591,8 +591,6 @@ export const en: Record<MessageKey, string> = {
   'rule.enabledNamed': '{name} rule on',
   'rule.emptyTitle': 'No rules yet',
   'rule.emptyBody': 'Move invoices to a folder, silence newsletters or forward a sender automatically.',
-  'rule.blockedName': 'Blocked: {email}',
-  'toast.blocked': '{email} blocked; their mail will go to trash',
   'priv.db': 'Mail is stored in an encrypted database on this computer (AES-256). The key lives only in the operating system\'s keyring.',
   'priv.keyring': 'Passwords and sign-in tokens are kept only in the keyring; we run no servers.',
   'priv.remote': 'Remote images and tracking pixels don\'t load until you allow them.',
@@ -1196,4 +1194,23 @@ export const en: Record<MessageKey, string> = {
   // Yazma: kapatırken taslak kaydı.
   'compose.closeUnsaved': 'Your latest changes could not be saved to the draft, so the window stayed open. Closing again will discard them. Reason: {message}',
   'compose.closeSlow': 'Saving the draft is taking long, so the window stayed open. Wait a moment and close again; closing right away may lose your latest changes.',
+  // Junk protection and blocking (shared actions).
+  'block.done': '{email} blocked; their mail will go to Junk from now on',
+  'block.doneMoved': '{email} blocked · {n} moved to Junk',
+  'spam.trusted': 'Sender marked as safe; warning removed',
+  'spam.trustedMoved': 'Sender marked as safe; message moved to the inbox',
+  // Permanent delete and emptying a mailbox.
+  'purge.doneOne': 'Message deleted permanently',
+  'purge.done': '{n} messages deleted permanently',
+  'purge.emptiedTrash': 'Trash emptied · {n} deleted permanently',
+  'purge.emptiedJunk': 'Junk emptied · {n} deleted permanently',
+  'purge.nothing': 'The mailbox is already empty',
+  // Older mail.
+  'older.none': 'There is no older mail on the server',
+  'block.badAddress': 'This address is missing or malformed, so it could not be blocked. You can delete the message or create a rule instead.',
+  'block.ownAddress': 'You cannot block your own address. To get rid of this message, delete or archive it.',
+  'block.full': 'The blocked list is full ({n} at most). Remove entries you no longer need in Settings › Privacy and security, then try again.',
+  // Code chip on a list row.
+  'otp.chipLabel': 'Verification code {code}; copy',
+  'otp.chipTitle': 'Copy code',
 };

@@ -605,8 +605,6 @@ export const tr = {
   'rule.enabledNamed': '{name} kuralı açık',
   'rule.emptyTitle': 'Henüz kural yok',
   'rule.emptyBody': 'Faturaları bir klasöre taşı, bültenleri sessize al ya da bir göndericiyi otomatik ilet.',
-  'rule.blockedName': 'Engellendi: {email}',
-  'toast.blocked': '{email} engellendi; postaları çöpe gidecek',
   'priv.db': 'Postalar bu bilgisayarda şifreli bir veritabanında durur (AES-256). Anahtar yalnız işletim sisteminin anahtar zincirinde.',
   'priv.keyring': 'Parolalar ve giriş jetonları yalnız anahtar zincirinde tutulur; hiçbir sunucumuz yok.',
   'priv.remote': 'Uzak görseller ve izleme pikselleri, sen izin verene kadar yüklenmez.',
@@ -1212,6 +1210,25 @@ export const tr = {
   // Yazma: kapatırken taslak kaydı.
   'compose.closeUnsaved': 'Son değişiklikler taslağa yazılamadı; pencere açık bırakıldı. Yeniden kapatırsan bu değişiklikler kaybolur. Neden: {message}',
   'compose.closeSlow': 'Taslak kaydı uzun sürdü; pencere açık bırakıldı. Biraz bekleyip yeniden kapat; hemen kapatırsan son değişiklikler kaybolabilir.',
+  // İstenmeyen koruması ve engelleme (ortak eylemler).
+  'block.done': '{email} engellendi; postaları artık İstenmeyen\'e gidecek',
+  'block.doneMoved': '{email} engellendi · {n} posta İstenmeyen\'e taşındı',
+  'spam.trusted': 'Gönderen güvenli sayıldı; uyarı kaldırıldı',
+  'spam.trustedMoved': 'Gönderen güvenli sayıldı; posta gelen kutusuna taşındı',
+  // Kalıcı silme ve kutuyu boşaltma.
+  'purge.doneOne': 'Posta kalıcı silindi',
+  'purge.done': '{n} posta kalıcı silindi',
+  'purge.emptiedTrash': 'Çöp boşaltıldı · {n} posta kalıcı silindi',
+  'purge.emptiedJunk': 'İstenmeyen boşaltıldı · {n} posta kalıcı silindi',
+  'purge.nothing': 'Kutu zaten boş',
+  // Daha eski postalar.
+  'older.none': 'Sunucuda daha eski posta yok',
+  'block.badAddress': 'Bu adres eksik ya da bozuk; engellenemedi. Postayı silebilir ya da bir kural oluşturabilirsin.',
+  'block.ownAddress': 'Kendi adresini engelleyemezsin. Bu postadan kurtulmak için onu sil ya da arşivle.',
+  'block.full': 'Engellenenler listesi dolu (en çok {n}). Ayarlar › Gizlilik ve güvenlik\'ten kullanmadığın girdileri kaldırıp yeniden dene.',
+  // Liste satırındaki kod çipi.
+  'otp.chipLabel': 'Doğrulama kodu {code}; kopyala',
+  'otp.chipTitle': 'Kodu kopyala',
 } as const;
 
 export type MessageKey = keyof typeof tr;

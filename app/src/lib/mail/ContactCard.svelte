@@ -112,7 +112,7 @@
 
   function block() {
     onclose();
-    void blockSender(accountId, email);
+    void blockSender(email);
   }
 
   async function copy() {

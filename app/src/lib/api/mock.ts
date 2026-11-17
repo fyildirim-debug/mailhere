@@ -479,6 +479,9 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
   /** Açılışta başlama (iki kabuk; kabukta varsayılan açık). */
   let autostart = true;
   let nextId = 1000;
+  /** `messages_older` ile kutu başına indirilmiş parti sayısı (sahte sunucuda kutu başına iki parti var). */
+  const olderDone = new Map<string, number>();
+  const OLDER_BATCHES = 2;
 
   function emit<E extends keyof EventPayloads>(event: E, payload: EventPayloads[E]) {
     handlers.get(event)?.forEach((h) => h(payload));
@@ -1543,6 +1546,65 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       emit(EVENTS.settings, structuredClone(state.settings));
       emit(EVENTS.changed, { mailboxIds: [] });
       return null;
+    },
+    messages_older: ({ view, accountId }) => {
+      // Sahte sunucu: her kutuda bir parti (üç posta) daha eski posta bekler.
+      const roles: Partial<Record<View['kind'], MailboxRole>> = { inbox: 'inbox', trash: 'trash', sent: 'sent', archive: 'archive', drafts: 'drafts' };
+      const role = roles[view.kind];
+      const boxes = state.mailboxes.filter((b) =>
+        view.kind === 'mailbox' ? b.id === view.id : role != null && b.role === role && (!accountId || b.accountId === accountId),
+      );
+      let fetched = 0;
+      for (const b of boxes) {
+        const done = olderDone.get(b.id) ?? 0;
+        if (done >= OLDER_BATCHES) continue;
+        olderDone.set(b.id, done + 1);
+        const mine = state.messages.filter((m) => m.mailboxId === b.id);
+        const oldest = mine.reduce((a, m) => Math.min(a, m.date), now());
+        const sample = mine[mine.length - 1];
+        if (!sample) continue;
+        for (let i = 1; i <= 3; i++) {
+          const id = nextId++;
+          state.messages.push({
+            ...structuredClone(sample),
+            id,
+            threadId: `older-${id}`,
+            subject: `Eski yazışma ${done * 3 + i}`,
+            snippet: 'Sunucudan sonradan indirilen daha eski bir posta.',
+            date: oldest - i * 86_400_000,
+            unread: false,
+            starred: false,
+            pinned: false,
+            snoozedUntil: null,
+            otp: null,
+            spam: false,
+            spamVerdict: null,
+            attachments: [],
+            hasAttachments: false,
+            tags: [],
+          });
+          fetched++;
+        }
+      }
+      if (fetched) emit(EVENTS.changed, { mailboxIds: boxes.map((b) => b.id) });
+      return { fetched, more: boxes.some((b) => (olderDone.get(b.id) ?? 0) < OLDER_BATCHES) };
+    },
+    messages_delete: ({ ids }) => {
+      const gone = ids.map(find);
+      if (gone.some((m) => !['trash', 'junk'].includes(roleOf(m.mailboxId)))) {
+        fail('invalid', 'Yalnız Çöp ya da İstenmeyen kutusundaki postalar kalıcı silinebilir. Postayı önce Çöp\'e taşı.');
+      }
+      const set = new Set(ids);
+      state.messages = state.messages.filter((m) => !set.has(m.id));
+      emit(EVENTS.changed, { mailboxIds: [] });
+      return null;
+    },
+    mailbox_empty: ({ accountId, role }) => {
+      const before = state.messages.length;
+      state.messages = state.messages.filter((m) => !(roleOf(m.mailboxId) === role && (!accountId || m.accountId === accountId)));
+      const n = before - state.messages.length;
+      if (n) emit(EVENTS.changed, { mailboxIds: [] });
+      return n;
     },
     transfer_begin: ({ includeSecrets }) => {
       // Yeni teklif eskisini sessizce kapatır.

@@ -282,6 +282,14 @@ export interface BlockResult {
   ids: MessageId[];
 }
 
+/** `messages_older` sonucu. */
+export interface OlderResult {
+  /** Bu çağrıda sunucudan indirilen posta sayısı. */
+  fetched: number;
+  /** Görünümün kutularından en az birinde hâlâ daha eski posta var mı. */
+  more: boolean;
+}
+
 /** Engellenenler listesinin üst sınırı (arka uçla aynı). */
 export const BLOCKED_MAX = 500;
 
@@ -1088,6 +1096,26 @@ export interface Commands {
    * kutusundaysa gelen kutusuna döner. `mh:settings` ve `mh:changed` yayar.
    */
   spam_trust: [{ id: MessageId }, null];
+
+  // Daha eski postalar, kalıcı silme
+  /**
+   * İlk eşitleme kutu başına en yeni 300 postayı indirir. Bu komut görünümün karşılık geldiği
+   * sunucu kutularında (gelen kutusu: seçili hesabın ya da tüm hesapların gelen kutuları;
+   * `trash`, `sent`, `archive`, `drafts`: o roldeki kutular; `mailbox`: o kutu) yereldeki en
+   * eski postadan daha eski bir sonraki partiyi (kutu başına 300) indirir, `mh:changed` yayar.
+   * Diğer görünümlerde `{ fetched: 0, more: false }`. Çevrimdışıysa `network`.
+   */
+  messages_older: [{ view: View; accountId: AccountId | null }, OlderResult];
+  /**
+   * Postaları kalıcı siler (sunucuda da); geri alınamaz. Yalnız Çöp ya da İstenmeyen kutusundaki
+   * postalar için: başka kutudan bir kimlik varsa hiçbirine dokunulmaz, `invalid` döner.
+   */
+  messages_delete: [{ ids: MessageId[] }, null];
+  /**
+   * Hesabın (null: tüm hesapların) Çöp ya da İstenmeyen kutusundaki bütün postaları kalıcı siler;
+   * silinen posta sayısını döndürür. Geri alınamaz.
+   */
+  mailbox_empty: [{ accountId: AccountId | null; role: 'trash' | 'junk' }, number];
 
   // Liste: göndericiye göre seçim, sabitleme, etiketler (hepsi yerel)
   /**

@@ -2,8 +2,10 @@
 // Eylemler iyimserdir: liste hemen güncellenir, arka uç ardından çağrılır.
 
 import {
+  BLOCKED_MAX,
   call,
   EVENTS,
+  normalizeBlockedEntry,
   on,
   openExternal,
   toAppError,
@@ -27,7 +29,7 @@ import { accountScope } from '../mail/query';
 import { showToast } from '../ui/toast.svelte';
 import { baseSubject, displayName, replyTargets } from '../util/format';
 import { isLockedError, isOpen, lock } from './lock.svelte';
-import { settings } from './settings.svelte';
+import { settings, updateSettings } from './settings.svelte';
 import { loadTags } from './tags.svelte';
 
 export type Screen = 'mail' | 'settings' | 'onboarding' | 'scheduled';
@@ -309,27 +311,27 @@ export function newRuleFrom(draft: Rule) {
   openSettings('rules');
 }
 
-/** Gönderenin postaları bundan sonra çöpe gider ve bildirim göstermez. */
-export async function blockSender(accountId: string, email: string) {
+/**
+ * Adresi engellenenler listesine ekler: postaları bundan sonra İstenmeyen'e gider ve
+ * bildirim göstermez. Elimizde posta varsa `guard.svelte.ts`teki `blockSenderOf`
+ * kullanılır (gelen kutusundaki postalarını da taşır).
+ */
+export async function blockSender(email: string) {
+  const address = normalizeBlockedEntry(email);
+  const had = settings.value.blocked;
   try {
-    const rule = await call('rule_save', {
-      rule: {
-        id: '',
-        name: t('rule.blockedName', { email }),
-        enabled: true,
-        accountId,
-        match: 'all',
-        conditions: [{ kind: 'from', op: 'is', value: email }],
-        actions: [{ kind: 'trash' }, { kind: 'mute' }],
-        stop: true,
-      },
-    });
+    if (!address || address.startsWith('@')) throw { code: 'invalid', message: t('block.badAddress') };
+    if (mail.accounts.some((a) => a.email.trim().toLowerCase() === address)) throw { code: 'invalid', message: t('block.ownAddress') };
+    if (!had.includes(address)) {
+      if (had.length >= BLOCKED_MAX) throw { code: 'invalid', message: t('block.full', { n: BLOCKED_MAX }) };
+      await updateSettings({ blocked: [...had, address] });
+    }
     showToast({
-      text: t('toast.blocked', { email }),
+      text: t('block.done', { email: address }),
       action: {
         label: t('act.undo'),
         run: async () => {
-          await call('rule_delete', { id: rule.id });
+          if (!had.includes(address)) await updateSettings({ blocked: settings.value.blocked.filter((e) => e !== address) });
         },
       },
     });
@@ -698,7 +700,7 @@ export async function screenerDecide(accountId: string, email: string, allow: bo
   try {
     await call('screener_decide', { email, accountId, allow });
     if (allow) showToast({ text: t('screen.allowed', { email }) });
-    else await blockSender(accountId, email);
+    else await blockSender(email);
     void refreshList(false);
     void refreshCounts();
   } catch (e) {
