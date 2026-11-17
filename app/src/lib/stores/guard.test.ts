@@ -3,7 +3,7 @@ import { createMockBackend } from '../api/mock';
 import { useBackend, type OlderResult } from '../api';
 import { t } from '../i18n/index.svelte';
 import { dismissToast, toasts } from '../ui/toast.svelte';
-import { loadOlder, older, olderAvailable, olderDone, otpFresh, OTP_CHIP_MS, purgeRole } from './guard.svelte';
+import { emptyMailbox, loadOlder, older, olderAvailable, olderDone, olderDoneHere, otpFresh, OTP_CHIP_MS, purgeRole } from './guard.svelte';
 import { loadMore, mail, refreshList, reloadMailboxes } from './mail.svelte';
 
 describe('kod çipinin tazeliği', () => {
@@ -55,7 +55,11 @@ describe('daha eski postalar ve liste derinliği', () => {
     await loadOlder();
     expect(mail.items.length).toBeGreaterThan(mid);
     expect(olderDone()).toBe(true);
+    expect(olderDoneHere()).toBe(true);
     expect(olderAvailable()).toBe(false);
+    // Durum görünüme aittir: başka görünümün anahtarıyla "burada bitti" sayılmaz.
+    mail.view = { kind: 'sent' };
+    expect(olderDoneHere()).toBe(false);
   });
 
   it('arama, süzgeç ve sanal görünümlerde ne düğme ne "hepsi bu kadar" vardır', async () => {
@@ -150,5 +154,37 @@ describe('kalıcı silme görünümleri', () => {
     expect(purgeRole({ kind: 'mailbox', id: other.id })).toBeNull();
     expect(purgeRole({ kind: 'inbox' })).toBeNull();
     expect(purgeRole({ kind: 'archive' })).toBeNull();
+  });
+});
+
+describe('kutuyu boşaltma kapsamı', () => {
+  it('klasör görünümünde yalnız o klasörün hesabı boşalır; Çöp görünümünde kapsamdaki hesaplar', async () => {
+    const backend = createMockBackend();
+    useBackend(backend);
+    await reloadMailboxes();
+    const roleOf = (id: string) => mail.mailboxes.find((b) => b.id === id)?.role ?? 'other';
+    /** Hesabın Çöp ve İstenmeyen dışındaki bir postasını bu kutuya koyar; hesapta posta yoksa false. */
+    const fill = (box: { id: string; accountId: string }) => {
+      const m = backend.state.messages.find((x) => x.accountId === box.accountId && !['trash', 'junk'].includes(roleOf(x.mailboxId)));
+      if (m) m.mailboxId = box.id;
+      return m != null;
+    };
+    // Postası olan her hesabın İstenmeyen kutusuna bir posta koy.
+    const junks = mail.mailboxes.filter((b) => b.role === 'junk').filter(fill);
+    expect(junks.length).toBeGreaterThan(1);
+    const count = (id: string) => backend.state.messages.filter((m) => m.mailboxId === id).length;
+    mail.accountId = null;
+    mail.view = { kind: 'mailbox', id: junks[0].id };
+    expect(await emptyMailbox('junk')).toBe(true);
+    expect(count(junks[0].id)).toBe(0);
+    for (const other of junks.slice(1)) expect(count(other.id)).toBeGreaterThan(0);
+
+    // Çöp görünümü, hesap kapsamı yokken tüm hesapların çöpünü boşaltır.
+    const trashes = mail.mailboxes.filter((b) => b.role === 'trash').filter(fill);
+    expect(trashes.length).toBeGreaterThan(1);
+    mail.view = { kind: 'trash' };
+    expect(await emptyMailbox('trash')).toBe(true);
+    for (const box of trashes) expect(count(box.id)).toBe(0);
+    dismissToast();
   });
 });
