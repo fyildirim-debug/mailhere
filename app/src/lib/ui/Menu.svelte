@@ -19,9 +19,10 @@
 </script>
 
 <script lang="ts">
-  // Açılır menü: sağ tık menüsü ve düğme menüleri. Ok tuşlarıyla gezilir,
-  // Esc ya da dışarı tıklama kapatır; seçimden sonra kendiliğinden kapanır.
+  // Açılır menü: sağ tık menüsü ve düğme menüleri. Ok tuşlarıyla gezilir, Enter
+  // odaktaki öğeyi seçer, Esc ya da dışarı tıklama kapatır; seçimden sonra kendiliğinden kapanır.
   // Mobil kabukta aynı öğeler alt sayfada (Sheet) listelenir; konum yok sayılır.
+  import { menuKeys } from '../mail/menukeys';
   import { isMobileShell } from '../shell';
   import Icon from './Icon.svelte';
   import Sheet from './Sheet.svelte';
@@ -77,15 +78,13 @@
     };
   });
 
+  /**
+   * Ok tuşları, Home / End ve Enter (`menukeys.ts`): Enter odaktaki öğeyi burada
+   * seçer ve olayı tüketir; yoksa ana pencerenin "seçili postayı aç" kısayolu
+   * tuşu yutar, öğe hiç tıklanmazdı.
+   */
   function onKeydown(e: KeyboardEvent) {
-    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Home' && e.key !== 'End') return;
-    e.preventDefault();
-    const list = [...(menu?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])];
-    if (!list.length) return;
-    const i = list.indexOf(document.activeElement as HTMLButtonElement);
-    const next =
-      e.key === 'Home' ? 0 : e.key === 'End' ? list.length - 1 : (i + (e.key === 'ArrowDown' ? 1 : -1) + list.length) % list.length;
-    list[next].focus();
+    menuKeys(e, menu);
   }
 
   function pick(item: MenuItem) {

@@ -245,7 +245,15 @@
     } else openPicker(what);
   }
 
+  /**
+   * Odak düğmeye Sekme ile mi taşındı? Öyleyse Enter / Space o düğmenindir
+   * (araç çubuğu, satır eylemi). Fareyle basılmış düğmede odak kalsa da bu
+   * tuşlar kısayol olarak çalışır: Enter seçili postayı açar, Space kaydırır.
+   */
+  let tabbed = false;
+
   function onKey(e: KeyboardEvent) {
+    if (e.key === 'Tab') tabbed = true;
     if (e.defaultPrevented || locked) return;
     // G zinciri: ikinci tuş görünümü seçer; başka tuş zinciri bitirir.
     if (chord) {
@@ -311,6 +319,13 @@
       chordTimer = setTimeout(endChord, GO_TIMEOUT);
       return;
     }
+    // Menü ve iletişim kutusunda, ya da odak Sekme ile bir düğmeye taşındıysa Enter / Space
+    // odaktaki öğenindir; "postayı aç" ya da "kaydır" sayılmaz. Liste satırının kendisi hariç.
+    if (sc === 'open' || sc === 'pageDown' || sc === 'pageUp') {
+      const el = e.target as Element | null;
+      if (el?.closest?.('[role="menu"], [role="dialog"], [role="alertdialog"]')) return;
+      if (tabbed && el?.closest?.('button, a[href], summary') && !el.closest('.row .main')) return;
+    }
     const id = mail.selectedId;
     e.preventDefault();
     learned(sc);
@@ -332,10 +347,8 @@
       return;
     }
     if (sc === 'pageDown' || sc === 'pageUp') {
-      // Space okuma alanını kaydırır; odaktaki düğmenin kendi Space davranışı (satır dışında) korunur.
-      const ae = document.activeElement as HTMLElement | null;
-      if (ae?.closest('button, a, summary, [role="menuitem"]') && !ae.closest('.row')) return;
-      if (!triage.on && reader?.page(sc === 'pageDown' ? 1 : -1)) e.preventDefault();
+      // Space okuma alanını kaydırır (Sekme ile odaklanılmış düğmenin kendi Space davranışı yukarıda korunur).
+      if (!triage.on) reader?.page(sc === 'pageDown' ? 1 : -1);
       return;
     }
     if (triage.on) {
@@ -399,7 +412,7 @@
   }
 </script>
 
-<svelte:window onkeydown={onKey} />
+<svelte:window onkeydown={onKey} onpointerdown={() => (tabbed = false)} />
 
 <div class="shell">
   <header class="titlebar" data-tauri-drag-region>
