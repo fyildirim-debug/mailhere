@@ -1,41 +1,15 @@
 // Toplu işlemler ve yerel işaretler (sabitleme, etiket): iyimser güncelleme,
-// sayılı bildirim ve geri alma. Tek postadaki eylemler `mail.svelte.ts`te.
+// sayılı bildirim ve geri alma. Tek postadaki eylemler ve ortak geri taşıma
+// yardımcıları (`originsOf`, `moveBack`) `mail.svelte.ts`te.
 
 import { call, toAppError, type Mailbox, type MessageId, type MoveTarget, type Tag } from '../api';
 import { t, when } from '../i18n/index.svelte';
 import { showToast } from '../ui/toast.svelte';
-import { mail, patchLocal, refreshCounts, refreshList, reloadMailboxes, select, takeOut } from './mail.svelte';
+import { mail, moveBack, originsOf, patchLocal, refreshCounts, refreshList, reloadMailboxes, restoreAfterUndo as restore, takeOut } from './mail.svelte';
 import { clearChecked } from './selection.svelte';
 
 function errorToast(e: unknown) {
   showToast({ text: t('toast.error', { message: toAppError(e).message }) });
-}
-
-/** Geri alınca liste yenilenir ve okunan posta yeniden seçilir. */
-async function restore(selected: MessageId | null) {
-  await refreshList();
-  if (selected != null) void select(selected, { markRead: false });
-  void refreshCounts();
-}
-
-/** Postaların geldiği klasörler (listeden ve okunan postadan bilinenler). */
-function originsOf(ids: MessageId[]): Map<MessageId, string> {
-  const from = new Map(mail.items.filter((m) => ids.includes(m.id)).map((m) => [m.id, m.mailboxId]));
-  if (mail.detail && ids.includes(mail.detail.id)) from.set(mail.detail.id, mail.detail.mailboxId);
-  return from;
-}
-
-/** Her postayı geldiği klasöre geri taşır; klasörü bilinmeyen gelen kutusuna döner. */
-async function moveBack(ids: MessageId[], from: Map<MessageId, string>) {
-  const back = new Map<string, MessageId[]>();
-  const unknown: MessageId[] = [];
-  for (const id of ids) {
-    const b = from.get(id);
-    if (b) back.set(b, [...(back.get(b) ?? []), id]);
-    else unknown.push(id);
-  }
-  for (const [box, list] of back) await call('messages_move_to', { ids: list, mailboxId: box });
-  if (unknown.length) await call('messages_move', { ids: unknown, target: 'inbox' });
 }
 
 /** Arşivle ya da çöpe at; geri alınca her posta geldiği klasöre döner. */
@@ -43,9 +17,6 @@ export async function bulkMove(ids: MessageId[], target: MoveTarget) {
   if (!ids.length) return;
   const selected = mail.selectedId;
   const from = originsOf(ids);
-  // Klasör görünümünde listede olmayanlar da (göndericiye göre temizlik) o klasördendir.
-  const view = mail.view;
-  if (view.kind === 'mailbox') for (const id of ids) if (!from.has(id)) from.set(id, view.id);
   takeOut(ids);
   clearChecked();
   try {
