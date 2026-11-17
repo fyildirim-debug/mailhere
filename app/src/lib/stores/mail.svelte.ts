@@ -22,6 +22,7 @@ import {
   type View,
 } from '../api';
 import { t, when } from '../i18n/index.svelte';
+import { bindComposeAccount } from '../mail/open';
 import { accountScope } from '../mail/query';
 import { showToast } from '../ui/toast.svelte';
 import { baseSubject, displayName, replyTargets } from '../util/format';
@@ -380,6 +381,10 @@ export function move(delta: 1 | -1) {
   if (next && next.id !== mail.selectedId) void select(next.id, { markRead: false });
 }
 
+// Postadaki `mailto:` bağlantısından açılan yeni posta, okunan postanın
+// hesabından (yoksa seçili hesap kapsamından) gönderilir.
+bindComposeAccount(() => mail.detail?.accountId ?? mail.accountId);
+
 // ---------------------------------------------------------- eylemler
 
 export function patchLocal(ids: MessageId[], patch: Partial<MessageSummary>) {
@@ -434,9 +439,45 @@ export async function toggleStar(id: MessageId, current?: boolean): Promise<bool
   }
 }
 
+/**
+ * Postaların geldiği klasörler: listeden ve okunan postadan bilinenler. Klasör
+ * görünümünde listede olmayanlar da (konuşmanın eski iletisi, göndericiye göre
+ * temizlik) o klasörden sayılır. Taşımadan ÖNCE çağrılır; geri alma bununla döner.
+ */
+export function originsOf(ids: MessageId[]): Map<MessageId, string> {
+  const set = new Set(ids);
+  const from = new Map(mail.items.filter((m) => set.has(m.id)).map((m) => [m.id, m.mailboxId]));
+  if (mail.detail && set.has(mail.detail.id)) from.set(mail.detail.id, mail.detail.mailboxId);
+  const view = mail.view;
+  if (view.kind === 'mailbox') for (const id of ids) if (!from.has(id)) from.set(id, view.id);
+  return from;
+}
+
+/** Her postayı geldiği klasöre geri taşır; klasörü bilinmeyen gelen kutusuna döner. */
+export async function moveBack(ids: MessageId[], from: Map<MessageId, string>) {
+  const back = new Map<string, MessageId[]>();
+  const unknown: MessageId[] = [];
+  for (const id of ids) {
+    const b = from.get(id);
+    if (b) back.set(b, [...(back.get(b) ?? []), id]);
+    else unknown.push(id);
+  }
+  for (const [box, list] of back) await call('messages_move_to', { ids: list, mailboxId: box });
+  if (unknown.length) await call('messages_move', { ids: unknown, target: 'inbox' });
+}
+
+/** Geri alınca liste yenilenir ve okunan posta yeniden seçilir. */
+export async function restoreAfterUndo(selected: MessageId | null) {
+  await refreshList();
+  if (selected != null) void select(selected, { markRead: false });
+  void refreshCounts();
+}
+
+/** Arşivle ya da çöpe at; geri alınca her posta geldiği klasöre döner (Gönderilenler, özel klasör…). */
 export async function moveTo(ids: MessageId[], target: MoveTarget) {
   if (!ids.length) return;
   const selected = mail.selectedId;
+  const from = originsOf(ids);
   takeOut(ids);
   try {
     await call('messages_move', { ids, target });
@@ -446,10 +487,8 @@ export async function moveTo(ids: MessageId[], target: MoveTarget) {
       action: {
         label: t('act.undo'),
         run: async () => {
-          await call('messages_move', { ids, target: 'inbox' });
-          await refreshList();
-          if (selected != null) void select(selected, { markRead: false });
-          void refreshCounts();
+          await moveBack(ids, from);
+          await restoreAfterUndo(selected);
         },
       },
     });
@@ -463,8 +502,7 @@ export async function moveTo(ids: MessageId[], target: MoveTarget) {
 export async function moveToFolder(ids: MessageId[], mailbox: Mailbox, label: string) {
   if (!ids.length) return;
   const selected = mail.selectedId;
-  const from = new Map(mail.items.filter((m) => ids.includes(m.id)).map((m) => [m.id, m.mailboxId]));
-  if (mail.detail && ids.includes(mail.detail.id)) from.set(mail.detail.id, mail.detail.mailboxId);
+  const from = originsOf(ids);
   takeOut(ids);
   try {
     await call('messages_move_to', { ids, mailboxId: mailbox.id });
@@ -475,16 +513,8 @@ export async function moveToFolder(ids: MessageId[], mailbox: Mailbox, label: st
       action: {
         label: t('act.undo'),
         run: async () => {
-          // Her posta geldiği klasöre döner.
-          const back = new Map<string, MessageId[]>();
-          for (const id of ids) {
-            const b = from.get(id);
-            if (b) back.set(b, [...(back.get(b) ?? []), id]);
-          }
-          for (const [box, list] of back) await call('messages_move_to', { ids: list, mailboxId: box });
-          await refreshList();
-          if (selected != null) void select(selected, { markRead: false });
-          void refreshCounts();
+          await moveBack(ids, from);
+          await restoreAfterUndo(selected);
         },
       },
     });

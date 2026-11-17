@@ -1,11 +1,15 @@
 <script lang="ts">
-  // Erteleme menüsü: akşam / yarın / hafta sonu / haftaya. Masaüstünde açılır
-  // menü, mobil kabukta alt sayfa (Sheet).
+  // Erteleme menüsü: akşam / yarın / hafta sonu / haftaya ve altında kendi
+  // tarih-saatini seçme. Masaüstünde açılır menü (ok tuşlarıyla gezilir), mobil
+  // kabukta alt sayfa (Sheet). Bileşen menü her açıldığında yeniden kurulur:
+  // hazır seçenekler o anın saatine göre hesaplanır.
   import { t, when, type MessageKey } from '../i18n/index.svelte';
   import { isMobileShell } from '../shell';
   import Icon from '../ui/Icon.svelte';
   import Sheet from '../ui/Sheet.svelte';
   import { snoozeOptions } from '../util/format';
+  import { menuKeys } from './menukeys';
+  import PickTime from './PickTime.svelte';
 
   interface Props {
     onpick: (at: number) => void;
@@ -39,9 +43,10 @@
         onclose();
       }
     };
-    setTimeout(() => document.addEventListener('mousedown', onDoc));
+    const timer = setTimeout(() => document.addEventListener('mousedown', onDoc));
     document.addEventListener('keydown', onKey, true);
     return () => {
+      clearTimeout(timer);
       document.removeEventListener('mousedown', onDoc);
       document.removeEventListener('keydown', onKey, true);
     };
@@ -56,14 +61,17 @@
       <span class="meta num">{when(o.at, now)}</span>
     </button>
   {/each}
+  <PickTime row={t('compose.pickTime')} label={t('time.pickSnooze')} action={t('act.snooze')} initial={opts[0].at} {iconSize} {onpick} />
 {/snippet}
 
 {#if isMobileShell}
   <Sheet title={t('snooze.title')} {onclose}>
-    <div class="sheet-menu" role="menu" aria-label={t('snooze.title')}>{@render rows(20)}</div>
+    <div class="sheet-menu" role="menu" tabindex="-1" aria-label={t('snooze.title')} bind:this={menu} onkeydown={(e) => menuKeys(e, menu)}>
+      {@render rows(20)}
+    </div>
   </Sheet>
 {:else}
-  <div class="popover" role="menu" aria-label={t('snooze.title')} bind:this={menu} {style}>
+  <div class="popover" role="menu" tabindex="-1" aria-label={t('snooze.title')} bind:this={menu} {style} onkeydown={(e) => menuKeys(e, menu)}>
     <div class="menu-title">{t('snooze.title')}</div>
     {@render rows(16)}
   </div>

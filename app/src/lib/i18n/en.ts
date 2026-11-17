@@ -109,7 +109,6 @@ export const en: Record<MessageKey, string> = {
   'list.loadMore': 'Older mail',
   'list.attachment': 'Has attachment',
   'list.starred': 'Starred',
-  'list.snoozedUntil': 'Back · {when}',
 
   'read.empty': 'Pick a message to read',
   'read.emptyHint': 'Move with J and K, open with Enter.',
@@ -161,13 +160,11 @@ export const en: Record<MessageKey, string> = {
   'toast.archived': 'Archived',
   'toast.deleted': 'Moved to trash',
   'toast.snoozed': 'Snoozed · {when}',
-  'toast.sent': 'Reply sent',
   'toast.queued': 'In outbox · sends in {n} s',
   'toast.remoteAllowed': 'Images enabled for {name}',
   'toast.markedRead': 'Marked all as read',
   'toast.error': 'That failed: {message}',
   'toast.sendFailed': 'Could not send: {message}',
-  'toast.draftDeleted': 'Draft deleted',
   'toast.saved': 'Saved',
 
   'palette.label': 'Command palette',
@@ -246,7 +243,6 @@ export const en: Record<MessageKey, string> = {
   'compose.bullet': 'Bullet',
   'compose.draftSaved': 'Draft saved · just now',
   'compose.queued': 'In outbox · undo within {n} s',
-  'compose.sent': 'Sent',
   'compose.scheduled': 'Scheduled · {when}',
   'compose.later': 'Send later',
   'compose.pickTime': 'Pick date and time…',
@@ -370,8 +366,6 @@ export const en: Record<MessageKey, string> = {
   'set.license': 'MIT licensed · clean room',
   'set.editAccount': 'Edit',
   'set.accountColor': 'Colour',
-  'set.signature': 'Signature',
-  'set.signatureHint': 'Added to the end of new mail and replies. Leave empty for none.',
   'set.save': 'Save',
   'set.auth.password': 'Password',
   'set.auth.google': 'Google sign-in',
@@ -465,7 +459,6 @@ export const en: Record<MessageKey, string> = {
   'tpl.empty': 'Empty template',
   'tpl.removed': '{name} deleted',
   'tpl.insert': 'Insert template',
-  'tpl.manage': 'Manage templates',
   'acc.lead': 'Each account has its own identity, signatures, server and folders.',
   'acc.state.online': 'Connected',
   'acc.tabs': 'Account settings',
@@ -879,7 +872,6 @@ export const en: Record<MessageKey, string> = {
   'bulk.count': '{n} selected',
   'bulk.hint': 'Ctrl-click to pick, Shift-click for a range, Ctrl A for everything shown. Esc clears the selection.',
   'bulk.clear': 'Clear selection',
-  'bulk.selectAll': 'Select everything shown',
   'bulk.archived': '{n} messages archived',
   'bulk.deleted': '{n} messages moved to trash',
   'bulk.snoozed': '{n} messages snoozed · {when}',
@@ -950,7 +942,6 @@ export const en: Record<MessageKey, string> = {
   'mob.more': 'More',
   'mob.selected': '{n} selected',
   'mob.selectAll': 'Select all',
-  'mob.refresh': 'Refresh',
   'mob.pull': 'Pull to refresh',
   'mob.release': 'Release to refresh',
   'mob.refreshing': 'Refreshing…',
@@ -960,7 +951,6 @@ export const en: Record<MessageKey, string> = {
   'mob.unstar': 'Unstar',
   'mob.move': 'Move',
   'mob.tag': 'Tag',
-  'mob.longPress': 'Press and hold to select',
   'mob.loading': 'Loading mail…',
 
   // mobile: settings, account setup, scheduled
@@ -1186,4 +1176,24 @@ export const en: Record<MessageKey, string> = {
   // Mobil okuma: komşu postaya geçiş (kaydırmanın menüdeki karşılığı).
   'mob.read.prev': 'Previous message',
   'mob.read.next': 'Next message',
+  // Yazma: gönderim öncesi denetimler.
+  'compose.badRecipient': '"{part}" in the {field} field is not a valid address. Fix or remove it; the message has not been sent yet.',
+  'compose.check.noAttachTitle': 'Send without an attachment?',
+  'compose.check.noAttachBody': 'The text says "{word}" but nothing is attached. To add a file, cancel and attach it.',
+  'compose.check.noSubjectTitle': 'Send without a subject?',
+  'compose.check.noSubjectBody': 'The subject line is empty. The recipient will not see what the message is about in their list; you can cancel and write one.',
+  'compose.check.bothTitle': 'Send without a subject or an attachment?',
+  'compose.check.sendAnyway': 'Send anyway',
+  'compose.check.scheduleAnyway': 'Schedule anyway',
+  // Kendi tarih-saatini seçme (ertele, sonra gönder).
+  'time.pickSend': 'Send date and time',
+  'time.pickSnooze': 'Snooze date and time',
+  'time.past': 'That moment has already passed. Pick a later date and time.',
+  'compose.schedulePast': 'The send time you picked has passed, so scheduling was removed. Pick a new time or send now.',
+  // Girdi yer tutucuları (örnek adres ve sunucu).
+  'placeholder.email': 'name@example.com',
+  'placeholder.jmapUrl': 'https://mail.example.com',
+  // Yazma: kapatırken taslak kaydı.
+  'compose.closeUnsaved': 'Your latest changes could not be saved to the draft, so the window stayed open. Closing again will discard them. Reason: {message}',
+  'compose.closeSlow': 'Saving the draft is taking long, so the window stayed open. Wait a moment and close again; closing right away may lose your latest changes.',
 };

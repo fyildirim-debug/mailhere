@@ -25,11 +25,18 @@
   import { showToast } from '../../lib/ui/toast.svelte';
   import WindowControls from '../../lib/ui/WindowControls.svelte';
   import FollowUpMenu from '../../lib/mail/FollowUpMenu.svelte';
+  import { menuKeys } from '../../lib/mail/menukeys';
+  import PickTime from '../../lib/mail/PickTime.svelte';
+  import { sendIssues, splitRecipients, type SendIssues } from '../../lib/mail/precheck';
   import { settings } from '../../lib/stores/settings.svelte';
   import { initLock, isLocked, lock } from '../../lib/stores/lock.svelte';
   import { isMobileShell } from '../../lib/shell';
   import { baseSubject, displayName, fileSize, snoozeOptions } from '../../lib/util/format';
+  import { parseAddress } from '../../lib/util/recipients';
   import { fillVariables } from '../../lib/util/variables';
+  import SendConfirm from './SendConfirm.svelte';
+
+  type Field = 'to' | 'cc' | 'bcc';
 
   interface Props {
     mode: ComposeMode;
@@ -68,14 +75,22 @@
   let attachments = $state<string[]>([]);
   let original = $state<MessageDetail | null>(null);
   let laterOpen = $state(false);
+  let laterEl = $state<HTMLDivElement>();
+  let moreBtn = $state<HTMLButtonElement>();
   let sendAt = $state<number | null>(null);
   /** Yanıt gelmezse hatırlatma anı; gönderimle birlikte arka uca gider. */
   let followUpAt = $state<number | null>(null);
   let queued = $state<{ id: string; at: number } | null>(null);
   let error = $state<string | null>(null);
+  /** Hata, bu alıcı alanında kalan geçersiz parçayı söylüyor; alan düzenlenince kalkar. */
+  let badField: Field | null = null;
+  /** Gönderim öncesi onay bekleyen durumlar (unutulmuş ek, boş konu). */
+  let confirm = $state<SendIssues | null>(null);
+  /** Yanıtta ve iletmede özgün postadan gelen konu; ek sözcüğü aranırken sayılmaz. */
+  let prefilledSubject = '';
   let bodyEl = $state<HTMLTextAreaElement>();
-  let drafts = $state<Record<'to' | 'cc' | 'bcc', string>>({ to: '', cc: '', bcc: '' });
-  let suggest = $state<{ field: 'to' | 'cc' | 'bcc'; items: Address[]; active: number } | null>(null);
+  let drafts = $state<Record<Field, string>>({ to: '', cc: '', bcc: '' });
+  let suggest = $state<{ field: Field; items: Address[]; active: number } | null>(null);
   let suggestTimer: ReturnType<typeof setTimeout> | null = null;
   /** Gömülü (mobil): son yazışılan kişiler; Kime boşken ve odaktayken çip olarak. */
   let recentPeople = $state<Address[]>([]);
@@ -170,6 +185,42 @@
     else await appWindow.close();
   }
 
+  /** Kapatırken taslak kaydı en çok bu kadar beklenir (ms); bitmezse pencere açık kalır. */
+  const CLOSE_SAVE_WAIT = 5000;
+  let closing = false;
+  /** Kayıt olmadı ve kullanıcı uyarıldı: yeniden kapatırsa pencere kaydetmeden kapanır. */
+  let closeWarned = false;
+
+  /**
+   * Başlık çubuğundaki kapat (X): bekleyen değişiklik taslağa yazıldıktan
+   * SONRA pencere kapanır (`pagehide` anında başlatılan kayıt, pencere yok
+   * olunca yarıda kalabiliyordu). Kayıt olmazsa pencere açık kalır ve nedenini
+   * söyler; ikinci kapatış kaydetmeden kapatır.
+   *
+   * İşletim sisteminin kapatma yolu (Alt F4, görev çubuğu) buradan geçmez;
+   * orada yine `pagehide` kaydı denenir.
+   */
+  async function closeWindow() {
+    if (closing) return;
+    if (discarded || locked || closeWarned || !dirty()) {
+      await appWindow.close();
+      return;
+    }
+    closing = true;
+    if (draftTimer) clearTimeout(draftTimer);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const slow = new Promise<'slow'>((resolve) => (timer = setTimeout(() => resolve('slow'), CLOSE_SAVE_WAIT)));
+    const result = await Promise.race([saveDraft().then(() => 'done' as const), slow]);
+    clearTimeout(timer);
+    closing = false;
+    if (result === 'done' && draftState !== 'error') {
+      await appWindow.close();
+      return;
+    }
+    closeWarned = true;
+    error = result === 'slow' ? t('compose.closeSlow') : t('compose.closeUnsaved', { message: draftError ?? '' });
+  }
+
   // Ayrı yazma penceresi arayüz kilitlenince örtülür: taslak bellekte kalır,
   // içerik görünmez ve etkileşimsizdir (`inert`); gömülü yazma (mobil) kabuğun
   // kilit ekranının altında kalır.
@@ -250,7 +301,7 @@
       .join('\n');
     const header = t('compose.wrote', { date: when(d.date), name: displayName(d.from) });
     if (mode === 'forward') {
-      subject = `Fwd: ${baseSubject(d.subject)}`;
+      subject = prefilledSubject = `Fwd: ${baseSubject(d.subject)}`;
       body = `\n\n${t('compose.forwarded')}\n${displayName(d.from)} <${d.from.email}>\n${when(d.date)}\n${d.subject}\n\n${d.bodyText ?? d.snippet}`;
       if (d.attachments.length) {
         forwardFrom = d.id;
@@ -258,7 +309,7 @@
       }
       return;
     }
-    subject = `Re: ${baseSubject(d.subject)}`;
+    subject = prefilledSubject = `Re: ${baseSubject(d.subject)}`;
     to = (d.replyTo.length ? d.replyTo : [d.from]).filter(notMe);
     if (!to.length) to = d.to.filter(notMe);
     if (mode === 'replyAll') {
@@ -321,6 +372,8 @@
   $effect(() => {
     const snap = snapshot();
     if (!ready || locked || snap === baseline) return;
+    // Yeni değişiklik: kapatırken yeniden kayıt denenir.
+    closeWarned = false;
     if (draftTimer) clearTimeout(draftTimer);
     draftTimer = setTimeout(() => void saveDraft(), 1500);
   });
@@ -352,6 +405,11 @@
         baseline = snap;
         draftState = 'saved';
         draftError = null;
+        // Kapatırken verilen "kaydedilemedi" uyarısı artık geçerli değil.
+        if (closeWarned) {
+          closeWarned = false;
+          error = null;
+        }
       } catch (e) {
         draftState = 'error';
         draftError = toAppError(e).message;
@@ -376,24 +434,19 @@
     await close();
   }
 
-  function parse(text: string): Address | null {
-    const m = text.trim().match(/^(?:"?([^"<]*?)"?\s*<)?([^\s<>@]+@[^\s<>@]+\.[^\s<>@]+)>?$/);
-    if (!m) return null;
-    return { name: m[1]?.trim() || null, email: m[2] };
-  }
-
-  function commit(field: 'to' | 'cc' | 'bcc') {
-    const parts = drafts[field].split(/[,;\n]+/).map((x) => x.trim()).filter(Boolean);
+  /** Alana yazılanı çiplere çevirir; adres olmayan parçalar alanda kalır ve döner. */
+  function commit(field: Field): string[] {
     const bad: string[] = [];
     const list = field === 'to' ? to : field === 'cc' ? cc : bcc;
-    for (const p of parts) {
-      const a = parse(p);
+    for (const p of splitRecipients(drafts[field])) {
+      const a = parseAddress(p);
       if (a && !list.some((x) => same(x, a))) {
         list.push(a);
         recipientAdded();
       } else if (!a) bad.push(p);
     }
     drafts[field] = bad.join(', ');
+    return bad;
   }
 
   /** Alıcı eklenince "En az bir alıcı ekle." uyarısı kalkar (başka hata kalır). */
@@ -401,7 +454,7 @@
     if (error === t('compose.needRecipient')) error = null;
   }
 
-  function onRecipientKey(field: 'to' | 'cc' | 'bcc', e: KeyboardEvent) {
+  function onRecipientKey(field: Field, e: KeyboardEvent) {
     const list = field === 'to' ? to : field === 'cc' ? cc : bcc;
     if (suggest?.field === field) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -431,12 +484,17 @@
     }
   }
 
-  function removeAt(field: 'to' | 'cc' | 'bcc', i: number) {
+  function removeAt(field: Field, i: number) {
     (field === 'to' ? to : field === 'cc' ? cc : bcc).splice(i, 1);
   }
 
   /** Yazılan parçaya uyan adresleri geçmiş postalardan önerir. */
-  function lookup(field: 'to' | 'cc' | 'bcc') {
+  function lookup(field: Field) {
+    // Geçersiz parça düzeltiliyor: uyarı kalkar, gönderimde yeniden bakılır.
+    if (badField === field) {
+      badField = null;
+      error = null;
+    }
     if (suggestTimer) clearTimeout(suggestTimer);
     const q = drafts[field].trim();
     if (q.length < 2) {
@@ -486,7 +544,7 @@
     recentPeople = [...seen.values()];
   }
 
-  function pick(field: 'to' | 'cc' | 'bcc', a: Address) {
+  function pick(field: Field, a: Address) {
     const list = field === 'to' ? to : field === 'cc' ? cc : bcc;
     if (!list.some((x) => same(x, a))) {
       list.push(a);
@@ -536,19 +594,47 @@
     if (!locked) laterOpen = true;
   }
 
-  /** Gönderir (kapsayıcı da çağırır: mobilde düğme uygulama çubuğunda). */
+  const FIELD_LABELS: Record<Field, MessageKey> = { to: 'compose.to', cc: 'compose.cc', bcc: 'compose.bcc' };
+
+  /** Gönderir (kapsayıcı da çağırır: mobilde düğme uygulama çubuğunda). Zamanlanmış gönderim de buradan geçer. */
   export async function send() {
-    if (locked) return;
+    await deliver(false);
+  }
+
+  /**
+   * Gönderimden önce: alıcı alanlarında adres olmayan parça kalmışsa durur ve
+   * hangisi olduğunu söyler; ek unutulmuş görünüyorsa ya da konu boşsa onay
+   * sorar (`confirmed`: onay verildi).
+   */
+  async function deliver(confirmed: boolean) {
+    if (locked || confirm) return;
     error = null;
-    commit('to');
-    commit('cc');
-    commit('bcc');
+    badField = null;
+    for (const field of ['to', 'cc', 'bcc'] as const) {
+      const bad = commit(field);
+      if (!bad.length) continue;
+      badField = field;
+      error = t('compose.badRecipient', { field: t(FIELD_LABELS[field]), part: bad[0] });
+      document.getElementById(`compose-${field}`)?.focus();
+      return;
+    }
     if (!to.length && !cc.length && !bcc.length) {
       error = t('compose.needRecipient');
       return;
     }
+    // Seçilen an bu arada geçmiş olabilir (pencere açık bekledi): sessizce hemen gönderilmez.
+    if (sendAt != null && sendAt <= Date.now()) {
+      sendAt = null;
+      error = t('compose.schedulePast');
+      return;
+    }
     const msg = outgoing();
     if (!from || !msg) return;
+    if (!confirmed) {
+      const own = prefilledSubject ? subject.trim() !== prefilledSubject : baseSubject(subject) === subject.trim();
+      confirm = sendIssues({ subject, body, hasAttachments: attachments.length + carried.length > 0, subjectIsOwn: own });
+      if (confirm) return;
+    }
     if (draftTimer) clearTimeout(draftTimer);
     sending = true;
     try {
@@ -565,6 +651,19 @@
     } finally {
       sending = false;
     }
+  }
+
+  /** Onay verildi: denetimler yeniden sorulmadan gönderilir. */
+  function confirmSend() {
+    confirm = null;
+    void deliver(true);
+  }
+
+  /** Vazgeçildi: odak eksik olan yere gider (boş konu ya da ek düğmesi). */
+  function cancelSend() {
+    const target = confirm?.noSubject ? 'compose-subject' : 'compose-attach';
+    confirm = null;
+    queueMicrotask(() => document.getElementById(target)?.focus());
   }
 
   async function undo() {
@@ -586,14 +685,39 @@
       if (!locked && ready) void saveDraft();
     } else if (e.key === 'Escape' && laterOpen) {
       laterOpen = false;
+      moreBtn?.focus();
     }
   }
 
-  const later = $derived(
-    snoozeOptions(Date.now())
+  /**
+   * "Sonra gönder" seçenekleri. Menü her açıldığında yeniden hesaplanır: uzun
+   * süre açık kalan pencerede dünün "yarın sabah"ı (geçmiş bir an) seçilemez.
+   */
+  function laterOptions() {
+    return snoozeOptions(Date.now())
       .filter((o) => o.key !== 'weekend')
-      .map((o) => ({ ...o, label: `snooze.${o.key}` as MessageKey })),
-  );
+      .map((o) => ({ ...o, label: `snooze.${o.key}` as MessageKey }));
+  }
+
+  function pickLater(at: number) {
+    sendAt = at;
+    laterOpen = false;
+    if (!embedded) moreBtn?.focus();
+  }
+
+  // Açılır menü (masaüstü): odak ilk seçeneğe gider, ok tuşlarıyla gezilir;
+  // dışarı tıklayınca kapanır. Alt sayfada (gömülü) odağı Sheet yönetir.
+  $effect(() => {
+    const el = laterEl;
+    if (!laterOpen || embedded || !el) return;
+    el.querySelector<HTMLButtonElement>('button')?.focus();
+    const onDoc = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (!el.contains(target) && !moreBtn?.contains(target)) laterOpen = false;
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  });
 
   const seconds = $derived(queued ? Math.max(1, Math.round((queued.at - Date.now()) / 1000)) : 0);
 </script>
@@ -601,13 +725,22 @@
 <svelte:window onkeydown={onKey} />
 
 {#snippet laterItems()}
-  {#each later as o (o.key)}
-    <button class="menu-item" role="menuitem" onclick={() => ((sendAt = o.at), (laterOpen = false))}>
+  {@const options = laterOptions()}
+  {#each options as o (o.key)}
+    <button class="menu-item" role="menuitem" onclick={() => pickLater(o.at)}>
       <Icon name="clock" size={embedded ? 20 : 16} />
       <span class="grow">{t(o.label)}</span>
       <span class="meta num">{when(o.at)}</span>
     </button>
   {/each}
+  <PickTime
+    row={t('compose.pickTime')}
+    label={t('time.pickSend')}
+    action={t('act.schedule')}
+    initial={sendAt ?? options[0].at}
+    iconSize={embedded ? 20 : 16}
+    onpick={pickLater}
+  />
   <FollowUpMenu
     embedded
     current={followUpAt}
@@ -632,7 +765,7 @@
     <header class="titlebar" data-tauri-drag-region inert={lockShown}>
       <span class="title trunc" data-tauri-drag-region>{title()}</span>
       <span class="grow" data-tauri-drag-region></span>
-      <WindowControls height={40} />
+      <WindowControls height={40} onclose={closeWindow} />
     </header>
   {/if}
 
@@ -649,7 +782,7 @@
 
     {#each [{ key: 'to', label: 'compose.to', list: to, show: true }, { key: 'cc', label: 'compose.cc', list: cc, show: showCc }, { key: 'bcc', label: 'compose.bcc', list: bcc, show: showBcc }] as row (row.key)}
       {#if row.show}
-        {@const field = row.key as 'to' | 'cc' | 'bcc'}
+        {@const field = row.key as Field}
         <div class="field wrap">
           <label class="flabel" for="compose-{field}">{t(row.label as MessageKey)}</label>
           {#each row.list as a, i (a.email)}
@@ -743,7 +876,7 @@
     <button class="btn-icon small" aria-label={t('compose.link')} title={t('compose.link')} onclick={() => wrap('[', '](https://)')}><Icon name="link" size={16} /></button>
     <button class="btn-icon small" aria-label={t('compose.bullet')} title={t('compose.bullet')} onclick={bullet}><Icon name="list" size={16} /></button>
     <span class="vsep"></span>
-    <button class="btn-icon small" aria-label={t('act.attach')} title={t('act.attach')} onclick={attach} disabled={locked}><Icon name="paperclip" size={16} /></button>
+    <button id="compose-attach" class="btn-icon small" aria-label={t('act.attach')} title={t('act.attach')} onclick={attach} disabled={locked}><Icon name="paperclip" size={16} /></button>
     <button class="btn-icon small" aria-label={t('tpl.insert')} title={t('tpl.insert')} aria-haspopup="menu" onclick={templateMenu} disabled={locked}><Icon name="template" size={16} /></button>
     <span class="grow"></span>
     {#if from?.signatures.length}
@@ -805,17 +938,19 @@
       </button>
       {#if laterOpen}
         <Sheet title={t('compose.later')} onclose={() => (laterOpen = false)}>
-          <div class="sheet-later" role="menu" aria-label={t('compose.later')}>{@render laterItems()}</div>
+          <div class="sheet-later" role="menu" tabindex="-1" aria-label={t('compose.later')} bind:this={laterEl} onkeydown={(e) => menuKeys(e, laterEl)}>
+            {@render laterItems()}
+          </div>
         </Sheet>
       {/if}
     {:else}
       <div class="split">
         <button class="send" onclick={send} disabled={locked}><Icon name="send" size={16} />{sendAt ? t('act.schedule') : t('act.send')}<span class="kbd on-accent">Ctrl Enter</span></button>
-        <button class="more" aria-label={t('compose.later')} title={t('compose.later')} aria-haspopup="menu" aria-expanded={laterOpen} disabled={locked} onclick={() => (laterOpen = !laterOpen)}>
+        <button class="more" aria-label={t('compose.later')} title={t('compose.later')} aria-haspopup="menu" aria-expanded={laterOpen} disabled={locked} bind:this={moreBtn} onclick={() => (laterOpen = !laterOpen)}>
           <Icon name="chevronDown" size={16} />
         </button>
         {#if laterOpen}
-          <div class="popover later" role="menu">
+          <div class="popover later" role="menu" tabindex="-1" aria-label={t('compose.later')} bind:this={laterEl} onkeydown={(e) => menuKeys(e, laterEl)}>
             <div class="menu-title">{t('compose.later')}</div>
             {@render laterItems()}
           </div>
@@ -826,6 +961,7 @@
 </div>
 
 {#if menu}<Menu at={menu.at} title={menu.title} items={menu.items} onclose={() => (menu = null)} />{/if}
+{#if confirm}<SendConfirm issues={confirm} scheduled={sendAt != null} onconfirm={confirmSend} oncancel={cancelSend} />{/if}
 
 <style>
   .win {
@@ -1168,7 +1304,7 @@
   .later {
     right: 0;
     bottom: 44px;
-    width: 280px;
+    width: 300px;
   }
 
   .later-btn {

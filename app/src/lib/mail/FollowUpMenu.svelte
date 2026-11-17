@@ -1,13 +1,16 @@
 <script lang="ts">
   // "Yanıt gelmezse hatırlat" menüsü: yarın / 3 gün / 1 hafta / özel tarih;
-  // kurulu hatırlatma varsa kaldırma. Okuma panelinde açılır menü, yazma
-  // penceresinde gönder menüsünün içine gömülü (`embedded`).
+  // kurulu hatırlatma varsa kaldırma. Okuma panelinde açılır menü (ok
+  // tuşlarıyla gezilir), yazma penceresinde gönder menüsünün içine gömülü
+  // (`embedded`; ok tuşlarını kapsayan menü yönetir).
   import { untrack } from 'svelte';
   import { t, when, type MessageKey } from '../i18n/index.svelte';
   import { isMobileShell } from '../shell';
   import Icon from '../ui/Icon.svelte';
   import Sheet from '../ui/Sheet.svelte';
-  import { followUpOptions, parseLocalDateTime, toLocalDateTime, type FollowUpKey } from '../util/followup';
+  import { followUpOptions, type FollowUpKey } from '../util/followup';
+  import { menuKeys } from './menukeys';
+  import PickTime from './PickTime.svelte';
 
   interface Props {
     /** Kurulu hatırlatmanın anı; yoksa null. */
@@ -34,10 +37,8 @@
     week: 'follow.week',
   };
 
-  let custom = $state(false);
   // Özel tarihin başlangıcı: kurulu hatırlatma, yoksa ilk seçenek (yalnız ilk değer).
-  let customValue = $state(toLocalDateTime(untrack(() => current) ?? opts[0].at));
-  const customAt = $derived(parseLocalDateTime(customValue, now));
+  const customInitial = untrack(() => current) ?? opts[0].at;
   let menu = $state<HTMLDivElement>();
   let pos = $state<{ left: number; top: number } | null>(null);
 
@@ -71,9 +72,6 @@
     };
   });
 
-  function pickCustom() {
-    if (customAt != null) onpick(customAt);
-  }
 </script>
 
 {#snippet rows(iconSize: number)}
@@ -84,17 +82,7 @@
       {#if current === o.at}<Icon name="check" size={iconSize} class="tick" />{:else}<span class="meta num">{when(o.at, now)}</span>{/if}
     </button>
   {/each}
-  {#if custom}
-    <div class="custom">
-      <input class="input small num" type="datetime-local" aria-label={t('follow.customDate')} bind:value={customValue} min={toLocalDateTime(now)} />
-      <button class="btn-primary small" disabled={customAt == null} onclick={pickCustom}>{t('follow.set')}</button>
-    </div>
-  {:else}
-    <button class="menu-item" role="menuitem" onclick={() => (custom = true)}>
-      <Icon name="calendar" size={iconSize} />
-      <span class="grow">{t('follow.custom')}</span>
-    </button>
-  {/if}
+  <PickTime row={t('follow.custom')} label={t('follow.customDate')} action={t('follow.set')} initial={customInitial} {iconSize} {onpick} />
   {#if current != null && onclear}
     <button class="menu-item clear" role="menuitem" onclick={() => onclear?.()}>
       <Icon name="x" size={iconSize} />
@@ -105,15 +93,19 @@
 
 {#if !embedded && isMobileShell}
   <Sheet title={t('follow.menu')} {onclose}>
-    <div class="sheet-menu" role="menu" aria-label={t('follow.menu')}>{@render rows(20)}</div>
+    <div class="sheet-menu" role="menu" tabindex="-1" aria-label={t('follow.menu')} bind:this={menu} onkeydown={(e) => menuKeys(e, menu)}>
+      {@render rows(20)}
+    </div>
   </Sheet>
 {:else}
   <div
     class={embedded ? 'embedded' : 'popover'}
     class:fixed={!embedded && !!at}
     role={embedded ? 'group' : 'menu'}
+    tabindex="-1"
     aria-label={t('follow.menu')}
     bind:this={menu}
+    onkeydown={(e) => !embedded && menuKeys(e, menu)}
     style={embedded ? '' : at ? `left:${pos?.left ?? at.x}px;top:${pos?.top ?? at.y}px` : style}
   >
     <div class="menu-title">{t('follow.menu')}</div>
@@ -150,24 +142,8 @@
     gap: 14px;
   }
 
-  .sheet-menu .custom {
-    padding: 8px 12px 10px;
-  }
-
   .grow {
     flex: 1;
-  }
-
-  .custom {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 10px 8px;
-  }
-
-  .custom .input {
-    flex: 1;
-    min-width: 0;
   }
 
   .clear {

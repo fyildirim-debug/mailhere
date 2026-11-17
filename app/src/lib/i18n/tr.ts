@@ -112,7 +112,6 @@ export const tr = {
   'list.loadMore': 'Daha eski postalar',
   'list.attachment': 'Ekli',
   'list.starred': 'Yıldızlı',
-  'list.snoozedUntil': 'Dönüş · {when}',
 
   // okuma
   'read.empty': 'Okumak için bir posta seç',
@@ -167,13 +166,11 @@ export const tr = {
   'toast.archived': 'Arşivlendi',
   'toast.deleted': 'Çöp kutusuna taşındı',
   'toast.snoozed': 'Ertelendi · {when}',
-  'toast.sent': 'Yanıt gönderildi',
   'toast.queued': 'Giden kutusunda · {n} sn içinde gider',
   'toast.remoteAllowed': '{name} için görseller açıldı',
   'toast.markedRead': 'Hepsi okundu sayıldı',
   'toast.error': 'Olmadı: {message}',
   'toast.sendFailed': 'Gönderilemedi: {message}',
-  'toast.draftDeleted': 'Taslak silindi',
   'toast.saved': 'Kaydedildi',
 
   // komut paleti
@@ -257,7 +254,6 @@ export const tr = {
   'compose.bullet': 'Madde işareti',
   'compose.draftSaved': 'Taslak kaydedildi · az önce',
   'compose.queued': 'Giden kutusunda · {n} sn içinde geri alabilirsin',
-  'compose.sent': 'Gönderildi',
   'compose.scheduled': 'Zamanlandı · {when}',
   'compose.later': 'Sonra gönder',
   'compose.pickTime': 'Tarih ve saat seç…',
@@ -383,8 +379,6 @@ export const tr = {
   'set.license': 'MIT lisanslı · temiz oda',
   'set.editAccount': 'Düzenle',
   'set.accountColor': 'Renk',
-  'set.signature': 'İmza',
-  'set.signatureHint': 'Yeni postaların ve yanıtların sonuna eklenir. Boş bırakırsan imza eklenmez.',
   'set.save': 'Kaydet',
   'set.auth.password': 'Parola',
   'set.auth.google': 'Google girişi',
@@ -479,7 +473,6 @@ export const tr = {
   'tpl.empty': 'Boş şablon',
   'tpl.removed': '{name} silindi',
   'tpl.insert': 'Şablon ekle',
-  'tpl.manage': 'Şablonları düzenle',
   'acc.lead': 'Her hesabın kimliği, imzaları, sunucusu ve klasörleri ayrı ayarlanır.',
   'acc.state.online': 'Bağlı',
   'acc.tabs': 'Hesap ayarları',
@@ -895,7 +888,6 @@ export const tr = {
   'bulk.count': '{n} posta seçili',
   'bulk.hint': 'Ctrl ile tek tek, Shift ile aralık, Ctrl A ile görünenlerin tümünü seç. Esc seçimi bırakır.',
   'bulk.clear': 'Seçimi bırak',
-  'bulk.selectAll': 'Görünenlerin tümünü seç',
   'bulk.archived': '{n} posta arşivlendi',
   'bulk.deleted': '{n} posta çöp kutusuna taşındı',
   'bulk.snoozed': '{n} posta ertelendi · {when}',
@@ -966,7 +958,6 @@ export const tr = {
   'mob.more': 'Diğer',
   'mob.selected': '{n} seçili',
   'mob.selectAll': 'Tümünü seç',
-  'mob.refresh': 'Yenile',
   'mob.pull': 'Yenilemek için çek',
   'mob.release': 'Bırak, yenilensin',
   'mob.refreshing': 'Yenileniyor…',
@@ -976,7 +967,6 @@ export const tr = {
   'mob.unstar': 'Yıldızı kaldır',
   'mob.move': 'Taşı',
   'mob.tag': 'Etiket',
-  'mob.longPress': 'Basılı tutarak seç',
   'mob.loading': 'Postalar yükleniyor…',
 
   // mobil: ayarlar, hesap ekleme, planlananlar
@@ -1202,6 +1192,26 @@ export const tr = {
   // Mobil okuma: komşu postaya geçiş (kaydırmanın menüdeki karşılığı).
   'mob.read.prev': 'Önceki posta',
   'mob.read.next': 'Sonraki posta',
+  // Yazma: gönderim öncesi denetimler.
+  'compose.badRecipient': '{field} alanındaki "{part}" geçerli bir adres değil. Düzelt ya da sil; posta henüz gönderilmedi.',
+  'compose.check.noAttachTitle': 'Ek eklemeden gönderilsin mi?',
+  'compose.check.noAttachBody': 'Metinde "{word}" geçiyor ama postada ek yok. Dosya ekleyeceksen vazgeç ve ekle.',
+  'compose.check.noSubjectTitle': 'Konu olmadan gönderilsin mi?',
+  'compose.check.noSubjectBody': 'Konu satırı boş. Alıcı postanın ne hakkında olduğunu listede göremez; vazgeçip bir konu yazabilirsin.',
+  'compose.check.bothTitle': 'Konu ve ek olmadan gönderilsin mi?',
+  'compose.check.sendAnyway': 'Yine de gönder',
+  'compose.check.scheduleAnyway': 'Yine de zamanla',
+  // Kendi tarih-saatini seçme (ertele, sonra gönder).
+  'time.pickSend': 'Gönderim tarihi ve saati',
+  'time.pickSnooze': 'Erteleme tarihi ve saati',
+  'time.past': 'Bu an geçmişte kaldı. İleri bir tarih ve saat seç.',
+  'compose.schedulePast': 'Seçtiğin gönderim zamanı geçti; zamanlama kaldırıldı. Yeni bir zaman seç ya da şimdi gönder.',
+  // Girdi yer tutucuları (örnek adres ve sunucu).
+  'placeholder.email': 'ad@alanadi.com',
+  'placeholder.jmapUrl': 'https://posta.alanadi.com',
+  // Yazma: kapatırken taslak kaydı.
+  'compose.closeUnsaved': 'Son değişiklikler taslağa yazılamadı; pencere açık bırakıldı. Yeniden kapatırsan bu değişiklikler kaybolur. Neden: {message}',
+  'compose.closeSlow': 'Taslak kaydı uzun sürdü; pencere açık bırakıldı. Biraz bekleyip yeniden kapat; hemen kapatırsan son değişiklikler kaybolabilir.',
 } as const;
 
 export type MessageKey = keyof typeof tr;
