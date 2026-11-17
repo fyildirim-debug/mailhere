@@ -9,8 +9,16 @@
   // Avatar ayrı düğmedir (44 px hedef): dokunmak seçimi başlatır. Seçim
   // kipinde satırın tamamı işaretler, avatarın yerine işaret gelir. Hareket
   // mantığı (kaydırma, uzun basış) SwipeRow'da.
+  //
+  // Şüpheli posta (`spam`) ilk satırda `--amber` uyarı ikonu taşır. Taze kod
+  // postasında (`otp`, son 60 dakika) konu satırının sonunda kod çipi durur:
+  // çip satır düğmesinin içinde değil üstündedir (düğme içinde düğme olmaz),
+  // konu satırı ona yer bırakır. Çipe dokunmak kodu kopyalar; postayı açmaz,
+  // kaydırmayı ve uzun basışı da başlatmaz (işaretçi olayları satıra çıkmaz).
   import type { Account } from '../../lib/api';
   import { locale, t } from '../../lib/i18n/index.svelte';
+  import OtpChip from '../../lib/mail/OtpChip.svelte';
+  import { otpFresh } from '../../lib/stores/guard.svelte';
   import Avatar from '../../lib/ui/Avatar.svelte';
   import Icon from '../../lib/ui/Icon.svelte';
   import { followUpDue } from '../../lib/util/followup';
@@ -38,6 +46,27 @@
   const who = $derived(message.followUp != null && message.to[0] ? message.to[0] : message.from);
   const awaiting = $derived(followUpDue(message.followUp, now));
   const selectLabel = $derived(t('list.selectRow', { subject: message.subject || displayName(message.from) }));
+  /** Kod çipi: yalnız taze postada ve seçim kipi dışında (seçimde dokunuş işaretler). */
+  const code = $derived(!selecting && message.otp && otpFresh(message.date, now) ? message.otp : null);
+  /** Çipin genişliği: konu satırı bu kadar yer bırakır (yerleşim oynamaz, metin çipin altına girmez). */
+  let chipW = $state(0);
+  /** İlk satırın ve konu satırının ölçülen yükseklikleri (sistem yazı ölçeğiyle büyür). */
+  let line1H = $state(20);
+  let subjectH = $state(20);
+  /** Çip (24 px) konu satırının ortasında: satır iç boşluğu 6, sıkı görünümde metin 4 px aşağıda. */
+  const chipTop = $derived(6 + (compact ? 4 : 0) + line1H + (subjectH - 24) / 2);
+
+  /** Çipe basış satıra çıkmaz: kaydırma, uzun basış ve aşağı çekme başlamaz. */
+  function quiet(node: HTMLElement) {
+    const stop = (e: Event) => e.stopPropagation();
+    const types = ['pointerdown', 'touchstart', 'contextmenu'] as const;
+    for (const type of types) node.addEventListener(type, stop, { passive: true });
+    return {
+      destroy() {
+        for (const type of types) node.removeEventListener(type, stop);
+      },
+    };
+  }
 </script>
 
 <div class="wrap" class:compact>
@@ -60,10 +89,11 @@
       {/if}
     </span>
     <span class="text">
-      <span class="line1">
+      <span class="line1" bind:clientHeight={line1H}>
         <span class="sender trunc">{displayName(who)}</span>
         {#if awaiting}<span class="tag">{t('follow.awaiting')}</span>{/if}
         {#if message.count > 1}<span class="count num">{message.count}</span>{/if}
+        {#if message.spam}<span class="warn"><Icon name="alert" size={14} label={t('mob.spam.rowLabel')} /></span>{/if}
         {#if message.hasAttachments}<Icon name="paperclip" size={14} label={t('list.attachment')} class="quiet" />{/if}
         {#if message.starred}<span class="star"><Icon name="star" size={14} filled label={t('list.starred')} /></span>{/if}
         {#if message.pinned}<Icon name="pin" size={14} label={t('list.pinnedMark')} class="quiet" />{/if}
@@ -77,13 +107,16 @@
           {listTime(message.date, now, locale())}
         </span>
       </span>
-      <span class="subject trunc">{message.subject || '—'}</span>
+      <span class="subject trunc" bind:clientHeight={subjectH} style:margin-right={code ? `${chipW + 8}px` : undefined}>{message.subject || '—'}</span>
       {#if !compact}<span class="snippet trunc">{message.snippet}</span>{/if}
     </span>
   </button>
   <!-- Avatara dokunmak seçimi başlatır (seçim kipinde satırın kendisi işaretler). -->
   {#if !selecting}
     <button class="pick" aria-label={selectLabel} onclick={ontoggle}></button>
+  {/if}
+  {#if code}
+    <span class="code" style:top="{chipTop}px" bind:clientWidth={chipW} use:quiet><OtpChip id={message.id} {code} unread={message.unread} /></span>
   {/if}
 </div>
 
@@ -231,9 +264,30 @@
     color: var(--ink-3);
   }
 
-  .star {
+  .star,
+  .warn {
+    flex: none;
     display: inline-flex;
     color: var(--amber);
+  }
+
+  /* Kod çipi: konu satırının sağ ucunda, satır düğmesinin üstünde. Görünüşü
+     24 px kalır; dokunma alanı görünmez kenarla 44 px'e çıkar. */
+  .code {
+    position: absolute;
+    right: var(--m-gutter);
+    display: inline-flex;
+  }
+
+  .code :global(.otp-chip) {
+    position: relative;
+  }
+
+  /* Kenar çizgisi (1 px) hesaba katılır: 24 + 2 × 10 = 44. */
+  .code :global(.otp-chip)::before {
+    content: '';
+    position: absolute;
+    inset: -11px -5px;
   }
 
   .tags {

@@ -81,6 +81,22 @@ Kurallar:
 - Metin çiftleri her iki temada en az **4.5:1**, büyük metin ve ikonlar en az **3:1** karşıtlık sağlar.
 - Tema varsayılan olarak sistemi izler; kullanıcı Açık / Koyu / Sistem seçebilir. Kök elemanda `data-theme="light|dark"`.
 
+**AMOLED siyah (yalnız mobil kabuk).** Ayarlar › Genel › Koyu tema › "AMOLED siyah" anahtarı (varsayılan kapalı) kök elemana `data-amoled` yazar; `tokens.css`teki `:root[data-theme='dark'][data-amoled]` bloğu koyu temanın yalnız şu jetonlarını geçersiz kılar:
+
+| Jeton | AMOLED değeri | Not |
+| --- | --- | --- |
+| `--ground`, `--surface`, `--paper` | `#000000` | üç zemin katmanı tam siyah (OLED'de pikseller kapanır); katmanlar çizgiyle ayrılır |
+| `--raised` | `#16181D` | alt sayfa, alt şerit, seçim çubuğu, seçili segment: siyahın üstünde seçilir |
+| `--line` | `#20232A` | ince ayraç |
+| `--line-strong` | `#383D49` | girdi ve düğme kenarı, kapalı anahtarın izi |
+| `--hover` | `rgba(230,232,237,.09)` | basma katmanı (siyahta %5 görünmezdi) |
+
+- Metin, vurgu, durum, seçim (`--sel`, `--accent-soft`) ve gölge jetonları koyu temadakiyle **aynıdır**; her metin / zemin çifti yine en az 4.5:1 (`e2e/mobil-amoled.spec.ts` ölçer).
+- Açık temada öznitelik dursa da hiçbir jeton değişmez; ayar "Şu an açık tema etkin…" diye söyler.
+- Kişisel tercihtir: tarayıcı deposunda (`mailhere.mob.amoled`), yalnız o telefonda; arka uç ayarlarına ve cihazlar arası aktarıma girmez. Masaüstü kabuğu bu özniteliği hiç yazmaz.
+- Segment izi (`--ground`) kâğıtla aynı siyaha indiği için AMOLED'de 1 px `--line` kenar alır (3 px iç boşluğun 1 px'i; ölçü değişmez). Zemin sırası kuralı (`ground` → `surface` → `paper` → `raised`) aynen geçerlidir; ilk üçü burada eşittir.
+- HTML posta koyuya eşlenirken `--paper`'ı okur: AMOLED'de posta gövdesi de siyah kâğıda oturur; "Özgün renkler" yine beyaz kâğıttır.
+
 ### 2.3 Avatar ve dosya türü paletleri
 
 Avatar; gönderici adresinden deterministik seçilen 9 tonlu paletten gelir (zemin + aynı tonda koyu metin, gri değil). Değerler `app/src/lib/ui/palette.ts` içindedir. Dosya türü rozetleri: PDF kırmızı tonu, tablo yeşil tonu, diğerleri nötr.
@@ -264,6 +280,10 @@ Android sürümü aynı arayüz kodundan (`app/`) derlenir; kabuk `mobile` olunc
 | Çekmece | sol, 300 px, `--ground`; başlıkta **hesap kimliği** (36 px renkli rozet, ad 15/600, adres 12 `--ink-2`; dokununca hesap ayarları), çok hesapta marka satırı |
 | Boş durum | 56 px `--accent-soft` disk içinde 26 px `--accent-text` ikon, başlık 19/600, gövde `--ink-3` 32ch |
 | Ayar listesi | 56 px satır (hesap 64), satırlar etiket hizasından başlayan `--line` çizgiyle ayrılır (tam genişlik değil), gruplar 20 px boşlukla |
+| Satır işaretleri | şüpheli postada (`spam`) ilk satırda 14 px `alert` ikonu, `--amber`, erişilebilir adı "Şüpheli posta". Taze kod postasında (`otp`, son 60 dakika) konu satırının sağ ucunda **kod çipi** (`OtpChip`: 24 px, köşe 999, öbekli kod + `copy`); konu çipe 8 px yer bırakır, satır yüksekliği değişmez. Çip satır düğmesinin içinde değil üstündedir; dokunma alanı görünmez kenarla 44 px. Dokunmak kodu kopyalar (toast "Kod kopyalandı"), postayı açmaz, kaydırma ve uzun basış başlatmaz; seçim kipinde çip gizlenir |
+| Listenin sonu | yerel sayfalar bitince ortada yumuşak düğme "Daha eski postalar" (`arrowDown`, 44 px); beklerken düğme yerinde kalır ("Daha eski postalar indiriliyor…", `aria-busy`, ikon döner); sunucuda kalmayınca 12 `--ink-3` "Hepsi bu kadar" (`role="status"`). Altında yüzen düğmelerin payı (104 px). İnen postalar düğmenin yerinde belirir, kaydırma konumu korunur. Arama, kategori ve süzgeçte çıkmaz |
+| Onay alt sayfası | geri alınamayan işlemde (`ConfirmSheet`): başlık soru ("3 posta kalıcı silinsin mi?"), 15 `--ink-2` sonuç ("Bu işlem geri alınamaz; sunucudan da silinir."), iki yumuşak düğme 48 px: Vazgeç (ilk odak) ve `--danger` metinli onay (ikon + eylemin adı). Yan yana; sığmazsa alt alta. Örtü, Esc, aşağı kaydırma ve geri tuşu vazgeçer |
+| Ekler alt sayfası | "Ekler": her ek 56 px satır — dosya rozeti, ad (kısalır), boyut; satırın kendisi açar, sağda 44 px `download` (Kaydet) ve `share` (Paylaş) ikon düğmeleri, erişilebilir adları dosya adını söyler |
 | Kilit ekranı | tüm kabuğun yerine geçer (`m-screen`): güvenli alan + 24 px kenar, panel genişliği ekrana uyar; girdi ve "Kilidi aç" 48 px, göster/gizle ve "Parolamı unuttum" 44 px; metin "Uygulamaya dönüldü…" (yeniden kilitleme) ya da "Postaları almak için…" (açılış). Ayarda anahtarın adı "Uygulamaya dönünce parola sor" (1 dk eşiği) |
 
 **Gezinme**
@@ -275,13 +295,17 @@ Android sürümü aynı arayüz kodundan (`app/`) derlenir; kabuk `mobile` olunc
 - Çoklu seçim: avatara dokunmak ya da uzun basış (450 ms, `haptic('confirm')`) başlatır; seçim çubuğunda görünür adlı "Tümünü seç". Aşağı çekme eşitler.
 - Okumada tek şerit: Yanıtla · Arşivle · Sil · Diğer eylemler (başta Tümünü yanıtla ve İlet, sonra taşı, etiket, sabitle, ertele…). Yıldız ve "okunmadı say" uygulama çubuğunda.
 - Arşivleyip silince (taşı, ertele de): ayara göre listeye dönülür (varsayılan), listede bir alttaki ya da bir üstteki posta aynı ekranda açılır ve okundu sayılır; komşu yoksa listeye dönülür. Geri alınca ekran geri gelen postaya döner.
+- **Çöp ve İstenmeyen** (`purgeRole`): "Sil" her yerde **"Kalıcı sil"** olur ve onay alt sayfası açar; geri alma toast'ı yoktur ("Posta kalıcı silindi"). Kaydırmada satır yerine döner, onay sonra gelir; seçim çubuğu Arşivle · Kalıcı sil · İstenmeyen · Diğer (İstenmeyen kutusunda "İstenmeyen" düğmesi yoktur); okuma şeridinde çöp ikonu "Kalıcı sil" adını alır (posta o kutulardaysa, hangi görünümden açılırsa açılsın). Uygulama çubuğu menüsünün sonunda `--danger` **"Çöpü boşalt" / "İstenmeyen'i boşalt"** (onaylı; klasör görünümünde yalnız o hesabın kutusu, Çöp görünümünde seçili kapsam).
+- **Gönderici eylemleri:** okumada "Diğer eylemler"in sonunda `--danger` "Göndereni engelle" (ad kısa; kimin engellendiğini geri alınabilir toast söyler). Posta İstenmeyen kutusundaysa menünün **başında** "İstenmeyen değil", şüpheliyse (ve İstenmeyen'de değilse) engellemenin üstünde "Güvenli say". İstenmeyen kutusunda "İstenmeyen" kaydırması "İstenmeyen değil"dir (`inbox` ikonu, `--accent`). Seçim çubuğunun "Diğer" menüsü bu eylemleri yalnız **tek** posta seçiliyken taşır. Şüpheli postanın uyarı kutusu masaüstüyle ortak okuma bileşenindedir (`MessageView`); mobil ayrıca kutu çizmez.
+- **Ekler:** ek kartı eki açar; kartların altındaki tam genişlik yumuşak düğme "Ekleri kaydet ya da paylaş" (ve "Diğer eylemler"deki aynı adlı giriş) Ekler alt sayfasını açar. Kaydedilince sayfa kapanır ve toast "Kaydedildi" der; kullanıcı sistemin kaydetme ekranından vazgeçerse hiçbir şey söylenmez, sayfa açık kalır; hata dosya adıyla söylenir ("… kaydedilemedi: ne oldu + ne yapılabilir").
+- **Ayarlar › Gizlilik ve güvenlik** (mobil ek, `MobileGuard`): "İstenmeyen koruması" (seçim satırı → alt sayfa: Kapalı / Uyar / İstenmeyen'e taşı; satırın açıklaması seçime göre konuşur), "Engellenen göndericiler" (48 px satırlar, `block` ikonu, 44 px "Kaldır" + geri alma toast'ı; boş durum ne yapılabileceğini söyler; altında etiketli 44 px girdi + "Engelle", hata girdinin altında 12 `--danger`, `role="alert"`), "Doğrulama kodları" (iki anahtar + "Kod postalarını sil": Kapalı / 1 saat sonra / 1 gün sonra). **Ayarlar › Genel**'e "Koyu tema › AMOLED siyah" anahtarı eklenir (§2.2).
 - Arama tam ekrandır ve alanı **altta**, klavyenin hemen üstündedir (geri düğmesi alanın solunda); boşken son aramalar (yalnız bu cihazda, en çok 6, "Geçmişi sil") ve işleç ipuçları alttan dizilir. Komut paleti ve klavye kısayolları yoktur; bildirim kartı, hızlı okuma ve pencere düğmeleri yoktur (işletim sistemi bildirimi kullanılır).
 - Yazma: Kime boş ve odaktayken son yazışılan 5 kişi çip olarak (40 px, köşe 999; önce gönderilenlerin alıcıları, sonra Kişiler'den göndericiler); Gönder'e uzun basış "Sonra gönder" alt sayfasını açar (`haptic('confirm')`).
 
 **Teknik**
 
 - `index.html` görünüm alanı: `width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content`; güvenli alan `env(safe-area-inset-*)`.
-- Koyu tema aynı `data-theme`; mobil i18n anahtarları `mob.*` önekiyle.
+- Koyu tema aynı `data-theme`; mobil i18n anahtarları `mob.*` önekiyle. AMOLED siyah (`data-amoled`, §2.2) yalnız bu kabukta sunulur ve kabukla birlikte yüklenen `amoled.svelte.ts` uygular (kilit ekranı dahil ilk ekran doğru zeminle gelir). Android kenardan kenara çizildiği ve sistem çubukları saydam olduğu için çubukların arkası uygulama çubuğunun ve alt şeridin zeminidir: AMOLED'de onlar da siyaha (alt şerit `--raised`e) döner; `system_bars` koyu temadaki gibi açık simge ister.
 - Geçişler yalnız `transform` / `opacity`, 200–280 ms; mobil kabuk tembel yüklenir, listeler sanallaştırılır, Geist önyüklenir.
 - Ölçüler `app/src/styles/mobile.css` değişkenlerinde tek yerde tutulur: `--m-appbar` 56, `--m-bar` 56, `--m-row` 72 / `--m-row-compact` 60, `--m-touch` 44 / `--m-touch-lg` 48, `--m-nav-row` 48, `--m-gutter` 16, `--m-chip` 32, `--m-drawer` 300, `--m-fab` 56 (köşe 16), `--m-line` 1.3334 (15 px'te 20 px satır aralığı, birimsiz); güvenli alan `--sat/--sab/--sal/--sar`. Paylaşılan sınıflar: `.m-chip` (+ `.m-chip-n` sayı), `.m-section` (bölüm başlığı), `.m-empty` (boş durum), `.thumb` (başparmak bölgesi), `.m-fab` (+ `.m-fab-label`, `.small`), `.m-search-fab`. İkon boyutu çubuklarda 22, yüzen düğmede 22.
 - **Sistem yazı ölçeği:** Android WebView kullanıcının yazı büyütmesini px yazılara da uygular. Metin taşıyan öğelerde yükseklik alt sınırdır (`min-height`; satırlar, çubuklar, çipler, menü ve çekmece satırları, düğmeler), satır aralığı birimsizdir (`--m-line`). Sanal listenin satır ve grup yükseklikleri görünmez bir ölçü metninden okunan oranla büyür (1.3× ölçekte satır 94 px). `setTextZoom(100)` ile ölçek kapatılmaz.

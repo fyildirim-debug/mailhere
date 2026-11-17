@@ -3,16 +3,24 @@
   // İstenmeyen ve "Diğer". Diğer, yukarı açılan menüde okundu/okunmadı,
   // yıldız, ertele, klasöre taşı ve etiketi toplar (çubuk sıkışmasın). Mantık
   // bulk.svelte.ts / selection.svelte.ts ile ortak; her eylem geri alınabilir.
+  //
+  // Tek posta seçiliyken "Diğer"e gönderici eylemleri eklenir: İstenmeyen
+  // değil / Güvenli say ve göndereni engelle.
+  // Çöp ve İstenmeyen görünümlerinde "Sil" yerine "Kalıcı sil" durur ve onay
+  // ister (geri alınamaz); İstenmeyen kutusunda "İstenmeyen" düğmesi yoktur
+  // (postalar zaten orada).
   import { t } from '../../lib/i18n/index.svelte';
   import { flatten, folderLabel, folderTree } from '../../lib/mail/folders';
   import SnoozeMenu from '../../lib/mail/SnoozeMenu.svelte';
   import Icon from '../../lib/ui/Icon.svelte';
   import Menu, { type MenuItem } from '../../lib/ui/Menu.svelte';
   import { bulkMove, bulkMoveToFolder, bulkSetUnread, bulkSnooze, bulkStar, setTag } from '../../lib/stores/bulk.svelte';
+  import { blockSenderOf, deleteForever, purgeRole, trustSenderOf } from '../../lib/stores/guard.svelte';
   import { mail } from '../../lib/stores/mail.svelte';
-  import { checkedIds, checkedRows } from '../../lib/stores/selection.svelte';
+  import { checkedIds, checkedRows, clearChecked } from '../../lib/stores/selection.svelte';
   import { tagStore } from '../../lib/stores/tags.svelte';
   import { showToast } from '../../lib/ui/toast.svelte';
+  import ConfirmSheet from './ConfirmSheet.svelte';
   import { junkOf } from './folders';
   import { haptic } from './haptic';
 
@@ -24,7 +32,33 @@
   const oneAccount = $derived(accounts.length === 1 ? accounts[0] : null);
   const junk = $derived(oneAccount ? junkOf(oneAccount) : undefined);
 
+  /** Çöp ya da İstenmeyen görünümü: silme kalıcıdır. */
+  const purge = $derived(purgeRole(mail.view));
+  /** Tek seçili posta: gönderici eylemleri yalnız o zaman anlamlıdır. */
+  const one = $derived(rows.length === 1 ? rows[0] : null);
+
   let menu = $state<'more' | 'snooze' | 'move' | 'tag' | null>(null);
+  let confirming = $state(false);
+
+  /** Gönderici eylemi bitince seçim bırakılır (posta taşınmış ya da uyarısı kalkmıştır). */
+  async function senderAct(run: Promise<boolean>) {
+    if (await run) clearChecked();
+  }
+
+  /** Tek seçili postanın göndericisine ilişkin eylemler; kendi postamızda (gönderilen, taslak) yok. */
+  const senderItems = $derived.by((): MenuItem[] => {
+    if (!one) return [];
+    const row = one;
+    const email = row.from.email;
+    if (mail.accounts.some((a) => a.email.toLowerCase() === email.toLowerCase())) return [];
+    const role = mail.mailboxes.find((b) => b.id === row.mailboxId)?.role;
+    if (role === 'sent' || role === 'drafts') return [];
+    const items: MenuItem[] = [];
+    if (role === 'junk') items.push({ key: 'notJunk', label: t('mob.spam.notJunk'), icon: 'inbox', onclick: () => void senderAct(trustSenderOf(row.id)) });
+    else if (row.spam) items.push({ key: 'trust', label: t('mob.spam.trust'), icon: 'shield', onclick: () => void senderAct(trustSenderOf(row.id)) });
+    items.push({ key: 'block', label: t('mob.spam.block'), icon: 'block', danger: true, onclick: () => void senderAct(blockSenderOf(row.id)) });
+    return items;
+  });
 
   /** İstenmeyen klasörüne taşır; klasör yoksa ya da seçim birden çok hesaptaysa nedenini söyler. */
   function spam() {
@@ -59,6 +93,7 @@
       onclick: () => (menu = 'move'),
     },
     { key: 'tag', label: t('mob.tag'), icon: 'tag', onclick: () => (menu = 'tag') },
+    ...senderItems,
   ]);
 
   const moveItems = $derived.by((): MenuItem[] => {
@@ -90,12 +125,20 @@
   <button class="act" onclick={() => bulkMove(ids, 'archive')}>
     <Icon name="archive" size={22} /><span>{t('act.archive')}</span>
   </button>
-  <button class="act" onclick={() => bulkMove(ids, 'trash')}>
-    <Icon name="trash" size={22} /><span>{t('act.delete')}</span>
-  </button>
-  <button class="act" onclick={spam}>
-    <Icon name="spam" size={22} /><span>{t('mob.swipe.spam')}</span>
-  </button>
+  {#if purge}
+    <button class="act" aria-haspopup="dialog" onclick={() => (confirming = true)}>
+      <Icon name="trash" size={22} /><span>{t('mob.purge.delete')}</span>
+    </button>
+  {:else}
+    <button class="act" onclick={() => bulkMove(ids, 'trash')}>
+      <Icon name="trash" size={22} /><span>{t('act.delete')}</span>
+    </button>
+  {/if}
+  {#if purge !== 'junk'}
+    <button class="act" onclick={spam}>
+      <Icon name="spam" size={22} /><span>{t('mob.swipe.spam')}</span>
+    </button>
+  {/if}
   <div class="anchor">
     <button
       class="act"
@@ -124,6 +167,16 @@
     {/if}
   </div>
 </div>
+
+{#if confirming}
+  <ConfirmSheet
+    title={ids.length === 1 ? t('mob.purge.confirmOne') : t('mob.purge.confirm', { n: ids.length })}
+    body={t('mob.purge.body')}
+    confirm={t('mob.purge.delete')}
+    onconfirm={() => void deleteForever(ids)}
+    onclose={() => (confirming = false)}
+  />
+{/if}
 
 <style>
   .bar {

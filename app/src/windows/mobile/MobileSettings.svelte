@@ -20,7 +20,9 @@
   import RulesSection from '../main/settings/RulesSection.svelte';
   import TagsSection from '../main/settings/TagsSection.svelte';
   import AppBar from './AppBar.svelte';
+  import MobileAppearance from './MobileAppearance.svelte';
   import MobileGestures from './MobileGestures.svelte';
+  import MobileGuard from './MobileGuard.svelte';
 
   interface Props {
     section: SettingsSection | null;
@@ -121,6 +123,7 @@
         {#if account}<AccountPage id={accountId} />{/if}
       {:else if section === 'general'}
         <GeneralSection />
+        <MobileAppearance />
         <MobileGestures />
       {:else if section === 'notifications'}
         <NotifySection />
@@ -136,6 +139,7 @@
         <DevicesSection />
       {:else if section === 'privacy'}
         <PrivacySection />
+        <MobileGuard />
       {:else}
         <AboutSection />
       {/if}
