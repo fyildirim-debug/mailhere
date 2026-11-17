@@ -12,6 +12,9 @@
   //
   // Komşu postaya geçiş: içerik üzerinde yatay kaydırma (yalnız transform)
   // listedeki önceki / sonraki satırı aynı ekranda açar (nav.replace).
+  //
+  // İstenmeyen kutusundaki postada menünün başında "İstenmeyen değil", şüpheli
+  // postada "Güvenli say" vardır (ikisi de göndereni güvenli sayar).
   import { untrack } from 'svelte';
   import { call, toAppError, type MessageId } from '../../lib/api';
   import { t, when } from '../../lib/i18n/index.svelte';
@@ -42,7 +45,7 @@
     unsubscribe,
     type Row,
   } from '../../lib/stores/mail.svelte';
-  import { blockSenderOf } from '../../lib/stores/guard.svelte';
+  import { blockSenderOf, trustSenderOf } from '../../lib/stores/guard.svelte';
   import { settings } from '../../lib/stores/settings.svelte';
   import { bulkMove, senderMessages, setTag, togglePin } from '../../lib/stores/bulk.svelte';
   import { tagStore } from '../../lib/stores/tags.svelte';
@@ -243,6 +246,8 @@
     const sender = msg.from.email;
     menu = {
       items: [
+        // İstenmeyen kutusundaki postanın asıl eylemi: gönderen güvenli sayılır, posta gelen kutusuna döner.
+        ...(role === 'junk' ? [{ label: t('mob.spam.notJunk'), icon: 'inbox' as const, onclick: () => void trustSenderOf(msg.id) }] : []),
         // Şeritte yer almayan yanıt biçimleri başta (taslakta yanıt yok).
         ...(isDraft
           ? []
@@ -283,7 +288,10 @@
               stop: false,
             }),
         },
-        { label: t('read.block', { email: sender }), icon: 'block', danger: true, onclick: () => void blockSenderOf(msg.id) },
+        // Şüpheli sayılan (ama İstenmeyen'e taşınmamış) posta: uyarı kaldırılır.
+        ...(role !== 'junk' && msg.spamVerdict ? [{ label: t('mob.spam.trust'), icon: 'shield' as const, onclick: () => void trustSenderOf(msg.id) }] : []),
+        // Ad kısa tutulur (adres alt sayfada kırpılırdı); kimin engellendiğini toast söyler, geri alınabilir.
+        { label: t('mob.spam.block'), icon: 'block', danger: true, onclick: () => void blockSenderOf(msg.id) },
       ],
     };
   }

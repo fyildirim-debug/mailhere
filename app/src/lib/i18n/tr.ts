@@ -1231,6 +1231,9 @@ export const tr = {
   'otp.chipTitle': 'Kodu kopyala',
   // Mobil 0.11: şüpheli posta, engelleme ve güvenli sayma.
   'mob.spam.rowLabel': 'Şüpheli posta',
+  'mob.spam.notJunk': 'İstenmeyen değil',
+  'mob.spam.trust': 'Güvenli say',
+  'mob.spam.block': 'Göndereni engelle',
 } as const;
 
 export type MessageKey = keyof typeof tr;

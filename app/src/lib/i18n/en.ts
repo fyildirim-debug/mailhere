@@ -1215,4 +1215,7 @@ export const en: Record<MessageKey, string> = {
   'otp.chipTitle': 'Copy code',
   // Mobile 0.11: suspicious mail, blocking and trusting.
   'mob.spam.rowLabel': 'Suspicious message',
+  'mob.spam.notJunk': 'Not junk',
+  'mob.spam.trust': 'Mark as safe',
+  'mob.spam.block': 'Block sender',
 };
