@@ -37,7 +37,7 @@ serde.workspace = true
 # AppIndicator kitaplığı, StatusNotifier izleyicisi, X11 tepsisi). Hepsi
 # bağımlılık ağacında zaten var (MIT / Apache-2.0).
 [target.'cfg(windows)'.dependencies]
-windows-registry = "0.6.1"
+windows-registry = "0.100.0"
 # Pano (doğrulama kodunu kendiliğinden kopyalama): Win32 çağrıları doğrudan.
 # `arboard` Windows'ta BSL-1.0 lisanslı `clipboard-win`e dayandığı için
 # kullanılmadı; `windows-sys` ağaçta zaten var (bkz. `src/clipboard.rs`).
@@ -47,7 +47,7 @@ windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_
 dbus = "0.9.12"
 # Tepsi simgesi D-Bus StatusNotifierItem olarak (AppIndicator kitaplığı yok;
 # sol tık pencereyi açar). Tauri'nin tray-icon'u bu özellikle ksni arka ucuna geçer.
-tray-icon = { version = "0.25", default-features = false, features = ["ksni"] }
+tray-icon = { version = "0.26", default-features = false, features = ["ksni"] }
 # Bildirim kartı penceresinin gravity'si (pencere yöneticisi köşeyi sabit tutsun)
 # ve pano (doğrulama kodunu kendiliğinden kopyalama, `src/clipboard.rs`).
 gtk = "0.18"
