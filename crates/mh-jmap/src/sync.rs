@@ -189,6 +189,14 @@ pub fn email_properties() -> Vec<String> {
             .iter()
             .map(|h| format!("header:{h}")),
     );
+    // İstenmeyen puanının baktığı başlıklar tüm örnekleriyle istenir
+    // (`:all`, postadaki sırayla): alıcı sunucunun eklediği en üstteki okunur;
+    // sonuncusu (varsayılan) gönderenin yazdığı sahte başlık olabilir.
+    p.extend(
+        mh_mime::spam::HEADERS
+            .iter()
+            .map(|h| format!("header:{h}:all")),
+    );
     p
 }
 
@@ -202,7 +210,29 @@ pub fn to_new_message(e: &Email, account_id: &str, mailbox_id: &str, now: Millis
         .next()
         .or_else(|| addresses(e.sender.as_ref()).into_iter().next())
         .unwrap_or_else(|| Address::new(None, ""));
-    let category = mh_mime::classify(&e.headers(), &from.email);
+    let headers = e.headers();
+    let category = mh_mime::classify(&headers, &from.email);
+    let reply_to = addresses(e.reply_to.as_ref());
+    // Yön değiştiren ve denetim karakterleri atılır; çok uzun konu kısaltılır.
+    let subject: String = mh_mime::clean_line(e.subject.as_deref().unwrap_or("").trim())
+        .chars()
+        .take(1000)
+        .collect();
+    let snippet = e
+        .preview
+        .as_deref()
+        .map(mh_mime::snippet)
+        .unwrap_or_default();
+    // Gövde henüz yok: kod konu ve önizlemeden, puan istenen başlıklardan
+    // çıkar; gövde inince ikisi de yenilenir (ek adları, kalan başlıklar).
+    let otp = mh_mime::find_otp(&subject, &snippet);
+    let spam = mh_mime::spam_score(&mh_mime::SpamInput {
+        headers: &headers,
+        from: &from,
+        reply_to: &reply_to,
+        attachments: &[],
+        blocked: false,
+    });
     let received = e.received_at.as_deref().and_then(parse_date);
     let mut date = e
         .sent_at
@@ -238,17 +268,9 @@ pub fn to_new_message(e: &Email, account_id: &str, mailbox_id: &str, now: Millis
             .unwrap_or_default(),
         to: addresses(e.to.as_ref()),
         cc: addresses(e.cc.as_ref()),
-        reply_to: addresses(e.reply_to.as_ref()),
-        // Yön değiştiren ve denetim karakterleri atılır; çok uzun konu kısaltılır.
-        subject: mh_mime::clean_line(e.subject.as_deref().unwrap_or("").trim())
-            .chars()
-            .take(1000)
-            .collect(),
-        snippet: e
-            .preview
-            .as_deref()
-            .map(mh_mime::snippet)
-            .unwrap_or_default(),
+        reply_to,
+        subject,
+        snippet,
         body_text: None,
         date,
         unread: !e.keyword("$seen"),
@@ -257,6 +279,8 @@ pub fn to_new_message(e: &Email, account_id: &str, mailbox_id: &str, now: Millis
         category,
         size: e.size,
         raw: None,
+        otp,
+        spam,
         from,
     }
 }
@@ -914,6 +938,43 @@ mod tests {
     }
 
     #[test]
+    fn kod_ve_istenmeyen_puani_alimda() {
+        // Gövde yok: kod konu ve önizlemeden, puan istenen başlıklardan.
+        let e = email(json!({
+            "id": "M7",
+            "mailboxIds": {"mb1": true},
+            "from": [{"name": "Banka", "email": "bildirim@banka.example"}],
+            "replyTo": [{"name": null, "email": "odeme@baska.example"}],
+            "subject": "Giriş bildirimi",
+            "preview": "Doğrulama kodunuz: 604 218",
+            "header:X-Spam-Flag:all": [" YES", " NO"],
+            "header:Authentication-Results:all": [" mx.ornek.com; dmarc=pass", " sahte; dmarc=fail"],
+        }));
+        let m = to_new_message(&e, "a", "a:mb1", 1_791_800_000_000);
+        assert_eq!(m.otp.as_deref(), Some("604218"));
+        assert_eq!(
+            m.spam.reasons,
+            [
+                mh_core::SpamReason::ServerFlagged,
+                mh_core::SpamReason::ReplyToMismatch
+            ],
+            "en üstteki başlıklar sayılır"
+        );
+        assert_eq!(m.spam.score, 75);
+        // İşaretsiz, kodsuz posta.
+        let e = email(json!({
+            "id": "M8",
+            "mailboxIds": {"mb1": true},
+            "from": [{"name": "Ayşe", "email": "ayse@eposta.com"}],
+            "subject": "Selam",
+            "preview": "Yarın görüşelim mi?",
+            "header:X-Spam-Flag:all": [],
+        }));
+        let m = to_new_message(&e, "a", "a:mb1", 1_791_800_000_000);
+        assert_eq!((m.otp, m.spam.score), (None, 0));
+    }
+
+    #[test]
     fn izlenen_kutular() {
         for r in SYNC_ROLES {
             assert!(tracked(r, false) && tracked(r, true), "{r:?}");
@@ -928,6 +989,8 @@ mod tests {
     fn istenen_alanlar() {
         let p = email_properties();
         assert!(p.contains(&"header:List-Unsubscribe".to_string()));
+        assert!(p.contains(&"header:X-Spam-Flag:all".to_string()));
+        assert!(p.contains(&"header:Authentication-Results:all".to_string()));
         assert!(p.contains(&"preview".to_string()));
         assert!(!p.iter().any(|x| x == "bodyValues"));
     }

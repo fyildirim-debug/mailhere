@@ -1,7 +1,8 @@
 //! Tam metin arama (FTS5) ve arama işleçleri.
 //!
-//! Sorgu, işleçlere (`from:`, `to:`, `konu:`, `has:ek`, `is:okunmamış`,
-//! `in:arşiv`, `önce:2026-10-01` …) ve serbest metne ayrılır. Serbest metin
+//! Sorgu, işleçlere (`from:`, `to:`, `konu:`, `has:ek`, `has:kod`,
+//! `is:okunmamış`, `is:şüpheli`, `in:arşiv`, `önce:2026-10-01` …) ve serbest
+//! metne ayrılır. Serbest metin
 //! FTS dizininde aranır; işleçler SQL koşuluna çevrilir. Kullanıcı girdisi
 //! SQL'e hiçbir zaman metin olarak eklenmez, hep parametreyle gider.
 
@@ -123,8 +124,13 @@ enum Filter {
     To(String),
     Subject(String),
     HasAttachment,
+    /// Doğrulama kodu içeren postalar (`has:kod` / `has:code`).
+    HasCode,
     Unread,
     Starred,
+    /// Şüpheli postalar (`is:spam` / `is:şüpheli`): istenmeyen puanı eşiğin
+    /// üstünde. İstenmeyen kutusu da aranır.
+    Spam,
     In(Place),
     /// Bu andan önce (yerel gün başı).
     Before(Millis),
@@ -203,11 +209,13 @@ fn filter_of(key: &str, raw: &str) -> Option<Filter> {
         "subject" | "konu" => Filter::Subject(folded),
         "has" => match folded.as_str() {
             "attachment" | "ek" => Filter::HasAttachment,
+            "code" | "kod" => Filter::HasCode,
             _ => return None,
         },
         "is" => match folded.as_str() {
             "unread" | "okunmamis" => Filter::Unread,
             "starred" | "yildizli" => Filter::Starred,
+            "spam" | "supheli" => Filter::Spam,
             _ => return None,
         },
         "in" => Filter::In(match role_alias(&folded) {
@@ -241,7 +249,8 @@ fn parse_query(q: &str) -> ParsedQuery {
 impl Store {
     /// Konu, gönderen ve gövdede arar; arama işleçlerini uygular. Serbest
     /// metin varsa en alakalı ve yeni önce, yoksa yeniden eskiye. `in:`
-    /// verilmedikçe çöp ve istenmeyen kutuları hariçtir.
+    /// verilmedikçe çöp ve istenmeyen kutuları hariçtir; `is:şüpheli`
+    /// istenmeyen kutusunu da arar (taşınan şüpheli postalar oradadır).
     pub fn search(&self, q: &str, limit: u32) -> AppResult<Vec<MessageSummary>> {
         let parsed = parse_query(q);
         let text = fts_query(&parsed.text);
@@ -264,6 +273,7 @@ impl Store {
             };
             let mut p: Vec<Value> = text.iter().cloned().map(Value::Text).collect();
             let mut placed = false;
+            let mut junk_too = false;
             for f in &parsed.filters {
                 match f {
                     Filter::From(v) => {
@@ -281,8 +291,14 @@ impl Store {
                         p.push(Value::Text(v.clone()));
                     }
                     Filter::HasAttachment => sql += " AND m.has_attachments = 1",
+                    Filter::HasCode => sql += " AND m.otp IS NOT NULL",
                     Filter::Unread => sql += " AND m.unread = 1",
                     Filter::Starred => sql += " AND m.starred = 1",
+                    Filter::Spam => {
+                        junk_too = true;
+                        sql += " AND ";
+                        sql += &crate::signals::spam_condition();
+                    }
                     Filter::In(Place::Role(role)) => {
                         placed = true;
                         sql += " AND b.role = ?";
@@ -321,7 +337,11 @@ impl Store {
                 }
             }
             if !placed {
-                sql += " AND b.role NOT IN ('trash', 'junk')";
+                sql += if junk_too {
+                    " AND b.role != 'trash'"
+                } else {
+                    " AND b.role NOT IN ('trash', 'junk')"
+                };
             }
             sql += match text {
                 Some(_) => " ORDER BY bm25(messages_fts, 4.0, 2.0, 1.0), m.date DESC LIMIT ?",
@@ -454,6 +474,77 @@ mod tests {
             parse_query("tag:Fatura etiket:\"Proje X\"").filters,
             vec![Filter::Tag("fatura".into()), Filter::Tag("proje x".into())]
         );
+    }
+
+    #[test]
+    fn kod_ve_supheli_isleci() {
+        assert_eq!(
+            parse_query("has:kod has:CODE is:spam is:Şüpheli IS:supheli").filters,
+            vec![
+                Filter::HasCode,
+                Filter::HasCode,
+                Filter::Spam,
+                Filter::Spam,
+                Filter::Spam
+            ]
+        );
+        let s = store_with_account("a");
+        for (path, role) in [
+            ("INBOX", MailboxRole::Inbox),
+            ("Junk", MailboxRole::Junk),
+            ("Trash", MailboxRole::Trash),
+        ] {
+            s.upsert_mailbox("a", path, path, role, None, false)
+                .unwrap();
+        }
+        let add = |mailbox: &str, subject: &str, date, otp: Option<&str>, score: u8| {
+            let mut m = msg("a", mailbox, subject, date);
+            m.otp = otp.map(str::to_owned);
+            m.spam = mh_core::SpamVerdict {
+                score,
+                reasons: if score > 0 {
+                    vec![mh_core::SpamReason::AuthFailed]
+                } else {
+                    Vec::new()
+                },
+            };
+            s.upsert_message(&m).unwrap().id
+        };
+        let code = add("a:INBOX", "Giriş kodu", 10, Some("482913"), 0);
+        let plain = add("a:INBOX", "Selam", 11, None, 0);
+        let low = add(
+            "a:INBOX",
+            "Az kuşkulu",
+            12,
+            None,
+            mh_core::SPAM_THRESHOLD - 1,
+        );
+        let spam = add("a:INBOX", "Hesabınız askıda", 13, None, 50);
+        let junk = add("a:Junk", "Ödül kazandınız", 14, Some("111222"), 90);
+        let trash = add("a:Trash", "Silinmiş kod", 15, Some("333444"), 100);
+        let ids = |q: &str| {
+            s.search(q, 50)
+                .unwrap()
+                .into_iter()
+                .map(|m| m.id)
+                .collect::<Vec<_>>()
+        };
+        // Kod: çöp ve istenmeyen hariç (in: verilmedikçe).
+        assert_eq!(ids("has:kod"), vec![code]);
+        assert_eq!(ids("has:code in:spam"), vec![junk]);
+        assert_eq!(ids("has:kod in:çöp"), vec![trash]);
+        // Şüpheli: eşik ve üstü; istenmeyen kutusu dahil, çöp hariç.
+        assert_eq!(ids("is:spam"), vec![junk, spam]);
+        assert_eq!(ids("is:şüpheli in:gelen"), vec![spam]);
+        assert_eq!(ids("is:spam has:kod"), vec![junk]);
+        assert_eq!(ids("is:spam askıda"), vec![spam], "serbest metinle");
+        assert!(!ids("selam").contains(&low) && ids("selam") == vec![plain]);
+        // Özet alanları sütunlardan gelir.
+        let row = |id| s.summary(id).unwrap().unwrap();
+        assert_eq!(row(code).otp.as_deref(), Some("482913"));
+        assert!(!row(code).spam && !row(low).spam && !row(plain).spam);
+        assert!(row(spam).spam && row(junk).spam);
+        assert_eq!(row(plain).otp, None);
     }
 
     #[test]

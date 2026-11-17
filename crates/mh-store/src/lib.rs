@@ -23,6 +23,7 @@ mod schema;
 mod screener;
 mod search;
 mod settings;
+mod signals;
 mod tags;
 mod threads;
 

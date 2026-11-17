@@ -238,18 +238,23 @@ impl Store {
                 )?
                 .execute(params![id, m.mailbox_id, m.unread, m.starred, thread_id])?;
                 if let Some(raw) = &m.raw {
-                    tx.prepare_cached(
-                        "UPDATE messages SET raw = ?2, body_fetched = 1, snippet = ?3, has_attachments = ?4,
-                             fts_body = ?5
-                         WHERE id = ?1 AND raw IS NULL",
-                    )?
-                    .execute(params![
-                        id,
-                        raw,
-                        m.snippet,
-                        m.has_attachments,
-                        fold_tr(m.body_text.as_deref().unwrap_or(""))
-                    ])?;
+                    let written = tx
+                        .prepare_cached(
+                            "UPDATE messages SET raw = ?2, body_fetched = 1, snippet = ?3, has_attachments = ?4,
+                                 fts_body = ?5
+                             WHERE id = ?1 AND raw IS NULL",
+                        )?
+                        .execute(params![
+                            id,
+                            raw,
+                            m.snippet,
+                            m.has_attachments,
+                            fold_tr(m.body_text.as_deref().unwrap_or(""))
+                        ])?;
+                    if written > 0 {
+                        // Gövde yeni geldi: kod ve puan gövdeyle yenilenir.
+                        crate::signals::update(tx, id, m.otp.as_deref(), &m.spam)?;
+                    }
                 }
                 let mut touched = Vec::new();
                 if old_mailbox != m.mailbox_id {

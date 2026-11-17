@@ -272,7 +272,31 @@ const MIGRATIONS: &[&str] = &[
     UPDATE settings SET json = json_set(json, '$.notify', 'all')
     WHERE json_extract(json, '$.notify') = 'people';
     "#,
+    // 11: doğrulama kodu ve istenmeyen puanı (alımda hesaplanır, `signals`).
+    // Kod ya da puan taşıyan posta azdır; onları arayan sorgular (kod süresi,
+    // `has:kod`, `is:spam`, gönderici bazında sıfırlama) kısmi dizin kullanır.
+    r#"
+    -- Postadaki doğrulama kodu (boşluksuz); yoksa NULL.
+    ALTER TABLE messages ADD COLUMN otp TEXT;
+    -- İstenmeyen puanı (0-100) ve nedenleri (virgülle ayrılmış adlar).
+    ALTER TABLE messages ADD COLUMN spam_score INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE messages ADD COLUMN spam_reasons TEXT NOT NULL DEFAULT '';
+    -- Kod postaları azdır: süresi dolanları bulmak ve `has:kod` araması.
+    CREATE INDEX messages_otp ON messages(mailbox_id, date) WHERE otp IS NOT NULL;
+    -- Puanlı postalar azdır: `is:spam` araması ve gönderici bazında sıfırlama.
+    CREATE INDEX messages_spam ON messages(account_id, date) WHERE spam_score > 0;
+
+    -- Bir kez yapılan arka plan geri doldurmaları (ad → bittiği an).
+    CREATE TABLE backfills (
+        name     TEXT PRIMARY KEY,
+        done_at  INTEGER NOT NULL
+    );
+    "#,
 ];
+
+/// "Yalnız Kişiler" varsayılanını "her posta"ya taşıyan geçişin sürümü.
+#[cfg(test)]
+const NOTIFY_ALL_VERSION: usize = 10;
 
 /// Dallar ayrı geliştirilirken ana dalın ara sürümleri bazı geçişleri yer
 /// tutucu olarak uyguladı (`user_version` ilerledi, tablolar oluşmadı). Bu
@@ -322,7 +346,7 @@ mod tests {
     #[test]
     fn eski_varsayilan_kisiler_her_postaya_tasinir() {
         let mut conn = Connection::open_in_memory().unwrap();
-        let son = MIGRATIONS.len();
+        let son = NOTIFY_ALL_VERSION;
         for sql in &MIGRATIONS[..son - 1] {
             conn.execute_batch(sql).unwrap();
         }
@@ -461,6 +485,53 @@ mod tests {
             })
             .unwrap();
         assert_eq!(hidden, 0);
+    }
+
+    #[test]
+    fn kod_ve_istenmeyen_gecisi_eski_postalari_korur() {
+        // 10. sürümde bir posta; 11. geçiş sonradan uygulanır.
+        let mut conn = Connection::open_in_memory().unwrap();
+        for sql in &MIGRATIONS[..10] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 10i64).unwrap();
+        conn.execute_batch(
+            "INSERT INTO accounts (id, name, email, display_name, color, kind, created_at)
+             VALUES ('a', 'İş', 'a@ornek.com', 'A', '#4C6FD8', 'imap', 1);
+             INSERT INTO mailboxes (id, account_id, path, name, role)
+             VALUES ('a:INBOX', 'a', 'INBOX', 'INBOX', 'inbox');
+             INSERT INTO messages (account_id, mailbox_id, thread_id, from_addr, date)
+             VALUES ('a', 'a:INBOX', 't', '{\"name\":null,\"email\":\"x@y.z\"}', 5);",
+        )
+        .unwrap();
+        migrate(&mut conn).unwrap();
+        assert_eq!(
+            conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+                .unwrap() as usize,
+            latest_version()
+        );
+        let (otp, score, reasons): (Option<String>, i64, String) = conn
+            .query_row(
+                "SELECT otp, spam_score, spam_reasons FROM messages",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!((otp, score, reasons.as_str()), (None, 0, ""));
+        assert!(table_exists(&conn, "backfills").unwrap());
+        // Kısmi dizinler oluştu.
+        for index in ["messages_otp", "messages_spam"] {
+            let n: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?1",
+                    [index],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(n, 1, "{index}");
+        }
+        // İkinci açılışta yeniden uygulanmaz (sütunlar zaten var).
+        migrate(&mut conn).unwrap();
     }
 
     #[test]

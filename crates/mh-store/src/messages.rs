@@ -2,7 +2,8 @@
 
 use mh_core::{
     Address, AppError, AppResult, Category, Counts, ErrorCode, ListOnly, ListQuery, MailboxRole,
-    MessageDetail, MessageId, MessageSummary, Millis, Page, ThreadEntry, View,
+    MessageDetail, MessageId, MessageSummary, Millis, Page, SpamVerdict, ThreadEntry, View,
+    SPAM_THRESHOLD,
 };
 use mh_mime::{fold_tr, normalize_subject, ParsedMessage};
 use rusqlite::types::Value;
@@ -39,6 +40,11 @@ pub struct NewMessage {
     pub size: u64,
     /// Tam ham posta; yalnız başlık indirildiyse `None`.
     pub raw: Option<Vec<u8>>,
+    /// Konu ve (indirildiyse) gövdede bulunan doğrulama kodu.
+    pub otp: Option<String>,
+    /// İstenmeyen puanı ve nedenleri (`mh_mime::spam`). Depo yazarken kendi
+    /// postamızı ve kabul edilmiş göndericiyi ayırır (`crate::signals`).
+    pub spam: SpamVerdict,
 }
 
 impl NewMessage {
@@ -71,6 +77,8 @@ impl NewMessage {
             category: p.category,
             size: 0,
             raw: None,
+            otp: p.otp,
+            spam: p.spam,
         }
     }
 
@@ -209,9 +217,10 @@ pub(crate) const SUMMARY_COLS: &str = "m.id, m.account_id, m.mailbox_id, m.threa
     (SELECT f.due_at FROM followups f WHERE f.message_id = m.id),
     m.pinned, (SELECT group_concat(tag_id, char(10)) FROM (
         SELECT mt.tag_id FROM message_tags mt JOIN tags g ON g.id = mt.tag_id
-        WHERE mt.message_id = m.id ORDER BY g.position, g.id))";
+        WHERE mt.message_id = m.id ORDER BY g.position, g.id)),
+    m.otp, m.spam_score";
 /// `SUMMARY_COLS` sütun sayısı (ardına eklenen sütunların başlangıcı).
-pub(crate) const SUMMARY_LEN: usize = 17;
+pub(crate) const SUMMARY_LEN: usize = 19;
 
 pub(crate) fn row_to_summary(r: &Row<'_>) -> rusqlite::Result<MessageSummary> {
     Ok(MessageSummary {
@@ -235,9 +244,8 @@ pub(crate) fn row_to_summary(r: &Row<'_>) -> rusqlite::Result<MessageSummary> {
             .get::<_, Option<String>>(16)?
             .map(|s| s.split('\n').map(str::to_owned).collect())
             .unwrap_or_default(),
-        // Sütunları bir sonraki adımda (depo geçişi) gelir.
-        otp: None,
-        spam: false,
+        otp: r.get(17)?,
+        spam: r.get::<_, i64>(18)? >= i64::from(SPAM_THRESHOLD),
     })
 }
 
@@ -381,12 +389,21 @@ pub(crate) fn insert_as(
     id: Option<MessageId>,
 ) -> rusqlite::Result<MessageId> {
     let thread_id = compute_thread_id(tx, m)?;
+    let signals = crate::signals::effective(
+        tx,
+        &m.account_id,
+        &m.mailbox_id,
+        &m.from,
+        m.otp.as_deref(),
+        &m.spam,
+    )?;
     tx.prepare_cached(
         "INSERT INTO messages (account_id, mailbox_id, uid, uidvalidity, message_id_header, in_reply_to, refs,
             thread_id, from_addr, to_addrs, cc_addrs, reply_to, subject, snippet, date, unread, starred,
-            has_attachments, category, size, body_fetched, fts_subject, fts_sender, fts_body, raw, id)
+            has_attachments, category, size, body_fetched, fts_subject, fts_sender, fts_body, raw, id,
+            otp, spam_score, spam_reasons)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
-            ?21, ?22, ?23, ?24, ?25, ?26)",
+            ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29)",
     )?
     .execute(params![
         m.account_id,
@@ -415,6 +432,9 @@ pub(crate) fn insert_as(
         fold_tr(m.body_text.as_deref().unwrap_or("")),
         m.raw,
         id,
+        signals.otp,
+        i64::from(signals.score),
+        signals.reasons,
     ])?;
     Ok(tx.last_insert_rowid())
 }
@@ -443,17 +463,22 @@ fn refresh(
         ])?;
     }
     if let Some(raw) = &m.raw {
-        tx.prepare_cached(
-            "UPDATE messages SET raw = ?2, body_fetched = 1, snippet = ?3, has_attachments = ?4, fts_body = ?5
-             WHERE id = ?1 AND raw IS NULL",
-        )?
-        .execute(params![
-            id,
-            raw,
-            m.snippet,
-            m.has_attachments,
-            fold_tr(m.body_text.as_deref().unwrap_or(""))
-        ])?;
+        let written = tx
+            .prepare_cached(
+                "UPDATE messages SET raw = ?2, body_fetched = 1, snippet = ?3, has_attachments = ?4, fts_body = ?5
+                 WHERE id = ?1 AND raw IS NULL",
+            )?
+            .execute(params![
+                id,
+                raw,
+                m.snippet,
+                m.has_attachments,
+                fold_tr(m.body_text.as_deref().unwrap_or(""))
+            ])?;
+        if written > 0 {
+            // Gövde yeni geldi: kod ve puan gövdeyle (ek adları) yenilenir.
+            crate::signals::update(tx, id, m.otp.as_deref(), &m.spam)?;
+        }
     }
     Ok(())
 }
@@ -517,20 +542,29 @@ impl Store {
         raw: &[u8],
         parsed: Option<ParsedMessage>,
     ) -> AppResult<()> {
-        self.with(|c| {
+        self.with_tx(|c| {
             match parsed {
-                Some(p) => c.execute(
-                    "UPDATE messages SET raw = ?2, body_fetched = 1, snippet = ?3, has_attachments = ?4,
-                        fts_body = ?5 WHERE id = ?1",
-                    params![
-                        id,
-                        raw,
-                        p.snippet,
-                        p.has_attachments,
-                        fold_tr(p.body_text.as_deref().unwrap_or(""))
-                    ],
-                )?,
-                None => c.execute("UPDATE messages SET raw = ?2, body_fetched = 1 WHERE id = ?1", params![id, raw])?,
+                Some(p) => {
+                    c.execute(
+                        "UPDATE messages SET raw = ?2, body_fetched = 1, snippet = ?3, has_attachments = ?4,
+                            fts_body = ?5 WHERE id = ?1",
+                        params![
+                            id,
+                            raw,
+                            p.snippet,
+                            p.has_attachments,
+                            fold_tr(p.body_text.as_deref().unwrap_or(""))
+                        ],
+                    )?;
+                    // Kod gövdede olabilir; ek adları puanı değiştirebilir.
+                    crate::signals::update(c, id, p.otp.as_deref(), &p.spam)?;
+                }
+                None => {
+                    c.execute(
+                        "UPDATE messages SET raw = ?2, body_fetched = 1 WHERE id = ?1",
+                        params![id, raw],
+                    )?;
+                }
             };
             Ok(())
         })
@@ -1241,7 +1275,8 @@ impl Store {
         let row = self.with(|c| {
             c.query_row(
                 &format!(
-                    "SELECT {SUMMARY_COLS}, m.cc_addrs, m.reply_to, m.message_id_header, m.refs, b.role, m.raw
+                    "SELECT {SUMMARY_COLS}, m.cc_addrs, m.reply_to, m.message_id_header, m.refs, b.role, m.raw,
+                        m.spam_reasons
                      FROM messages m LEFT JOIN mailboxes b ON b.id = m.mailbox_id WHERE m.id = ?1"
                 ),
                 [id],
@@ -1255,12 +1290,25 @@ impl Store {
                         from_json::<Vec<String>>(i + 3, &r.get::<_, String>(i + 3)?)?,
                         r.get::<_, Option<String>>(i + 4)?,
                         r.get::<_, Option<Vec<u8>>>(i + 5)?,
+                        r.get::<_, i64>(i - 1)?,
+                        r.get::<_, String>(i + 6)?,
                     ))
                 },
             )
             .optional()
         })?;
-        let Some((summary, cc, reply_to, message_id_header, references, role, raw)) = row else {
+        let Some((
+            mut summary,
+            cc,
+            reply_to,
+            message_id_header,
+            references,
+            role,
+            raw,
+            spam_score,
+            spam_reasons,
+        )) = row
+        else {
             return Err(AppError::new(
                 ErrorCode::NotFound,
                 "Posta bulunamadı; silinmiş ya da taşınmış olabilir.",
@@ -1276,7 +1324,9 @@ impl Store {
         let sender_warning = (!own)
             .then(|| mh_mime::sender_warning(raw.as_deref(), &summary.from))
             .flatten();
-        let otp = (!own)
+        // Kod okuma anında yeniden aranır: geri doldurmanın erişmediği eski
+        // postalarda da (sütun boş) "Kodu kopyala" çıkar.
+        summary.otp = (!own)
             .then(|| {
                 let text = rendered
                     .as_ref()
@@ -1285,6 +1335,19 @@ impl Store {
                 mh_mime::find_otp(&summary.subject, text)
             })
             .flatten();
+        // Engellenenler listesi sütuna yazılmaz; burada eklenir. Bu hesapta
+        // kabul edilmiş gönderici ("Güvenli") ve kendi adreslerimiz alan adı
+        // engelinden muaftır (yeni posta süzgeciyle aynı kural).
+        let spam_verdict = if own {
+            None
+        } else {
+            let email = &summary.from.email;
+            let blocked = mh_core::is_blocked(&self.blocked_senders()?, email)
+                && !self.sender_accepted(&summary.account_id, email)?
+                && !self.is_own_address(email)?;
+            crate::signals::verdict_of(spam_score, &spam_reasons, blocked)
+        };
+        summary.spam = spam_verdict.is_some();
         Ok(MessageDetail {
             cc,
             bcc: rendered.as_ref().map(|r| r.bcc.clone()).unwrap_or_default(),
@@ -1302,8 +1365,8 @@ impl Store {
             unsubscribe,
             invite,
             sender_warning,
-            spam_verdict: None,
-            summary: MessageSummary { otp, ..summary },
+            spam_verdict,
+            summary,
         })
     }
 
@@ -1362,6 +1425,8 @@ pub(crate) mod tests {
             category: Category::People,
             size: 100,
             raw: None,
+            otp: None,
+            spam: SpamVerdict::default(),
         }
     }
 
@@ -1860,22 +1925,30 @@ pub(crate) mod tests {
         assert!(!d.has_remote_content);
         assert_eq!(d.sender_warning, Some(mh_core::SenderWarning::AuthFailed));
         assert_eq!(d.summary.otp.as_deref(), Some("604218"));
-        assert_eq!(s.otp(id).unwrap().as_deref(), Some("604218"));
-        assert_eq!(s.otp(9999).unwrap(), None);
+        // Kod alımda sütuna yazılır: listede de görünür.
+        assert_eq!(
+            s.summary(id).unwrap().unwrap().otp.as_deref(),
+            Some("604218")
+        );
 
         // Taslakta (kendi postamız) uyarı ve kod gösterilmez.
         let mut m = NewMessage::from_raw(raw, false, "a", "a:Drafts", 6).unwrap();
         m.uid = Some(2);
         let id = s.upsert_message(&m).unwrap().id;
         let d = s.detail(id, &[]).unwrap();
-        assert_eq!((d.sender_warning, d.summary.otp), (None, None));
+        assert_eq!((d.sender_warning, d.summary.otp.clone()), (None, None));
+        assert_eq!((d.spam_verdict.clone(), d.summary.spam), (None, false));
+        assert_eq!(s.summary(id).unwrap().unwrap().otp, None);
         assert_eq!(d.trackers, 1);
 
         // Gövdesi inmemiş postada kod konu ve önizlemeden aranır.
         let mut m = msg("a", "a:INBOX", "Your verification code", 7);
         m.snippet = "Use 731 004 to sign in.".into();
         let id = s.upsert_message(&m).unwrap().id;
-        assert_eq!(s.otp(id).unwrap().as_deref(), Some("731004"));
+        assert_eq!(
+            s.detail(id, &[]).unwrap().summary.otp.as_deref(),
+            Some("731004")
+        );
     }
 
     #[test]

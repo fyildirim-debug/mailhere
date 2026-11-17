@@ -136,16 +136,25 @@ impl Email {
             .map(|(id, _)| id.as_str())
     }
 
-    /// `header:Ad` biçiminde istenmiş başlıklar: (ad, ham değer).
+    /// `header:Ad` biçiminde istenmiş başlıklar: (ad, ham değer). Tüm
+    /// örnekleri istenen başlık (`header:Ad:all`, değer dizisi) postadaki
+    /// sırayla, her örnek ayrı çift olarak döner.
     pub fn headers(&self) -> Vec<(&str, &str)> {
-        self.extra
-            .iter()
-            .filter_map(|(k, v)| {
-                let name = k.strip_prefix("header:")?;
-                let name = name.split(':').next().unwrap_or(name);
-                Some((name, v.as_str()?))
-            })
-            .collect()
+        let mut out = Vec::new();
+        for (k, v) in &self.extra {
+            let Some(name) = k.strip_prefix("header:") else {
+                continue;
+            };
+            let name = name.split(':').next().unwrap_or(name);
+            match v {
+                Value::String(s) => out.push((name, s.as_str())),
+                Value::Array(list) => {
+                    out.extend(list.iter().filter_map(|i| Some((name, i.as_str()?))))
+                }
+                _ => {}
+            }
+        }
+        out
     }
 }
 
@@ -264,6 +273,19 @@ mod tests {
         assert!(!e.keyword("$flagged"));
         assert_eq!(e.mailboxes().collect::<Vec<_>>(), vec!["a"]);
         assert_eq!(e.headers(), vec![("List-Id", " <duyuru.ornek.com>")]);
+
+        // Tüm örnekleri istenen başlık: her örnek ayrı çift, postadaki sırayla.
+        let e: Email = serde_json::from_value(serde_json::json!({
+            "id": "M2",
+            "header:X-Spam-Flag:all": [" YES", " NO"],
+            "header:X-Spam-Level:all": [],
+            "header:X-Spam:all": null
+        }))
+        .unwrap();
+        assert_eq!(
+            e.headers(),
+            vec![("X-Spam-Flag", " YES"), ("X-Spam-Flag", " NO")]
+        );
     }
 
     #[test]

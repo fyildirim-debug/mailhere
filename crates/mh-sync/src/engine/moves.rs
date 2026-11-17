@@ -78,6 +78,8 @@ mod tests {
             category: Category::People,
             size: 10,
             raw: None,
+            otp: None,
+            spam: Default::default(),
         }
     }
 

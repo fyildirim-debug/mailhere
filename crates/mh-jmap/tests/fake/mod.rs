@@ -185,10 +185,12 @@ impl State {
         out.insert("id".into(), json!(e.id));
         for prop in props.iter().filter_map(Value::as_str) {
             if let Some(name) = prop.strip_prefix("header:") {
-                out.insert(
-                    prop.into(),
-                    raw_header(&e.raw, name).map_or(Value::Null, Value::String),
-                );
+                let value = match name.strip_suffix(":all") {
+                    // Tüm örnekler, postadaki sırayla (RFC 8621 §4.1.3).
+                    Some(name) => json!(raw_headers(&e.raw, name)),
+                    None => raw_header(&e.raw, name).map_or(Value::Null, Value::String),
+                };
+                out.insert(prop.into(), value);
             } else if let Some(v) = full.get_mut(prop) {
                 out.insert(prop.into(), v.take());
             }
@@ -205,6 +207,18 @@ fn raw_header(raw: &[u8], name: &str) -> Option<String> {
         let (n, v) = line.split_once(':')?;
         n.trim().eq_ignore_ascii_case(name).then(|| v.to_owned())
     })
+}
+
+/// Ham postadan başlığın tüm ham değerleri, postadaki sırayla.
+fn raw_headers(raw: &[u8], name: &str) -> Vec<String> {
+    let text = String::from_utf8_lossy(raw);
+    let head = text.split("\r\n\r\n").next().unwrap_or("");
+    head.split("\r\n")
+        .filter_map(|line| {
+            let (n, v) = line.split_once(':')?;
+            n.trim().eq_ignore_ascii_case(name).then(|| v.to_owned())
+        })
+        .collect()
 }
 
 /// Basit RFC 5322 posta.
