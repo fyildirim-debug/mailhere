@@ -16,6 +16,7 @@
   import MessageRow from './MessageRow.svelte';
   import SearchChips from './SearchChips.svelte';
   import { desk } from './layout.svelte';
+  import { emptyConfirmed, emptyTarget, purgeBox, removeMessages } from './purge';
   import { startTriage } from './triage-state.svelte';
 
   interface Props {
@@ -71,6 +72,11 @@
     if (scrollTop + viewport > layout.total - 600) void loadMore();
   }
 
+
+
+  // Çöp / İstenmeyen görünümü: başlıkta "Çöpü boşalt" / "İstenmeyen'i boşalt".
+  const purgeTarget = $derived(emptyTarget());
+
   // Klavyeyle seçim değişince satırı görünür tut.
   $effect(() => {
     const id = mail.selectedId;
@@ -122,6 +128,7 @@
     if (!rowMenu) return [];
     const m = rowMenu.row;
     const tomorrow = snoozeOptions(now).find((o) => o.key === 'tomorrow')!.at;
+    const purge = purgeBox(m.mailboxId);
     return [
       { label: t('read.openQuick'), icon: 'external', onclick: () => void call('open_quick', { id: m.id }) },
       { label: m.unread ? t('act.markRead') : t('act.markUnread'), icon: 'mail', kbd: m.unread ? undefined : 'U', onclick: () => void setUnread(m.ids, !m.unread) },
@@ -134,7 +141,7 @@
           ] as MenuItem[])
         : []),
       { label: t('snooze.tomorrow'), icon: 'clock', kbd: 'H', onclick: () => void snooze(m.ids, tomorrow) },
-      { label: t('act.delete'), icon: 'trash', kbd: '#', danger: true, onclick: () => void moveTo(m.ids, 'trash') },
+      { label: t(purge ? 'purge.delete' : 'act.delete'), icon: 'trash', kbd: '#', danger: true, onclick: () => void removeMessages(m.ids) },
     ];
   });
   const filterItems = $derived<MenuItem[]>([
@@ -216,6 +223,13 @@
       </div>
     </div>
     {#if mail.search != null}<SearchChips />{/if}
+    {#if purgeTarget && rows.length}
+      <div class="purge-row">
+        <button class="btn-soft small empty-btn" onclick={() => void emptyConfirmed()}>
+          <Icon name="trash" size={16} />{t(purgeTarget.role === 'trash' ? 'purge.emptyTrash' : 'purge.emptyJunk')}
+        </button>
+      </div>
+    {/if}
     {#if mail.only && mail.search == null}
       <div class="pill-row">
         <span class="pill">
@@ -410,6 +424,16 @@
     left: 0;
     right: 0;
     top: 0;
+  }
+
+  /* Çöp / İstenmeyen: kutuyu boşaltma (geri alınamaz; metin --danger). */
+  .purge-row {
+    display: flex;
+    margin-top: -4px;
+  }
+
+  .empty-btn {
+    color: var(--danger);
   }
 
   .group {

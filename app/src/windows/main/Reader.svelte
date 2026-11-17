@@ -32,6 +32,7 @@
   import { settings } from '../../lib/stores/settings.svelte';
   import { bulkMove, senderMessages, setTag, togglePin } from '../../lib/stores/bulk.svelte';
   import { tagStore, tagsOf } from '../../lib/stores/tags.svelte';
+  import { purgeable, purgeBox, removeMessages } from './purge';
   import { teach } from './teach.svelte';
 
   interface Props {
@@ -57,6 +58,9 @@
   /** Konuşma görünümü: ayar açık ve taslak değil. */
   const conversation = $derived(settings.value.conversationView && !isDraft);
   const isSent = $derived(d ? mail.mailboxes.find((b) => b.id === d.mailboxId)?.role === 'sent' : false);
+  /** Çöp ya da İstenmeyen'deki postada "Sil" kalıcı siler (onaylı). */
+  const purge = $derived(d ? purgeable(selectedIds()) : false);
+  const deleteLabel = $derived(t(purge ? 'purge.delete' : 'act.delete'));
   /** Elek görünümünde: gönderici için kabul / engelle kararı. */
   const screening = $derived(mail.view.kind === 'screener' && mail.search == null);
   /** Göndericiye göre temizlik yalnız arka ucun kapsadığı görünümlerde: gelen kutusu, klasör, etiket (arama dışı). */
@@ -211,7 +215,8 @@
           ? [
               { label: t('bulk.senderArchive'), icon: 'archive' as const, onclick: () => void senderAction('archive', at) },
               { label: t('bulk.senderKeepLatest'), icon: 'archive' as const, onclick: () => void senderAction('keepLatest', at) },
-              { label: t('bulk.senderTrash'), icon: 'trash' as const, onclick: () => void senderAction('trash', at) },
+              // Çöp ve İstenmeyen'de "çöpe at" anlamsız; oradan yalnız kalıcı silinir.
+              ...(purgeBox(msg.mailboxId) ? [] : [{ label: t('bulk.senderTrash'), icon: 'trash' as const, onclick: () => void senderAction('trash', at) }]),
             ]
           : []),
         {
@@ -285,9 +290,9 @@
         </div>
         <button
           class="btn-icon"
-          aria-label={t('act.delete')}
-          title="{t('act.delete')} · #"
-          onclick={(e) => void teach('delete', e, moveTo(selectedIds(), 'trash'))}
+          aria-label={deleteLabel}
+          title="{deleteLabel} · #"
+          onclick={(e) => (purge ? void removeMessages(selectedIds()) : void teach('delete', e, removeMessages(selectedIds())))}
         >
           <Icon name="trash" />
         </button>

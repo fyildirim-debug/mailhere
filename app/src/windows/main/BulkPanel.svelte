@@ -10,6 +10,7 @@
   import { mail, openSettings } from '../../lib/stores/mail.svelte';
   import { checkedIds, checkedRows, clearChecked } from '../../lib/stores/selection.svelte';
   import { tagStore } from '../../lib/stores/tags.svelte';
+  import { purgeable, removeMessages } from './purge';
   import { teach } from './teach.svelte';
 
   const rows = $derived(checkedRows());
@@ -20,6 +21,8 @@
   const allPinned = $derived(rows.every((r) => r.pinned));
   const accounts = $derived([...new Set(rows.map((r) => r.accountId))]);
   const oneAccount = $derived(accounts.length === 1 ? accounts[0] : null);
+  /** Seçimin tümü Çöp ya da İstenmeyen'deyse "Sil" kalıcı siler (onaylı). */
+  const purge = $derived(purgeable(ids));
 
   let snoozeOpen = $state(false);
   /** Erteleme menüsü fareyle açıldı (seçimden sonra kısayol öğretilir). */
@@ -71,8 +74,8 @@
       <button class="act" onclick={(e) => void teach('archive', e, bulkMove(ids, 'archive'))}>
         <Icon name="archive" /><span class="grow">{t('act.archive')}</span><span class="kbd">E</span>
       </button>
-      <button class="act" onclick={(e) => void teach('delete', e, bulkMove(ids, 'trash'))}>
-        <Icon name="trash" /><span class="grow">{t('act.delete')}</span><span class="kbd">#</span>
+      <button class="act" onclick={(e) => (purge ? void removeMessages(ids, { bulk: true }) : void teach('delete', e, removeMessages(ids, { bulk: true })))}>
+        <Icon name="trash" /><span class="grow">{t(purge ? 'purge.delete' : 'act.delete')}</span><span class="kbd">#</span>
       </button>
       <button class="act" onclick={(e) => void (allRead ? teach('unread', e, bulkSetUnread(ids, true)) : bulkSetUnread(ids, false))}>
         <Icon name="mail" /><span class="grow">{allRead ? t('act.markUnread') : t('act.markRead')}</span>{#if allRead}<span class="kbd">U</span>{/if}

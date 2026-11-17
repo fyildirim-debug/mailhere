@@ -9,6 +9,7 @@
   import { clickRow, isChecked, toggleCheck } from '../../lib/stores/selection.svelte';
   import { tagsOf } from '../../lib/stores/tags.svelte';
   import { showReader } from './layout.svelte';
+  import { purgeBox, removeMessages } from './purge';
   import { teach } from './teach.svelte';
 
   interface Props {
@@ -28,6 +29,9 @@
   // Yanıt hatırlatmalı (gönderilmiş) satırda beklenen kişi, yani ilk alıcı görünür.
   const who = $derived(message.followUp != null && message.to[0] ? message.to[0] : message.from);
   const awaiting = $derived(followUpDue(message.followUp, now));
+  /** Çöp ya da İstenmeyen'deki satırda "Sil" kalıcı siler (onaylı). */
+  const purge = $derived(purgeBox(message.mailboxId));
+  const deleteLabel = $derived(t(purge ? 'purge.delete' : 'act.delete'));
 
   // Sağ tık (ya da Shift F10 / menü tuşu) bağlam menüsünü listeye bildirir.
   function openMenu(e: MouseEvent | KeyboardEvent) {
@@ -97,7 +101,12 @@
     <button class="btn-icon small" aria-label={t('act.snooze')} title="{t('snooze.tomorrow')} · H" onclick={(e) => void teach('snooze', e, snooze(message.ids, tomorrow))}>
       <Icon name="clock" size={16} />
     </button>
-    <button class="btn-icon small" aria-label={t('act.delete')} title="{t('act.delete')} · #" onclick={(e) => void teach('delete', e, moveTo(message.ids, 'trash'))}>
+    <button
+      class="btn-icon small"
+      aria-label={deleteLabel}
+      title="{deleteLabel} · #"
+      onclick={(e) => (purge ? void removeMessages(message.ids) : void teach('delete', e, removeMessages(message.ids)))}
+    >
       <Icon name="trash" size={16} />
     </button>
   </div>

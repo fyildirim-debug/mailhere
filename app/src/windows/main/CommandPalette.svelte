@@ -18,6 +18,7 @@
   import { resolvedTheme, toggleTheme } from '../../lib/stores/settings.svelte';
   import { matchRange, score } from './fuzzy';
   import { desk, showReader, toggleSidebar } from './layout.svelte';
+  import { purgeable, removeMessages } from './purge';
   import { scale, setScale, stepped } from './scale.svelte';
   import { startTriage } from './triage-state.svelte';
 
@@ -177,7 +178,7 @@
         cmd('archive', 'act.archive', 'archive', () => moveTo(selectedIds(), 'archive'), KEY_LABEL.archive),
         cmd('snooze', 'act.snooze', 'clock', () => snooze(selectedIds(), tomorrow), KEY_LABEL.snooze, `${t('act.snooze')} · ${t('snooze.tomorrow')}`),
         cmd('reply', 'palette.reply', 'reply', () => onopen('reply'), KEY_LABEL.reply),
-        cmd('delete', 'act.delete', 'trash', () => moveTo(selectedIds(), 'trash'), KEY_LABEL.delete),
+        cmd('delete', purgeable(selectedIds()) ? 'purge.delete' : 'act.delete', 'trash', () => removeMessages(selectedIds()), KEY_LABEL.delete),
         cmd('star', 'palette.star', 'star', () => toggleStar(sel), KEY_LABEL.star),
         cmd('unread', 'palette.unread', 'mail', () => setUnread([sel], true), KEY_LABEL.unread),
         cmd('pin', pinned ? 'pin.unpin' : 'pin.pin', 'pin', () => togglePin(selectedIds()), KEY_LABEL.pin),

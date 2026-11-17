@@ -1213,4 +1213,17 @@ export const en: Record<MessageKey, string> = {
   // Code chip on a list row.
   'otp.chipLabel': 'Verification code {code}; copy',
   'otp.chipTitle': 'Copy code',
+  // Permanent delete confirmation and emptying a mailbox (desktop).
+  'purge.delete': 'Delete permanently',
+  'purge.confirmOneTitle': 'Delete this message permanently?',
+  'purge.confirmTitle': 'Delete {n} messages permanently?',
+  'purge.confirmOneBody': 'The message is removed from this computer and from the server. This cannot be undone.',
+  'purge.confirmBody': 'The messages are removed from this computer and from the server. This cannot be undone.',
+  'purge.emptyTrash': 'Empty Trash',
+  'purge.emptyJunk': 'Empty Junk',
+  'purge.emptyTrashTitle': 'Empty the Trash?',
+  'purge.emptyJunkTitle': 'Empty the Junk mailbox?',
+  'purge.emptyTrashCount': 'Delete the {n} messages in Trash permanently?',
+  'purge.emptyJunkCount': 'Delete the {n} messages in Junk permanently?',
+  'purge.emptyBody': 'Every message in the mailbox is removed from this computer and from the server. This cannot be undone.',
 };

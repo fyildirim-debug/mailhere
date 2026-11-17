@@ -1229,6 +1229,19 @@ export const tr = {
   // Liste satırındaki kod çipi.
   'otp.chipLabel': 'Doğrulama kodu {code}; kopyala',
   'otp.chipTitle': 'Kodu kopyala',
+  // Kalıcı silme onayı ve kutuyu boşaltma (masaüstü).
+  'purge.delete': 'Kalıcı sil',
+  'purge.confirmOneTitle': 'Bu posta kalıcı silinsin mi?',
+  'purge.confirmTitle': '{n} posta kalıcı silinsin mi?',
+  'purge.confirmOneBody': 'Posta bu bilgisayardan ve sunucudan silinir. Bu işlem geri alınamaz.',
+  'purge.confirmBody': 'Postalar bu bilgisayardan ve sunucudan silinir. Bu işlem geri alınamaz.',
+  'purge.emptyTrash': 'Çöpü boşalt',
+  'purge.emptyJunk': 'İstenmeyen\'i boşalt',
+  'purge.emptyTrashTitle': 'Çöp boşaltılsın mı?',
+  'purge.emptyJunkTitle': 'İstenmeyen kutusu boşaltılsın mı?',
+  'purge.emptyTrashCount': 'Çöpteki {n} posta kalıcı silinsin mi?',
+  'purge.emptyJunkCount': 'İstenmeyen kutusundaki {n} posta kalıcı silinsin mi?',
+  'purge.emptyBody': 'Kutudaki tüm postalar bu bilgisayardan ve sunucudan silinir. Bu işlem geri alınamaz.',
 } as const;
 
 export type MessageKey = keyof typeof tr;
