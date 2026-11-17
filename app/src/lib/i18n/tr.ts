@@ -1229,6 +1229,8 @@ export const tr = {
   // Liste satırındaki kod çipi.
   'otp.chipLabel': 'Doğrulama kodu {code}; kopyala',
   'otp.chipTitle': 'Kodu kopyala',
+  // Mobil 0.11: şüpheli posta, engelleme ve güvenli sayma.
+  'mob.spam.rowLabel': 'Şüpheli posta',
 } as const;
 
 export type MessageKey = keyof typeof tr;

@@ -1213,4 +1213,6 @@ export const en: Record<MessageKey, string> = {
   // Code chip on a list row.
   'otp.chipLabel': 'Verification code {code}; copy',
   'otp.chipTitle': 'Copy code',
+  // Mobile 0.11: suspicious mail, blocking and trusting.
+  'mob.spam.rowLabel': 'Suspicious message',
 };
