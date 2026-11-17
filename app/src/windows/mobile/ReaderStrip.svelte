@@ -18,6 +18,8 @@
   interface Props {
     detail: MessageDetail | null;
     draft: boolean;
+    /** Posta Çöp ya da İstenmeyen kutusunda: "Sil" kalıcı siler (onayı ekran sorar). */
+    purge?: boolean;
     onarchive: () => void;
     ontrash: () => void;
     onmore: () => void;
@@ -26,7 +28,8 @@
     onfull: (text: string) => void;
   }
 
-  let { detail: d, draft, onarchive, ontrash, onmore, oneditdraft, onfull }: Props = $props();
+  let { detail: d, draft, purge = false, onarchive, ontrash, onmore, oneditdraft, onfull }: Props = $props();
+  const trashLabel = $derived(t(purge ? 'mob.purge.delete' : 'act.delete'));
 
   let text = $state('');
   let quick = $state<QuickReply>();
@@ -74,7 +77,7 @@
         <Icon name="archive" size={22} />
       </button>
     {/if}
-    <button class="btn-icon act" disabled={!d} aria-label={t('act.delete')} title={t('act.delete')} onclick={ontrash}>
+    <button class="btn-icon act" disabled={!d} aria-label={trashLabel} title={trashLabel} aria-haspopup={purge ? 'dialog' : undefined} onclick={ontrash}>
       <Icon name="trash" size={22} />
     </button>
     <button class="btn-icon act" disabled={!d} aria-label={t('read.more')} title={t('read.more')} aria-haspopup="menu" onclick={onmore}>

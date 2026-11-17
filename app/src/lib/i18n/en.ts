@@ -1218,4 +1218,13 @@ export const en: Record<MessageKey, string> = {
   'mob.spam.notJunk': 'Not junk',
   'mob.spam.trust': 'Mark as safe',
   'mob.spam.block': 'Block sender',
+  // Mobile 0.11: permanent delete and emptying a mailbox.
+  'mob.purge.delete': 'Delete forever',
+  'mob.purge.confirmOne': 'Delete this message forever?',
+  'mob.purge.confirm': 'Delete {n} messages forever?',
+  'mob.purge.body': 'This cannot be undone; the deletion applies on the server too.',
+  'mob.purge.emptyTrash': 'Empty Trash',
+  'mob.purge.emptyJunk': 'Empty Junk',
+  'mob.purge.emptyTrashConfirm': 'Delete every message in Trash forever?',
+  'mob.purge.emptyJunkConfirm': 'Delete every message in Junk forever?',
 };

@@ -7,9 +7,13 @@
   // alanın başında durur: içerik akınca başlık uygulama çubuğuna çekilir
   // (`onscrolled`), çipler sayfanın üstüne yapışır. Sanal yerleşim başlığın
   // yüksekliği kadar kaydırılarak okunur.
+  //
+  // Çöp ve İstenmeyen görünümlerinde (`purgeRole`) "Sil" kaydırması "Kalıcı
+  // sil" olur: satır yerine döner, onay alt sayfası açılır. İstenmeyen
+  // kutusunda "İstenmeyen" kaydırması "İstenmeyen değil"dir.
   import { onMount, untrack } from 'svelte';
   import { fade } from 'svelte/transition';
-  import { call, toAppError, type Category, type SwipeAction } from '../../lib/api';
+  import { call, toAppError, type Category, type MessageId, type SwipeAction } from '../../lib/api';
   import { t, type MessageKey } from '../../lib/i18n/index.svelte';
   import { folderLabel } from '../../lib/mail/folders';
   import { emptyState, groupLabel, groupOf, isInboxView, orderRows } from '../../lib/mail/listing';
@@ -19,9 +23,11 @@
   import Menu, { type MenuItem } from '../../lib/ui/Menu.svelte';
   import { showToast } from '../../lib/ui/toast.svelte';
   import { bulkMoveToFolder, bulkSetUnread, setPinned } from '../../lib/stores/bulk.svelte';
+  import { deleteForever, purgeRole, trustSenderOf } from '../../lib/stores/guard.svelte';
   import { loadMore, mail, moveTo, refreshCounts, refreshList, rowsOf, setCategory, snooze, type Row } from '../../lib/stores/mail.svelte';
   import { isChecked, openRow, toggleCheck } from '../../lib/stores/selection.svelte';
   import { settings } from '../../lib/stores/settings.svelte';
+  import ConfirmSheet from './ConfirmSheet.svelte';
   import { categoryUnread } from './counts.svelte';
   import { junkOf, moveItems } from './folders';
   import { haptic } from './haptic';
@@ -78,6 +84,8 @@
   const rows = $derived(orderRows(rowsOf(mail.items, mail.search == null), ctx));
   const selecting = $derived(mail.checked.length > 0);
   const empty = $derived(emptyState(mail));
+  /** Çöp ya da İstenmeyen görünümü: silme kalıcıdır ve onay ister. */
+  const purge = $derived(purgeRole(mail.view));
 
   const layout = $derived(
     buildLayout(rows, { rowH, groupH, tail: 104, groupOf: (m) => groupOf(m, ctx), groupLabel, rowKey: (m) => `m-${m.id}` }),
@@ -148,8 +156,10 @@
       case 'snooze':
         return { icon: 'clock', label: t('snooze.tomorrow'), tone: 'amber' };
       case 'trash':
-        return { icon: 'trash', label: t('act.delete'), tone: 'danger' };
+        return { icon: 'trash', label: purge ? t('mob.purge.delete') : t('act.delete'), tone: 'danger' };
       case 'spam':
+        // İstenmeyen kutusunda aynı kaydırma postayı geri çıkarır.
+        if (purge === 'junk') return { icon: 'inbox', label: t('mob.spam.notJunk'), tone: 'accent' };
         return { icon: 'spam', label: t('mob.swipe.spam'), tone: 'danger' };
       case 'move':
         return { icon: 'folder', label: t('mob.swipe.move'), tone: 'neutral' };
@@ -162,10 +172,15 @@
     }
   }
 
-  /** İstenmeyen kutusu olmayan hesapta satır yerinde kalır. */
+  /** İstenmeyen kutusu olmayan hesapta satır yerinde kalır; kalıcı silme önce onay sorar. */
   function swipeRemoves(row: Row, a: SwipeAction): boolean {
+    if (a === 'trash' && purge) return false;
+    if (a === 'spam' && purge === 'junk') return true;
     return a === 'spam' ? junkOf(row.accountId) != null : removesRow(a);
   }
+
+  /** Kalıcı silme onayı bekleyen postalar. */
+  let purging = $state<MessageId[] | null>(null);
 
   /** "Klasöre taşı" kaydırmasının açtığı seçici (alt sayfa). */
   let moving = $state<{ items: MenuItem[] } | null>(null);
@@ -173,11 +188,21 @@
   /** Kaydırma eylemi; her biri mevcut geri alma toast'ıyla gelir. */
   function swipeAction(row: Row, a: SwipeAction) {
     switch (a) {
-      case 'archive':
       case 'trash':
+        if (purge) {
+          purging = row.ids;
+          break;
+        }
+        void moveTo(row.ids, a);
+        break;
+      case 'archive':
         void moveTo(row.ids, a);
         break;
       case 'spam': {
+        if (purge === 'junk') {
+          void trustSenderOf(row.id);
+          break;
+        }
         const junk = junkOf(row.accountId);
         if (junk) void bulkMoveToFolder(row.ids, junk, folderLabel(junk));
         else {
@@ -405,6 +430,16 @@
 </section>
 
 {#if moving}<Menu title={t('read.moveTo')} items={moving.items} onclose={() => (moving = null)} />{/if}
+{#if purging}
+  {@const ids = purging}
+  <ConfirmSheet
+    title={ids.length === 1 ? t('mob.purge.confirmOne') : t('mob.purge.confirm', { n: ids.length })}
+    body={t('mob.purge.body')}
+    confirm={t('mob.purge.delete')}
+    onconfirm={() => void deleteForever(ids)}
+    onclose={() => (purging = null)}
+  />
+{/if}
 
 <style>
   .list {

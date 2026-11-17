@@ -15,6 +15,8 @@
   //
   // İstenmeyen kutusundaki postada menünün başında "İstenmeyen değil", şüpheli
   // postada "Güvenli say" vardır (ikisi de göndereni güvenli sayar).
+  // Çöp ya da İstenmeyen kutusundaki postada "Sil" yerine "Kalıcı sil" durur
+  // ve onay ister (geri alınamaz, geri alma toast'ı yok).
   import { untrack } from 'svelte';
   import { call, toAppError, type MessageId } from '../../lib/api';
   import { t, when } from '../../lib/i18n/index.svelte';
@@ -45,11 +47,12 @@
     unsubscribe,
     type Row,
   } from '../../lib/stores/mail.svelte';
-  import { blockSenderOf, trustSenderOf } from '../../lib/stores/guard.svelte';
+  import { blockSenderOf, deleteForever, trustSenderOf } from '../../lib/stores/guard.svelte';
   import { settings } from '../../lib/stores/settings.svelte';
   import { bulkMove, senderMessages, setTag, togglePin } from '../../lib/stores/bulk.svelte';
   import { tagStore } from '../../lib/stores/tags.svelte';
   import AppBar from './AppBar.svelte';
+  import ConfirmSheet from './ConfirmSheet.svelte';
   import { moveItems } from './folders';
   import { nav } from './nav.svelte';
   import ReaderStrip from './ReaderStrip.svelte';
@@ -75,6 +78,8 @@
   const role = $derived(d ? mail.mailboxes.find((b) => b.id === d.mailboxId)?.role : undefined);
   const isDraft = $derived(role === 'drafts');
   const isSent = $derived(role === 'sent');
+  /** Posta Çöp ya da İstenmeyen kutusunda: silme kalıcıdır. */
+  const purge = $derived(role === 'trash' || role === 'junk');
   const conversation = $derived(settings.value.conversationView && !isDraft);
   const screening = $derived(mail.view.kind === 'screener' && mail.search == null);
   const senderScope = $derived(mail.search == null && (mail.view.kind === 'inbox' || mail.view.kind === 'mailbox' || mail.view.kind === 'tag'));
@@ -83,6 +88,8 @@
   let menu = $state<{ title?: string; items: MenuItem[] } | null>(null);
   let snoozeOpen = $state(false);
   let followOpen = $state(false);
+  /** Kalıcı silme onayı açık mı. */
+  let purging = $state(false);
   /** Ekrandan çıkılıyor: listenin seçimi değişse de bu ekran onu izlemez. */
   let leaving = false;
 
@@ -144,9 +151,24 @@
   }
 
   function trash() {
+    if (purge) {
+      purging = true;
+      return;
+    }
     const before = neighbors;
     void moveTo(ids(), 'trash');
     removed(before);
+  }
+
+  /** Onaylanan kalıcı silme; olmazsa ekran postada kalır. */
+  async function purgeNow() {
+    const before = neighbors;
+    // Silinen posta listeden çıkarken seçim sıradakine geçer; ekran onu
+    // izlemesin, nereye gidileceğine `afterRemove` ayarı karar verir.
+    leaving = true;
+    const ok = await deleteForever(ids());
+    leaving = false;
+    if (ok) removed(before);
   }
 
   function markUnread() {
@@ -451,10 +473,20 @@
 
 <!-- Her posta kendi şeridini kurar: yazılan yanıt başka postaya taşınmaz. -->
 {#key id}
-  <ReaderStrip detail={d} draft={isDraft} onarchive={archive} ontrash={trash} onmore={moreMenu} oneditdraft={editDraft} onfull={fullReply} />
+  <ReaderStrip detail={d} draft={isDraft} {purge} onarchive={archive} ontrash={trash} onmore={moreMenu} oneditdraft={editDraft} onfull={fullReply} />
 {/key}
 
 {#if menu}<Menu title={menu.title} label={menu.title ?? t('read.more')} items={menu.items} onclose={() => (menu = null)} />{/if}
+{#if purging}
+  {@const n = ids().length}
+  <ConfirmSheet
+    title={n === 1 ? t('mob.purge.confirmOne') : t('mob.purge.confirm', { n })}
+    body={t('mob.purge.body')}
+    confirm={t('mob.purge.delete')}
+    onconfirm={() => void purgeNow()}
+    onclose={() => (purging = false)}
+  />
+{/if}
 {#if snoozeOpen}
   <SnoozeMenu
     onclose={() => (snoozeOpen = false)}

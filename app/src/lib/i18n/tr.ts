@@ -1234,6 +1234,15 @@ export const tr = {
   'mob.spam.notJunk': 'İstenmeyen değil',
   'mob.spam.trust': 'Güvenli say',
   'mob.spam.block': 'Göndereni engelle',
+  // Mobil 0.11: kalıcı silme ve kutuyu boşaltma.
+  'mob.purge.delete': 'Kalıcı sil',
+  'mob.purge.confirmOne': 'Bu posta kalıcı silinsin mi?',
+  'mob.purge.confirm': '{n} posta kalıcı silinsin mi?',
+  'mob.purge.body': 'Bu işlem geri alınamaz; sunucudan da silinir.',
+  'mob.purge.emptyTrash': 'Çöpü boşalt',
+  'mob.purge.emptyJunk': 'İstenmeyen\'i boşalt',
+  'mob.purge.emptyTrashConfirm': 'Çöpteki tüm postalar kalıcı silinsin mi?',
+  'mob.purge.emptyJunkConfirm': 'İstenmeyen\'deki tüm postalar kalıcı silinsin mi?',
 } as const;
 
 export type MessageKey = keyof typeof tr;

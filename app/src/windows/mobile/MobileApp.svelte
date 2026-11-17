@@ -25,6 +25,7 @@
   import { bindSheetLayer } from '../../lib/ui/sheet-layer';
   import ToastHost from '../../lib/ui/ToastHost.svelte';
   import { initMail, mail, markAllRead, pullMail, rowsOf, select, setOnly, setView, type Row } from '../../lib/stores/mail.svelte';
+  import { emptyMailbox, purgeRole } from '../../lib/stores/guard.svelte';
   import { initLock, isLocked, isOpen, lock, watchRelock } from '../../lib/stores/lock.svelte';
   import { signalFirstScreen } from '../../lib/ready';
   import { refreshSettings } from '../../lib/stores/settings.svelte';
@@ -36,6 +37,7 @@
   import Onboarding from '../main/Onboarding.svelte';
   import ScheduledView from '../main/ScheduledView.svelte';
   import AppBar from './AppBar.svelte';
+  import ConfirmSheet from './ConfirmSheet.svelte';
   import Drawer from './Drawer.svelte';
   import MobileBulkBar from './MobileBulkBar.svelte';
   import MobileCompose from './MobileCompose.svelte';
@@ -208,6 +210,20 @@
 
   // ------------------------------------------------------------- diğer menüsü
 
+  /** Çöp ya da İstenmeyen görünümü (aramada değil): menüde "boşalt" çıkar. */
+  const purge = $derived(mail.search == null ? purgeRole(mail.view) : null);
+  /** Boşaltma onayı bekleyen kutu. */
+  let emptying = $state<'trash' | 'junk' | null>(null);
+
+  /**
+   * Boşaltılacak kutunun hesabı: klasör görünümünde o klasörün hesabı (görünen
+   * kutudan fazlası silinmesin), Çöp görünümünde seçili kapsam (null: tüm hesaplar).
+   */
+  function purgeAccount(): string | null {
+    const v = mail.view;
+    return v.kind === 'mailbox' ? (mail.mailboxes.find((b) => b.id === v.id)?.accountId ?? mail.accountId) : mail.accountId;
+  }
+
   let more = $state<{ x: number; y: number } | null>(null);
   const onlyKey: Record<ListOnly, MessageKey> = { unread: 'list.only.unread', starred: 'list.only.starred', attachments: 'list.only.attachments' };
   const moreItems = $derived.by((): MenuItem[] => {
@@ -225,6 +241,17 @@
           onclick: () => mail.only !== k && setOnly(k),
         })),
       );
+    }
+    // Çöp ve İstenmeyen: kutunun tamamını kalıcı silme (onaylı).
+    if (purge) {
+      const role = purge;
+      items.push({
+        key: 'empty',
+        label: t(role === 'trash' ? 'mob.purge.emptyTrash' : 'mob.purge.emptyJunk'),
+        icon: 'trash',
+        danger: true,
+        onclick: () => (emptying = role),
+      });
     }
     return items;
   });
@@ -342,6 +369,16 @@
   {/if}
 
   {#if more}<Menu at={more} items={moreItems} onclose={() => (more = null)} />{/if}
+  {#if emptying}
+    {@const role = emptying}
+    <ConfirmSheet
+      title={t(role === 'trash' ? 'mob.purge.emptyTrashConfirm' : 'mob.purge.emptyJunkConfirm')}
+      body={t('mob.purge.body')}
+      confirm={t(role === 'trash' ? 'mob.purge.emptyTrash' : 'mob.purge.emptyJunk')}
+      onconfirm={() => void emptyMailbox(role, purgeAccount())}
+      onclose={() => (emptying = null)}
+    />
+  {/if}
   <ToastHost />
 </div>
 
