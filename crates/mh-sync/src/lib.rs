@@ -1,6 +1,7 @@
 //! Mailhere eşitleme: hesap ayarı keşfi, IMAP bağlantısı, kutu eşitleme,
 //! IDLE ile anlık bildirim ve sunucu işlemleri.
 
+mod checked;
 mod conn;
 mod credentials;
 pub mod discover;
@@ -24,7 +25,7 @@ pub use credentials::{
 pub use discover::discover;
 pub use engine::{assign_roles, fetch_body, is_syncable, Assigned, Listed, SyncManager};
 pub use error::{SyncError, SyncResult};
-pub use mailbox::{sync_mailbox, uid_set, MailboxOutcome};
+pub use mailbox::{fetch_older, sync_mailbox, uid_set, MailboxOutcome, OlderOutcome, OLDER_BATCH};
 pub use secrets::{password_for, MemorySecrets, SecretStore};
 
 /// Arka uçtan arayüze giden olaylar. Kabuk (`src-tauri`) bunları pencerelere

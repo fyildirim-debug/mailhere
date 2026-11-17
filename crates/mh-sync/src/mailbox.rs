@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use async_imap::types::{Fetch, Flag};
 use futures::TryStreamExt;
 use mh_core::{AppError, ErrorCode, MessageId, Millis};
-use mh_store::{MailboxInfo, NewMessage, Store};
+use mh_store::{MailboxInfo, NewMessage, Store, UpsertOutcome};
 
 use crate::conn::ImapSession;
 use crate::error::{SyncError, SyncResult};
@@ -17,6 +17,18 @@ pub const MAX_INLINE_BODY: u32 = 512 * 1024;
 /// Bayrakları yenilenen en yeni posta sayısı.
 pub const FLAG_REFRESH: usize = 500;
 const CHUNK: usize = 50;
+
+/// "Daha eski postalar" isteğinde kutu başına indirilen posta sayısı.
+pub const OLDER_BATCH: usize = 300;
+
+/// `fetch_older` sonucu.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct OlderOutcome {
+    /// Bu çağrıda yerele yeni yazılan posta sayısı.
+    pub fetched: u32,
+    /// Sunucuda hâlâ daha eski posta var mı.
+    pub more: bool,
+}
 
 /// Kutu eşitlemesinin sonucu.
 #[derive(Debug, Default)]
@@ -172,6 +184,152 @@ async fn fetch_uids(session: &mut ImapSession, seq: bool, set: &str) -> SyncResu
     Ok(fetches.iter().filter_map(|f| f.uid).collect())
 }
 
+/// Verilen UID'leri (seçili kutudan) indirip depoya yazar: küçük postalar
+/// gövdesiyle, büyükler yalnız başlığıyla. Olağan alım yoludur (ayrıştırma,
+/// önizleme, kategori, kod ve istenmeyen puanı). Yazılan her posta için
+/// `stored` çağrılır (sonuç, okunmamış mı).
+async fn download(
+    session: &mut ImapSession,
+    store: &Store,
+    info: &MailboxInfo,
+    uidvalidity: Option<u32>,
+    uids: &[u32],
+    mut stored: impl FnMut(UpsertOutcome, bool),
+) -> SyncResult<()> {
+    let now = now_ms();
+    for chunk in uids.chunks(CHUNK) {
+        let set = uid_set(chunk);
+        let sizes: HashMap<u32, u32> = session
+            .uid_fetch(&set, "(UID RFC822.SIZE)")
+            .await?
+            .try_collect::<Vec<Fetch>>()
+            .await?
+            .iter()
+            .filter_map(|f| Some((f.uid?, f.size.unwrap_or(0))))
+            .collect();
+        let (small, big): (Vec<u32>, Vec<u32>) = chunk
+            .iter()
+            .copied()
+            .filter(|u| sizes.contains_key(u))
+            .partition(|u| sizes[u] <= MAX_INLINE_BODY);
+        for (uids, query) in [
+            (small, "(UID FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[])"),
+            (
+                big,
+                "(UID FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[HEADER])",
+            ),
+        ] {
+            if uids.is_empty() {
+                continue;
+            }
+            let items = {
+                let fetches: Vec<Fetch> = session
+                    .uid_fetch(uid_set(&uids), query)
+                    .await?
+                    .try_collect()
+                    .await?;
+                let mut items = Vec::with_capacity(fetches.len());
+                for f in fetches
+                    .iter()
+                    .filter(|f| f.uid.is_some_and(|u| uids.contains(&u)))
+                {
+                    match RawFetch::of(f) {
+                        Some(r) => items.push(r),
+                        None => tracing::warn!(uid = ?f.uid, "posta okunamadı, atlandı"),
+                    }
+                }
+                items
+            };
+            for (uid, m) in parse_all(items, info, uidvalidity, now).await? {
+                let Some(m) = m else {
+                    tracing::warn!(uid, "posta ayrıştırılamadı, atlandı");
+                    continue;
+                };
+                let unread = m.unread;
+                stored(store.upsert_message(&m)?, unread);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Sunucuda olup yerelde olmayan UID'lerden indirilecek parti (yeniden
+/// eskiye, en çok `limit`) ve ondan sonra daha eskisinin kalıp kalmadığı.
+/// `skip`: yerelde bilerek bulunmayan UID'ler (kalıcı silinmesi sırada
+/// bekleyenler).
+fn older_batch(
+    server: impl IntoIterator<Item = u32>,
+    have: &HashSet<u32>,
+    skip: &HashSet<u32>,
+    limit: usize,
+) -> (Vec<u32>, bool) {
+    let mut missing: Vec<u32> = server
+        .into_iter()
+        .filter(|u| !have.contains(u) && !skip.contains(u))
+        .collect();
+    missing.sort_unstable_by(|a, b| b.cmp(a));
+    missing.dedup();
+    let more = missing.len() > limit;
+    missing.truncate(limit);
+    (missing, more)
+}
+
+/// Kutunun bir sonraki eski partisini indirir (`messages_older`).
+///
+/// İlk eşitleme yalnız en yeni postaları indirir; burada sunucunun filigrana
+/// (görülen en büyük UID) kadarki UID'lerinden yerelde olmayanların en yeni
+/// `OLDER_BATCH` tanesi alınır. Sınır "yereldeki en küçük UID" değil küme
+/// farkıdır: yarıda kalan bir indirmenin bıraktığı boşluk da, yerelde hiç
+/// postası kalmamış kutu da aynı yoldan tamamlanır. Filigranın üstündeki
+/// (yeni gelen) postalara dokunulmaz; onları olağan eşitleme bildirimle
+/// indirir. Bu yoldan inen posta bildirim, kural ya da elek tetiklemez.
+///
+/// Kutu henüz eşitlenmediyse ya da UIDVALIDITY değiştiyse hiçbir şey
+/// indirilmez (`more` doğru döner): kutuyu önce olağan eşitleme kurar.
+pub async fn fetch_older(
+    session: &mut ImapSession,
+    store: &Store,
+    info: &MailboxInfo,
+    skip: &HashSet<u32>,
+) -> SyncResult<OlderOutcome> {
+    let id = info.mailbox.id.as_str();
+    let mb = session.examine(&info.mailbox.path).await?;
+    if mb.exists == 0 {
+        return Ok(OlderOutcome::default());
+    }
+    if info.uidvalidity.is_none() || info.uidvalidity != mb.uid_validity || info.highest_uid == 0 {
+        return Ok(OlderOutcome {
+            fetched: 0,
+            more: true,
+        });
+    }
+    let server: HashSet<u32> =
+        crate::checked::uid_search(session, &format!("UID 1:{}", info.highest_uid)).await?;
+    let have: HashSet<u32> = store
+        .local_uids(id)?
+        .into_iter()
+        .map(|(_, uid, ..)| uid)
+        .collect();
+    let (batch, more) = older_batch(
+        server.into_iter().filter(|u| *u <= info.highest_uid),
+        &have,
+        skip,
+        OLDER_BATCH,
+    );
+    let mut fetched = 0u32;
+    download(session, store, info, mb.uid_validity, &batch, |r, _| {
+        if r.inserted {
+            fetched += 1;
+        }
+    })
+    .await?;
+    if !more {
+        // Parti eksiksiz indi ve gerisi yok: kutunun başına ulaşıldı.
+        store.set_mailbox_older_done(id, true)?;
+    }
+    Ok(OlderOutcome { fetched, more })
+}
+
 /// Kutuyu sunucuyla eşitler. `notify` doğruysa yeni okunmamış postalar
 /// sonuçta listelenir (ilk eşitleme hariç).
 pub async fn sync_mailbox(
@@ -221,73 +379,31 @@ pub async fn sync_mailbox(
         .collect();
     let new_uids = to_fetch(server_uids, &have);
 
-    let now = now_ms();
-    for chunk in new_uids.chunks(CHUNK) {
-        let set = uid_set(chunk);
-        let sizes: HashMap<u32, u32> = session
-            .uid_fetch(&set, "(UID RFC822.SIZE)")
-            .await?
-            .try_collect::<Vec<Fetch>>()
-            .await?
-            .iter()
-            .filter_map(|f| Some((f.uid?, f.size.unwrap_or(0))))
-            .collect();
-        let (small, big): (Vec<u32>, Vec<u32>) = chunk
-            .iter()
-            .copied()
-            .filter(|u| sizes.contains_key(u))
-            .partition(|u| sizes[u] <= MAX_INLINE_BODY);
-        for (uids, query) in [
-            (small, "(UID FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[])"),
-            (
-                big,
-                "(UID FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[HEADER])",
-            ),
-        ] {
-            if uids.is_empty() {
-                continue;
+    download(
+        session,
+        store,
+        info,
+        mb.uid_validity,
+        &new_uids,
+        |r, unread| {
+            out.changed = true;
+            if r.inserted && unread && notify && !initial {
+                out.new_unread.push(r.id);
             }
-            let items = {
-                let fetches: Vec<Fetch> = session
-                    .uid_fetch(uid_set(&uids), query)
-                    .await?
-                    .try_collect()
-                    .await?;
-                let mut items = Vec::with_capacity(fetches.len());
-                for f in fetches
-                    .iter()
-                    .filter(|f| f.uid.is_some_and(|u| uids.contains(&u)))
-                {
-                    match RawFetch::of(f) {
-                        Some(r) => items.push(r),
-                        None => tracing::warn!(uid = ?f.uid, "posta okunamadı, atlandı"),
-                    }
-                }
-                items
-            };
-            for (uid, m) in parse_all(items, info, mb.uid_validity, now).await? {
-                let Some(m) = m else {
-                    tracing::warn!(uid, "posta ayrıştırılamadı, atlandı");
-                    continue;
-                };
-                let unread = m.unread;
-                let r = store.upsert_message(&m)?;
-                out.changed = true;
-                if r.inserted && unread && notify && !initial {
-                    out.new_unread.push(r.id);
-                }
-            }
-        }
-    }
+        },
+    )
+    .await?;
     store.set_mailbox_sync_state(id, mb.uid_validity, mb.uid_next, watermark)?;
 
     // 2) Sunucuda silinenler ve bayrak değişiklikleri
     let local = store.local_uids(id)?;
     if let Some(&(_, min_uid, _, _)) = local.first() {
+        // Durumu denetlenen arama: sunucu aramayı reddederse boş küme "hepsi
+        // silinmiş" diye okunmaz, eşitleme hata verir (yerel postalar kalır).
         let existing: HashSet<u32> = if mb.exists == 0 {
             HashSet::new()
         } else {
-            session.uid_search(format!("UID {min_uid}:*")).await?
+            crate::checked::uid_search(session, &format!("UID {min_uid}:*")).await?
         };
         let gone: Vec<MessageId> = local
             .iter()
@@ -340,6 +456,38 @@ mod tests {
         let have: HashSet<u32> = [9, 4].into_iter().collect();
         assert_eq!(to_fetch(vec![3, 9, 5, 3, 4, 12], &have), vec![12, 5, 3]);
         assert!(to_fetch(vec![], &have).is_empty());
+    }
+
+    #[test]
+    fn daha_eski_parti_yeniden_eskiye_ve_gerisi() {
+        let set = |v: &[u32]| v.iter().copied().collect::<HashSet<u32>>();
+        let have = set(&[8, 9, 10]);
+        let none = HashSet::new();
+        // Yerelde olmayanların en yenileri; gerisi kaldıysa `more`.
+        assert_eq!(
+            older_batch([1, 2, 3, 5, 8, 9, 10], &have, &none, 3),
+            (vec![5, 3, 2], true)
+        );
+        assert_eq!(
+            older_batch([1, 2, 3, 5, 8, 9, 10], &have, &none, 4),
+            (vec![5, 3, 2, 1], false),
+            "parti tam dolunca gerisi yok"
+        );
+        // Aradaki boşluk (yarıda kalmış indirme) da tamamlanır.
+        assert_eq!(
+            older_batch([7, 8, 9, 10], &have, &none, 300),
+            (vec![7], false)
+        );
+        // Kalıcı silinmesi bekleyen UID yeniden indirilmez.
+        assert_eq!(
+            older_batch([4, 5, 6, 8], &have, &set(&[5]), 300),
+            (vec![6, 4], false)
+        );
+        // Hepsi yerelde ya da sunucu boş.
+        assert_eq!(older_batch([8, 9], &have, &none, 300), (vec![], false));
+        assert_eq!(older_batch([], &have, &none, 300), (vec![], false));
+        // Yerelde hiç posta yok: en yeni parti.
+        assert_eq!(older_batch(1..=5, &none, &none, 2), (vec![5, 4], true));
     }
 
     #[test]

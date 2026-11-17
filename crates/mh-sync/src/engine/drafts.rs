@@ -6,13 +6,11 @@
 //! bilinmiyorsa (ekleme kuyrukta bekliyordu) Message-ID aramasıyla bulunup
 //! silinir. Yerel satır, eşitlemede aynı Message-ID ile yeni UID'yi sahiplenir.
 
-use futures::TryStreamExt;
 use mh_core::{AppError, AppResult, ErrorCode, MailboxRole, MessageId, Millis};
 use mh_store::{Action, MessageLocation, NewMessage, ServerRef};
 
-use super::{ensure_mailbox, store_flags, Conn, SyncManager};
+use super::{ensure_mailbox, expunge_uids, Conn, SyncManager};
 use crate::error::SyncResult;
-use crate::mailbox::uid_set;
 
 /// Sunucudan kaldırılacak eski taslak kopyası (sunucudaki yeri: taşıması
 /// bekleyen postada kaynak kutu).
@@ -171,13 +169,7 @@ pub(super) async fn apply(
         if uids.is_empty() {
             continue;
         }
-        let set = uid_set(&uids);
-        store_flags(conn, &set, "+FLAGS.SILENT (\\Deleted)").await?;
-        if conn.has_uidplus {
-            let _: Vec<u32> = conn.session.uid_expunge(&set).await?.try_collect().await?;
-        } else {
-            let _: Vec<u32> = conn.session.expunge().await?.try_collect().await?;
-        }
+        expunge_uids(conn, &uids).await?;
         if !touched.iter().any(|t| t == path) {
             touched.push(path.to_owned());
         }
