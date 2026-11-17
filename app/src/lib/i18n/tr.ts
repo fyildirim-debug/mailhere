@@ -1202,6 +1202,15 @@ export const tr = {
   // Mobil okuma: komşu postaya geçiş (kaydırmanın menüdeki karşılığı).
   'mob.read.prev': 'Önceki posta',
   'mob.read.next': 'Sonraki posta',
+  // Yazma: gönderim öncesi denetimler.
+  'compose.badRecipient': '{field} alanındaki "{part}" geçerli bir adres değil. Düzelt ya da sil; posta henüz gönderilmedi.',
+  'compose.check.noAttachTitle': 'Ek eklemeden gönderilsin mi?',
+  'compose.check.noAttachBody': 'Metinde "{word}" geçiyor ama postada ek yok. Dosya ekleyeceksen vazgeç ve ekle.',
+  'compose.check.noSubjectTitle': 'Konu olmadan gönderilsin mi?',
+  'compose.check.noSubjectBody': 'Konu satırı boş. Alıcı postanın ne hakkında olduğunu listede göremez; vazgeçip bir konu yazabilirsin.',
+  'compose.check.bothTitle': 'Konu ve ek olmadan gönderilsin mi?',
+  'compose.check.sendAnyway': 'Yine de gönder',
+  'compose.check.scheduleAnyway': 'Yine de zamanla',
 } as const;
 
 export type MessageKey = keyof typeof tr;

@@ -1186,4 +1186,13 @@ export const en: Record<MessageKey, string> = {
   // Mobil okuma: komşu postaya geçiş (kaydırmanın menüdeki karşılığı).
   'mob.read.prev': 'Previous message',
   'mob.read.next': 'Next message',
+  // Yazma: gönderim öncesi denetimler.
+  'compose.badRecipient': '"{part}" in the {field} field is not a valid address. Fix or remove it; the message has not been sent yet.',
+  'compose.check.noAttachTitle': 'Send without an attachment?',
+  'compose.check.noAttachBody': 'The text says "{word}" but nothing is attached. To add a file, cancel and attach it.',
+  'compose.check.noSubjectTitle': 'Send without a subject?',
+  'compose.check.noSubjectBody': 'The subject line is empty. The recipient will not see what the message is about in their list; you can cancel and write one.',
+  'compose.check.bothTitle': 'Send without a subject or an attachment?',
+  'compose.check.sendAnyway': 'Send anyway',
+  'compose.check.scheduleAnyway': 'Schedule anyway',
 };

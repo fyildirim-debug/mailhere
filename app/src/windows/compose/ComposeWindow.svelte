@@ -25,11 +25,16 @@
   import { showToast } from '../../lib/ui/toast.svelte';
   import WindowControls from '../../lib/ui/WindowControls.svelte';
   import FollowUpMenu from '../../lib/mail/FollowUpMenu.svelte';
+  import { sendIssues, splitRecipients, type SendIssues } from '../../lib/mail/precheck';
   import { settings } from '../../lib/stores/settings.svelte';
   import { initLock, isLocked, lock } from '../../lib/stores/lock.svelte';
   import { isMobileShell } from '../../lib/shell';
   import { baseSubject, displayName, fileSize, snoozeOptions } from '../../lib/util/format';
+  import { parseAddress } from '../../lib/util/recipients';
   import { fillVariables } from '../../lib/util/variables';
+  import SendConfirm from './SendConfirm.svelte';
+
+  type Field = 'to' | 'cc' | 'bcc';
 
   interface Props {
     mode: ComposeMode;
@@ -73,9 +78,15 @@
   let followUpAt = $state<number | null>(null);
   let queued = $state<{ id: string; at: number } | null>(null);
   let error = $state<string | null>(null);
+  /** Hata, bu alıcı alanında kalan geçersiz parçayı söylüyor; alan düzenlenince kalkar. */
+  let badField: Field | null = null;
+  /** Gönderim öncesi onay bekleyen durumlar (unutulmuş ek, boş konu). */
+  let confirm = $state<SendIssues | null>(null);
+  /** Yanıtta ve iletmede özgün postadan gelen konu; ek sözcüğü aranırken sayılmaz. */
+  let prefilledSubject = '';
   let bodyEl = $state<HTMLTextAreaElement>();
-  let drafts = $state<Record<'to' | 'cc' | 'bcc', string>>({ to: '', cc: '', bcc: '' });
-  let suggest = $state<{ field: 'to' | 'cc' | 'bcc'; items: Address[]; active: number } | null>(null);
+  let drafts = $state<Record<Field, string>>({ to: '', cc: '', bcc: '' });
+  let suggest = $state<{ field: Field; items: Address[]; active: number } | null>(null);
   let suggestTimer: ReturnType<typeof setTimeout> | null = null;
   /** Gömülü (mobil): son yazışılan kişiler; Kime boşken ve odaktayken çip olarak. */
   let recentPeople = $state<Address[]>([]);
@@ -250,7 +261,7 @@
       .join('\n');
     const header = t('compose.wrote', { date: when(d.date), name: displayName(d.from) });
     if (mode === 'forward') {
-      subject = `Fwd: ${baseSubject(d.subject)}`;
+      subject = prefilledSubject = `Fwd: ${baseSubject(d.subject)}`;
       body = `\n\n${t('compose.forwarded')}\n${displayName(d.from)} <${d.from.email}>\n${when(d.date)}\n${d.subject}\n\n${d.bodyText ?? d.snippet}`;
       if (d.attachments.length) {
         forwardFrom = d.id;
@@ -258,7 +269,7 @@
       }
       return;
     }
-    subject = `Re: ${baseSubject(d.subject)}`;
+    subject = prefilledSubject = `Re: ${baseSubject(d.subject)}`;
     to = (d.replyTo.length ? d.replyTo : [d.from]).filter(notMe);
     if (!to.length) to = d.to.filter(notMe);
     if (mode === 'replyAll') {
@@ -376,24 +387,19 @@
     await close();
   }
 
-  function parse(text: string): Address | null {
-    const m = text.trim().match(/^(?:"?([^"<]*?)"?\s*<)?([^\s<>@]+@[^\s<>@]+\.[^\s<>@]+)>?$/);
-    if (!m) return null;
-    return { name: m[1]?.trim() || null, email: m[2] };
-  }
-
-  function commit(field: 'to' | 'cc' | 'bcc') {
-    const parts = drafts[field].split(/[,;\n]+/).map((x) => x.trim()).filter(Boolean);
+  /** Alana yazılanı çiplere çevirir; adres olmayan parçalar alanda kalır ve döner. */
+  function commit(field: Field): string[] {
     const bad: string[] = [];
     const list = field === 'to' ? to : field === 'cc' ? cc : bcc;
-    for (const p of parts) {
-      const a = parse(p);
+    for (const p of splitRecipients(drafts[field])) {
+      const a = parseAddress(p);
       if (a && !list.some((x) => same(x, a))) {
         list.push(a);
         recipientAdded();
       } else if (!a) bad.push(p);
     }
     drafts[field] = bad.join(', ');
+    return bad;
   }
 
   /** Alıcı eklenince "En az bir alıcı ekle." uyarısı kalkar (başka hata kalır). */
@@ -401,7 +407,7 @@
     if (error === t('compose.needRecipient')) error = null;
   }
 
-  function onRecipientKey(field: 'to' | 'cc' | 'bcc', e: KeyboardEvent) {
+  function onRecipientKey(field: Field, e: KeyboardEvent) {
     const list = field === 'to' ? to : field === 'cc' ? cc : bcc;
     if (suggest?.field === field) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -431,12 +437,17 @@
     }
   }
 
-  function removeAt(field: 'to' | 'cc' | 'bcc', i: number) {
+  function removeAt(field: Field, i: number) {
     (field === 'to' ? to : field === 'cc' ? cc : bcc).splice(i, 1);
   }
 
   /** Yazılan parçaya uyan adresleri geçmiş postalardan önerir. */
-  function lookup(field: 'to' | 'cc' | 'bcc') {
+  function lookup(field: Field) {
+    // Geçersiz parça düzeltiliyor: uyarı kalkar, gönderimde yeniden bakılır.
+    if (badField === field) {
+      badField = null;
+      error = null;
+    }
     if (suggestTimer) clearTimeout(suggestTimer);
     const q = drafts[field].trim();
     if (q.length < 2) {
@@ -486,7 +497,7 @@
     recentPeople = [...seen.values()];
   }
 
-  function pick(field: 'to' | 'cc' | 'bcc', a: Address) {
+  function pick(field: Field, a: Address) {
     const list = field === 'to' ? to : field === 'cc' ? cc : bcc;
     if (!list.some((x) => same(x, a))) {
       list.push(a);
@@ -536,19 +547,41 @@
     if (!locked) laterOpen = true;
   }
 
-  /** Gönderir (kapsayıcı da çağırır: mobilde düğme uygulama çubuğunda). */
+  const FIELD_LABELS: Record<Field, MessageKey> = { to: 'compose.to', cc: 'compose.cc', bcc: 'compose.bcc' };
+
+  /** Gönderir (kapsayıcı da çağırır: mobilde düğme uygulama çubuğunda). Zamanlanmış gönderim de buradan geçer. */
   export async function send() {
-    if (locked) return;
+    await deliver(false);
+  }
+
+  /**
+   * Gönderimden önce: alıcı alanlarında adres olmayan parça kalmışsa durur ve
+   * hangisi olduğunu söyler; ek unutulmuş görünüyorsa ya da konu boşsa onay
+   * sorar (`confirmed`: onay verildi).
+   */
+  async function deliver(confirmed: boolean) {
+    if (locked || confirm) return;
     error = null;
-    commit('to');
-    commit('cc');
-    commit('bcc');
+    badField = null;
+    for (const field of ['to', 'cc', 'bcc'] as const) {
+      const bad = commit(field);
+      if (!bad.length) continue;
+      badField = field;
+      error = t('compose.badRecipient', { field: t(FIELD_LABELS[field]), part: bad[0] });
+      document.getElementById(`compose-${field}`)?.focus();
+      return;
+    }
     if (!to.length && !cc.length && !bcc.length) {
       error = t('compose.needRecipient');
       return;
     }
     const msg = outgoing();
     if (!from || !msg) return;
+    if (!confirmed) {
+      const own = prefilledSubject ? subject.trim() !== prefilledSubject : baseSubject(subject) === subject.trim();
+      confirm = sendIssues({ subject, body, hasAttachments: attachments.length + carried.length > 0, subjectIsOwn: own });
+      if (confirm) return;
+    }
     if (draftTimer) clearTimeout(draftTimer);
     sending = true;
     try {
@@ -565,6 +598,19 @@
     } finally {
       sending = false;
     }
+  }
+
+  /** Onay verildi: denetimler yeniden sorulmadan gönderilir. */
+  function confirmSend() {
+    confirm = null;
+    void deliver(true);
+  }
+
+  /** Vazgeçildi: odak eksik olan yere gider (boş konu ya da ek düğmesi). */
+  function cancelSend() {
+    const target = confirm?.noSubject ? 'compose-subject' : 'compose-attach';
+    confirm = null;
+    queueMicrotask(() => document.getElementById(target)?.focus());
   }
 
   async function undo() {
@@ -649,7 +695,7 @@
 
     {#each [{ key: 'to', label: 'compose.to', list: to, show: true }, { key: 'cc', label: 'compose.cc', list: cc, show: showCc }, { key: 'bcc', label: 'compose.bcc', list: bcc, show: showBcc }] as row (row.key)}
       {#if row.show}
-        {@const field = row.key as 'to' | 'cc' | 'bcc'}
+        {@const field = row.key as Field}
         <div class="field wrap">
           <label class="flabel" for="compose-{field}">{t(row.label as MessageKey)}</label>
           {#each row.list as a, i (a.email)}
@@ -743,7 +789,7 @@
     <button class="btn-icon small" aria-label={t('compose.link')} title={t('compose.link')} onclick={() => wrap('[', '](https://)')}><Icon name="link" size={16} /></button>
     <button class="btn-icon small" aria-label={t('compose.bullet')} title={t('compose.bullet')} onclick={bullet}><Icon name="list" size={16} /></button>
     <span class="vsep"></span>
-    <button class="btn-icon small" aria-label={t('act.attach')} title={t('act.attach')} onclick={attach} disabled={locked}><Icon name="paperclip" size={16} /></button>
+    <button id="compose-attach" class="btn-icon small" aria-label={t('act.attach')} title={t('act.attach')} onclick={attach} disabled={locked}><Icon name="paperclip" size={16} /></button>
     <button class="btn-icon small" aria-label={t('tpl.insert')} title={t('tpl.insert')} aria-haspopup="menu" onclick={templateMenu} disabled={locked}><Icon name="template" size={16} /></button>
     <span class="grow"></span>
     {#if from?.signatures.length}
@@ -826,6 +872,7 @@
 </div>
 
 {#if menu}<Menu at={menu.at} title={menu.title} items={menu.items} onclose={() => (menu = null)} />{/if}
+{#if confirm}<SendConfirm issues={confirm} scheduled={sendAt != null} onconfirm={confirmSend} oncancel={cancelSend} />{/if}
 
 <style>
   .win {

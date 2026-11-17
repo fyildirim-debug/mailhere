@@ -75,7 +75,7 @@ test('yazma: gönder menüsünden yanıt hatırlatması seçilir ve gönderimle 
   await to.fill('yeni.kisi@ornek.com');
   await to.press('Enter');
   await page.locator('#compose-subject').fill('Teklif');
-  await page.getByRole('textbox', { name: 'Posta metni' }).fill('Ekte.');
+  await page.getByRole('textbox', { name: 'Posta metni' }).fill('Teklifi yarın konuşalım.');
 
   await page.getByRole('button', { name: 'Sonra gönder' }).click();
   const menu = page.getByRole('group', { name: 'Yanıt gelmezse hatırlat' });
