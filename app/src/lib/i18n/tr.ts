@@ -1243,6 +1243,9 @@ export const tr = {
   'mob.purge.emptyJunk': 'İstenmeyen\'i boşalt',
   'mob.purge.emptyTrashConfirm': 'Çöpteki tüm postalar kalıcı silinsin mi?',
   'mob.purge.emptyJunkConfirm': 'İstenmeyen\'deki tüm postalar kalıcı silinsin mi?',
+  // Mobil 0.11: daha eski postalar.
+  'mob.older.busy': 'Daha eski postalar indiriliyor…',
+  'mob.older.done': 'Hepsi bu kadar',
 } as const;
 
 export type MessageKey = keyof typeof tr;

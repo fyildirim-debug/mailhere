@@ -1227,4 +1227,7 @@ export const en: Record<MessageKey, string> = {
   'mob.purge.emptyJunk': 'Empty Junk',
   'mob.purge.emptyTrashConfirm': 'Delete every message in Trash forever?',
   'mob.purge.emptyJunkConfirm': 'Delete every message in Junk forever?',
+  // Mobile 0.11: older mail.
+  'mob.older.busy': 'Downloading older mail…',
+  'mob.older.done': 'That is everything',
 };

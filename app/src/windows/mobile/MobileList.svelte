@@ -11,7 +11,9 @@
   // Çöp ve İstenmeyen görünümlerinde (`purgeRole`) "Sil" kaydırması "Kalıcı
   // sil" olur: satır yerine döner, onay alt sayfası açılır. İstenmeyen
   // kutusunda "İstenmeyen" kaydırması "İstenmeyen değil"dir.
-  import { onMount, untrack } from 'svelte';
+  // Yerel sayfalar bitince listenin sonunda "Daha eski postalar" düğmesi
+  // sunucudan bir sonraki partiyi ister; kalmayınca "Hepsi bu kadar" yazar.
+  import { onMount, tick, untrack } from 'svelte';
   import { fade } from 'svelte/transition';
   import { call, toAppError, type Category, type MessageId, type SwipeAction } from '../../lib/api';
   import { t, type MessageKey } from '../../lib/i18n/index.svelte';
@@ -23,7 +25,7 @@
   import Menu, { type MenuItem } from '../../lib/ui/Menu.svelte';
   import { showToast } from '../../lib/ui/toast.svelte';
   import { bulkMoveToFolder, bulkSetUnread, setPinned } from '../../lib/stores/bulk.svelte';
-  import { deleteForever, purgeRole, trustSenderOf } from '../../lib/stores/guard.svelte';
+  import { deleteForever, loadOlder, older, olderAvailable, purgeRole, trustSenderOf } from '../../lib/stores/guard.svelte';
   import { loadMore, mail, moveTo, refreshCounts, refreshList, rowsOf, setCategory, snooze, type Row } from '../../lib/stores/mail.svelte';
   import { isChecked, openRow, toggleCheck } from '../../lib/stores/selection.svelte';
   import { settings } from '../../lib/stores/settings.svelte';
@@ -87,8 +89,39 @@
   /** Çöp ya da İstenmeyen görünümü: silme kalıcıdır ve onay ister. */
   const purge = $derived(purgeRole(mail.view));
 
+  // ------------------------------------------------------ daha eski postalar
+  // Durum `guard`dadır ve görünüme bağlıdır: başka görünümün "bitti" bilgisi
+  // burada gösterilmez (anahtar `guard`daki ile aynı biçimde kurulur).
+  const olderHere = $derived(older.key === JSON.stringify([mail.view, mail.accountId]));
+  const plain = $derived(mail.search == null && mail.category == null && mail.only == null);
+  const olderState = $derived.by((): 'more' | 'busy' | 'done' | null => {
+    if (!rows.length) return null;
+    if (olderHere && older.busy) return 'busy';
+    if (olderAvailable()) return 'more';
+    return olderHere && older.done && plain && !mail.nextCursor ? 'done' : null;
+  });
+
+  /**
+   * Bir sonraki eski partiyi ister. İndirme listeyi ilk sayfasından yeniden
+   * kurar; okurun bulunduğu yere dek sayfalar yeniden yüklenir ve kaydırma
+   * konumu korunur (yeni postalar düğmenin yerinde, hemen altta belirir).
+   */
+  async function fetchOlder() {
+    if (older.busy) return;
+    const had = mail.items.length;
+    const top = scroller?.scrollTop ?? 0;
+    await loadOlder();
+    for (let n = mail.items.length; mail.nextCursor && n < had; n = mail.items.length) {
+      await loadMore();
+      if (mail.items.length === n) break;
+    }
+    await tick();
+    if (scroller && scroller.scrollTop < top) scroller.scrollTop = top;
+  }
+
+  // Alt boşluk (yüzen düğmenin payı) düğme varken düğmenin altındadır.
   const layout = $derived(
-    buildLayout(rows, { rowH, groupH, tail: 104, groupOf: (m) => groupOf(m, ctx), groupLabel, rowKey: (m) => `m-${m.id}` }),
+    buildLayout(rows, { rowH, groupH, tail: olderState ? 0 : 104, groupOf: (m) => groupOf(m, ctx), groupLabel, rowKey: (m) => `m-${m.id}` }),
   );
   const visible = $derived(visibleEntries(layout.entries, scrollTop - headH, viewport, OVERSCAN));
   /** Birleşik görünüm (birden çok hesap, hesap seçili değil): satırda hesap rengi karesi. */
@@ -415,6 +448,19 @@
           </div>
         {/each}
       </div>
+      {#if olderState}
+        <div class="older">
+          {#if olderState === 'done'}
+            <span class="older-done" role="status">{t('mob.older.done')}</span>
+          {:else}
+            <!-- Beklerken düğme yerinde kalır (odak kaybolmaz); ikinci dokunuş yok sayılır. -->
+            <button class="btn-soft" aria-busy={olderState === 'busy'} onclick={() => void fetchOlder()}>
+              <span class="older-icon" class:spin={olderState === 'busy'}><Icon name={olderState === 'busy' ? 'refresh' : 'arrowDown'} size={18} /></span>
+              {olderState === 'busy' ? t('mob.older.busy') : t('list.loadMore')}
+            </button>
+          {/if}
+        </div>
+      {/if}
     {:else if mail.loading}
       <div class="m-empty">
         <span class="meta">{t('mob.loading')}</span>
@@ -593,6 +639,31 @@
     color: var(--ink-3);
   }
 
+  /* Listenin sonu: daha eski postalar düğmesi; altında yüzen düğmenin payı. */
+  .older {
+    flex: none;
+    display: flex;
+    justify-content: center;
+    padding: 12px var(--m-gutter) 104px;
+  }
+
+  .older-icon {
+    display: inline-flex;
+    color: var(--ink-3);
+  }
+
+  .older-icon.spin {
+    animation: spin 0.9s linear infinite;
+  }
+
+  .older-done {
+    display: flex;
+    align-items: center;
+    min-height: var(--m-touch);
+    font-size: var(--fs-meta);
+    color: var(--ink-3);
+  }
+
   @keyframes spin {
     to {
       transform: rotate(360deg);
@@ -605,7 +676,8 @@
       transition: none;
     }
 
-    .pull-icon.spin {
+    .pull-icon.spin,
+    .older-icon.spin {
       animation: none;
     }
   }
