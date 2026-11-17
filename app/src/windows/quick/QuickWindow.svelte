@@ -11,6 +11,7 @@
   import MailBody from '../../lib/mail/MailBody.svelte';
   import QuickRepliesEditor from '../../lib/mail/QuickRepliesEditor.svelte';
   import SnoozeMenu from '../../lib/mail/SnoozeMenu.svelte';
+  import SpamNotice from '../../lib/mail/SpamNotice.svelte';
   import { baseSubject, displayName, fileSize, foreignReplyDomains } from '../../lib/util/format';
   import { fillVariables } from '../../lib/util/variables';
   import { locale } from '../../lib/i18n/index.svelte';
@@ -228,6 +229,8 @@
         <span class="meta num">{when(d.date)}</span>
       </div>
       <h1 class="selectable">{d.subject || '—'}</h1>
+      <!-- Şüpheli posta: nedenler burada da yazar; engelleme ve "Güvenli" için posta uygulamada açılır. -->
+      {#if d.spamVerdict}<SpamNotice detail={d} verdict={d.spamVerdict} readonly />{/if}
       <div class="body">
         <MailBody id={d.id} text={d.bodyText} html={d.bodyHtml} remoteAllowed={d.remoteAllowed} bind:original />
       </div>

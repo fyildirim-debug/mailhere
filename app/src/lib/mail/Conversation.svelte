@@ -4,7 +4,8 @@
   // olmayan ileti açılınca indirilir.
   import { untrack } from 'svelte';
   import { SvelteSet } from 'svelte/reactivity';
-  import { call, toAppError, type MessageDetail, type MessageId } from '../api';
+  import type { Snippet } from 'svelte';
+  import { call, toAppError, type Attachment, type MessageDetail, type MessageId } from '../api';
   import { t, when } from '../i18n/index.svelte';
   import Avatar from '../ui/Avatar.svelte';
   import Icon from '../ui/Icon.svelte';
@@ -16,9 +17,11 @@
   interface Props {
     /** Listede seçili ileti; konuşma onun hesabı ve kimliğiyle yüklenir. */
     selected: MessageDetail;
+    /** Her iletinin ek kartlarına aktarılır (bkz. MessageView `attachmentActions`). */
+    attachmentActions?: Snippet<[Attachment, MessageDetail]>;
   }
 
-  let { selected }: Props = $props();
+  let { selected, attachmentActions }: Props = $props();
 
   let items = $state<MessageDetail[]>([]);
   let loading = $state(false);
@@ -155,7 +158,7 @@
                 </button>
               {/if}
               <!-- Seçili iletinin yanıtla / ilet düğmeleri araç çubuğunda (mobilde alt şeritte). -->
-              <MessageView detail={m} actions={m.id !== selected.id} onupdate={update} />
+              <MessageView detail={m} actions={m.id !== selected.id} onupdate={update} {attachmentActions} />
             </div>
           {:else}
             <button class="prior" aria-expanded="false" aria-label={t('conv.expand', { name: label(m) })} onclick={() => toggle(m)}>

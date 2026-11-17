@@ -13,8 +13,7 @@ const SRC = join(__dirname, '..', '..');
 
 /** Bilerek bekleyen anahtarlar: kullanımı yolda olanlar ve henüz karar verilmemiş eskiler. */
 const WAITING = new Set([
-  // Yolda: daha fazla yükle, tüm ekleri indir.
-  'list.loadMore',
+  // Yolda: tüm ekleri indir.
   'act.downloadAll',
   // Eski ayar başlıkları; silinip silinmeyeceğine karar verilmedi.
   'set.notifications',

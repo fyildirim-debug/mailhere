@@ -51,6 +51,8 @@ export type SettingsSection =
 export type AccountTab = 'general' | 'signatures' | 'server' | 'folders' | 'vacation';
 
 const PAGE = 100;
+/** Yenilemede korunan en büyük liste derinliği (posta). */
+const KEEP_MAX = 1000;
 
 export const mail = $state({
   ready: false,
@@ -196,11 +198,24 @@ export async function refreshList(keepSelection = true) {
       if ((!keepSelection || mail.selectedId == null) && items.length) void select(items[0].id, { markRead: false });
       return;
     }
-    const page = await call('messages_list', {
+    // Yenilemede (yeni posta, bayrak, daha eski postalar) yüklenmiş derinlik korunur:
+    // aşağı kaydırılmış liste ilk sayfaya kısalıp kaydırma konumunu kaybetmez.
+    const want = keepSelection ? Math.min(mail.items.length, KEEP_MAX) : 0;
+    let page = await call('messages_list', {
       query: { view: mail.view, accountId: mail.accountId, category: mail.category, only: mail.only, cursor: null, limit: PAGE },
     });
     if (token !== listToken) return;
-    mail.items = page.items;
+    let items = page.items;
+    while (page.nextCursor && items.length < want) {
+      page = await call('messages_list', {
+        query: { view: mail.view, accountId: mail.accountId, category: mail.category, only: mail.only, cursor: page.nextCursor, limit: PAGE },
+      });
+      if (token !== listToken) return;
+      if (!page.items.length) break;
+      const known = new Set(items.map((m) => m.id));
+      items = [...items, ...page.items.filter((m) => !known.has(m.id))];
+    }
+    mail.items = items;
     mail.nextCursor = page.nextCursor;
     pruneChecked();
     // Seçili posta bu görünümde yoksa okuma alanı açık kalır; liste yalnız vurguyu kaybeder.

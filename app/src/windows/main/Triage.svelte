@@ -9,6 +9,7 @@
   import { KEY_LABEL, type Shortcut } from '../../lib/util/keys';
   import { mail, selectedIds, setUnread, setView, toggleStar } from '../../lib/stores/mail.svelte';
   import Reader from './Reader.svelte';
+  import { purgeable } from './purge';
   import { teach, type Teachable } from './teach.svelte';
   import { archiveCurrent, back, deleteCurrent, finished, progress, skip, snoozeCurrent, stopTriage } from './triage-state.svelte';
 
@@ -47,6 +48,8 @@
   }
 
   const starred = $derived(mail.detail?.starred ?? false);
+  /** Çöp ya da İstenmeyen'deki postada "Sil" kalıcı siler (onaylı; kısayol öğretilmez). */
+  const purge = $derived(purgeable(selectedIds()));
 
   const acts = $derived<Act[]>([
     {
@@ -77,7 +80,13 @@
         void teach('reply', e);
       },
     },
-    { key: 'delete', label: t('act.delete'), icon: 'trash', kbd: KEY_LABEL.delete!, run: (e) => void teach('delete', e, deleteCurrent()) },
+    {
+      key: 'delete',
+      label: t(purge ? 'purge.delete' : 'act.delete'),
+      icon: 'trash',
+      kbd: KEY_LABEL.delete!,
+      run: (e) => (purge ? void deleteCurrent() : void teach('delete', e, deleteCurrent())),
+    },
     {
       key: 'star',
       label: starred ? t('act.unstar') : t('act.star'),

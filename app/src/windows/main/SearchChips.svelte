@@ -1,9 +1,11 @@
 <script lang="ts">
   // Arama sonuçlarının üstündeki süzgeç çipleri: Kimden, Tarih, Ekli,
-  // Okunmamış, Hesap. Çip seçimi sorgu metnine işleç olarak yazılır ve arama
-  // yeniden çalışır; çipin durumu da metinden okunur (doğruluk kaynağı metin).
+  // Okunmamış, Hesap ve "Diğer" (kod içeren, şüpheli, okunmuş, boyut). Çip
+  // seçimi sorgu metnine işleç olarak yazılır ve arama yeniden çalışır; çipin
+  // durumu da metinden okunur (doğruluk kaynağı metin). "Diğer"deki süzgeçler
+  // yalnız etkinken kendi çipleriyle görünür: satır kalabalıklaşmaz.
   import { t } from '../../lib/i18n/index.svelte';
-  import { presetDate, readChips, withOp, type ChipOp, type DatePreset } from '../../lib/mail/query';
+  import { presetDate, readChips, SIZE_PRESETS, sizeLabel, withOp, type ChipOp, type DatePreset } from '../../lib/mail/query';
   import Icon from '../../lib/ui/Icon.svelte';
   import Menu, { type MenuItem } from '../../lib/ui/Menu.svelte';
   import { displayName } from '../../lib/util/format';
@@ -73,6 +75,32 @@
     };
   }
 
+  /** "Diğer": aç-kapa süzgeçler ve hazır boyutlar; işaret sorgudaki duruma göre. */
+  function moreMenu(e: MouseEvent) {
+    menu = {
+      at: anchor(e),
+      title: t('chip.moreTitle'),
+      items: [
+        { label: t('chip.code'), checked: chips.code, onclick: () => set('code', !chips.code) },
+        { label: t('chip.spam'), checked: chips.spam, onclick: () => set('spam', !chips.spam) },
+        { label: t('chip.read'), checked: chips.read, onclick: () => set('read', !chips.read) },
+        ...SIZE_PRESETS.map((v) => ({
+          key: `size-${v}`,
+          label: t('chip.sizeOver', { size: sizeLabel(v) }),
+          checked: chips.larger === v,
+          onclick: () => set('larger', chips.larger === v ? null : v),
+        })),
+      ],
+    };
+  }
+
+  /** Boyut çipinin değeri: "5 MB üstü", "100 KB altı" ya da ikisi. */
+  const sizeName = $derived(
+    [chips.larger ? t('chip.sizeOver', { size: sizeLabel(chips.larger) }) : null, chips.smaller ? t('chip.sizeUnder', { size: sizeLabel(chips.smaller) }) : null]
+      .filter(Boolean)
+      .join(' · ') || null,
+  );
+
   /** Seçili çipin kısa değeri. */
   function accountName(v: string) {
     const lower = v.toLocaleLowerCase('tr');
@@ -126,6 +154,19 @@
   {#if multiAccount}
     {@render menuChip('account', t('chip.account'), chips.account ? accountName(chips.account) : null, accountMenu)}
   {/if}
+  {#if chips.code}
+    <button class="chip on" aria-pressed="true" onclick={() => set('code', false)}>{t('chip.code')}</button>
+  {/if}
+  {#if chips.spam}
+    <button class="chip on" aria-pressed="true" onclick={() => set('spam', false)}><Icon name="alert" size={14} />{t('chip.spam')}</button>
+  {/if}
+  {#if chips.read}
+    <button class="chip on" aria-pressed="true" onclick={() => set('read', false)}>{t('chip.read')}</button>
+  {/if}
+  {#if sizeName}
+    {@render menuChip('larger', t('chip.size'), sizeName, moreMenu, 'smaller')}
+  {/if}
+  <button class="chip" aria-haspopup="menu" aria-label={t('chip.moreTitle')} onclick={moreMenu}>{t('chip.more')}<Icon name="chevronDown" size={14} /></button>
 </div>
 
 {#if menu}<Menu at={menu.at} title={menu.title} items={menu.items} onclose={() => (menu = null)} />{/if}

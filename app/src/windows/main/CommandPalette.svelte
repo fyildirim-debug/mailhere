@@ -2,12 +2,13 @@
   // Komut paleti (Ctrl K, /): arama, komutlar, postalar ve kişiler. Her
   // komutun kısayolu yanında yazar; komutlar iki dilde (ve eşanlamlılarıyla)
   // bulanık eşleşir, sık kullanılanlar üste çıkar. Arama işleçleri yazılırken
-  // tamamlanır: from: kişi, after: / before: hazır tarih, hesap: hesap.
+  // tamamlanır: from: / kimden:, to: / kime:, cc: kişi, after: / before: hazır
+  // tarih, larger: / smaller: hazır boyut, hesap: hesap.
   import { call, type Address, type MessageSummary } from '../../lib/api';
   import { t, when, type MessageKey } from '../../lib/i18n/index.svelte';
   import { en } from '../../lib/i18n/en';
   import { tr } from '../../lib/i18n/tr';
-  import { completeWith, completing, presetDate, type DatePreset } from '../../lib/mail/query';
+  import { completeWith, completing, presetDate, SIZE_PRESETS, sizeLabel, type DatePreset } from '../../lib/mail/query';
   import Avatar from '../../lib/ui/Avatar.svelte';
   import Icon from '../../lib/ui/Icon.svelte';
   import type { IconName } from '../../lib/ui/icons';
@@ -18,6 +19,7 @@
   import { resolvedTheme, toggleTheme } from '../../lib/stores/settings.svelte';
   import { matchRange, score } from './fuzzy';
   import { desk, showReader, toggleSidebar } from './layout.svelte';
+  import { purgeable, removeMessages } from './purge';
   import { scale, setScale, stepped } from './scale.svelte';
   import { startTriage } from './triage-state.svelte';
 
@@ -140,7 +142,8 @@
     'set-compose': 'yazma gönderme imza geri al undo send signature compose ayar settings',
     'set-accounts': 'hesap sunucu imap smtp parola account server password ayar settings',
     'set-devices': 'cihaz aktar qr telefon device transfer phone ayar settings',
-    'set-privacy': 'gizlilik güvenlik kilit parola uzak içerik privacy security lock remote content ayar settings',
+    'set-privacy':
+      'gizlilik güvenlik kilit parola uzak içerik istenmeyen spam şüpheli engelle engellenen gönderici doğrulama kodu privacy security lock remote content junk suspicious block blocked sender verification code otp ayar settings',
     'set-about': 'güncelleme sürüm hakkında update version about ayar settings',
     tags: 'etiket label',
     templates: 'şablon hazır yanıt template snippet',
@@ -177,7 +180,7 @@
         cmd('archive', 'act.archive', 'archive', () => moveTo(selectedIds(), 'archive'), KEY_LABEL.archive),
         cmd('snooze', 'act.snooze', 'clock', () => snooze(selectedIds(), tomorrow), KEY_LABEL.snooze, `${t('act.snooze')} · ${t('snooze.tomorrow')}`),
         cmd('reply', 'palette.reply', 'reply', () => onopen('reply'), KEY_LABEL.reply),
-        cmd('delete', 'act.delete', 'trash', () => moveTo(selectedIds(), 'trash'), KEY_LABEL.delete),
+        cmd('delete', purgeable(selectedIds()) ? 'purge.delete' : 'act.delete', 'trash', () => removeMessages(selectedIds()), KEY_LABEL.delete),
         cmd('star', 'palette.star', 'star', () => toggleStar(sel), KEY_LABEL.star),
         cmd('unread', 'palette.unread', 'mail', () => setUnread([sel], true), KEY_LABEL.unread),
         cmd('pin', pinned ? 'pin.unpin' : 'pin.pin', 'pin', () => togglePin(selectedIds()), KEY_LABEL.pin),
@@ -256,19 +259,36 @@
   const completions = $derived.by((): { title: MessageKey; items: Item[] } | null => {
     if (!comp) return null;
     const v = comp.value.toLocaleLowerCase('tr');
-    if (comp.kind === 'from') {
+    if (comp.kind === 'from' || comp.kind === 'to' || comp.kind === 'cc') {
+      // Gönderen işlecinde postaların gönderenleri, alıcı işleçlerinde alıcıları önerilir.
+      const kind = comp.kind;
       const seen = new Map<string, Address>();
       for (const m of [...found, ...mail.items]) {
-        const a = m.from;
-        const k = a.email.toLowerCase();
-        if (seen.has(k)) continue;
-        if (v && !`${a.name ?? ''} ${a.email}`.toLocaleLowerCase('tr').includes(v)) continue;
-        seen.set(k, a);
+        for (const a of kind === 'from' ? [m.from] : m.to) {
+          const k = a.email.toLowerCase();
+          if (seen.has(k)) continue;
+          if (v && !`${a.name ?? ''} ${a.email}`.toLocaleLowerCase('tr').includes(v)) continue;
+          seen.set(k, a);
+        }
       }
       const people = [...seen.values()].slice(0, 6);
       return {
         title: 'palette.people',
-        items: people.map((p) => ({ key: `c-${p.email}`, label: displayName(p), meta: p.email, person: p, plain: true, run: () => fill(completeWith(q, 'from', p.email)) })),
+        items: people.map((p) => ({ key: `c-${p.email}`, label: displayName(p), meta: p.email, person: p, plain: true, run: () => fill(completeWith(q, kind, p.email)) })),
+      };
+    }
+    if (comp.kind === 'larger' || comp.kind === 'smaller') {
+      const kind = comp.kind;
+      return {
+        title: 'chip.size',
+        items: SIZE_PRESETS.filter((s) => !v || s.startsWith(v)).map((s) => ({
+          key: `s-${s}`,
+          label: t(kind === 'larger' ? 'chip.sizeOver' : 'chip.sizeUnder', { size: sizeLabel(s) }),
+          meta: `${kind}:${s}`,
+          icon: 'filter' as IconName,
+          plain: true,
+          run: () => fill(completeWith(q, kind, s)),
+        })),
       };
     }
     if (comp.kind === 'account') {
@@ -312,8 +332,9 @@
     if (!comp && matched.length) out.push({ title: 'palette.actions', items: matched });
     // Arama işleçleri: tıklayınca sorguya eklenir, palet açık kalır.
     if (!comp && (!needle || /^\S*$/.test(needle))) {
-      const ops: [string, MessageKey][] = [
-        ['from:', 'palette.op.from'],
+      // Üçüncü öğe: işlecin öteki yazılışları (yazılınca aynı ipucu çıkar).
+      const ops: [string, MessageKey, string[]?][] = [
+        ['from:', 'palette.op.from', ['kimden:']],
         ['has:ek', 'palette.op.attachment'],
         ['is:okunmamış', 'palette.op.unread'],
         ['in:arşiv', 'palette.op.in'],
@@ -321,17 +342,24 @@
         ['after:', 'palette.op.after'],
         ['before:', 'palette.op.before'],
         ...(mail.accounts.length > 1 ? ([['hesap:', 'palette.op.account']] as [string, MessageKey][]) : []),
+        ['to:', 'palette.op.to', ['kime:']],
+        ['cc:', 'palette.op.cc'],
+        ['has:kod', 'palette.op.code', ['has:code']],
+        ['is:şüpheli', 'palette.op.spam', ['is:spam', 'is:supheli']],
+        ['is:okunmuş', 'palette.op.read', ['is:read', 'is:okunmus']],
+        ['larger:', 'palette.op.larger', ['büyük:', 'buyuk:']],
+        ['smaller:', 'palette.op.smaller', ['küçük:', 'kucuk:']],
       ];
       const lower = needle.toLocaleLowerCase('tr');
       const tips = ops
-        .filter(([op]) => !lower || op.startsWith(lower))
+        .filter(([op, , also]) => !lower || op.startsWith(lower) || (also ?? []).some((a) => a.startsWith(lower)))
         .map(([op, meta]) => ({
           key: `op-${op}`,
           label: op,
           meta: t(meta),
           icon: 'filter' as IconName,
           plain: true,
-          run: () => fill(`${needle && !op.startsWith(lower) ? `${needle} ` : ''}${op}`),
+          run: () => fill(op),
         }));
       if (tips.length && !found.length) out.push({ title: 'palette.ops', items: tips.slice(0, needle ? 3 : 5) });
     }

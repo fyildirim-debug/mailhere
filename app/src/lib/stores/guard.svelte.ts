@@ -2,12 +2,13 @@
 // ve mobil arayüzün ortak eylemleri. Bileşenler `call` yerine bunları kullanır ki
 // toast metni, geri alma ve liste yenileme iki kabukta aynı olsun.
 
+import { untrack } from 'svelte';
 import { call, toAppError, type MailboxRole, type MessageId, type View } from '../api';
 import { t } from '../i18n/index.svelte';
 import { copyText } from '../mail/otp';
 import { showToast } from '../ui/toast.svelte';
 import { isLockedError } from './lock.svelte';
-import { mail, refreshCounts, refreshList, restoreAfterUndo, select, setUnread, takeOut } from './mail.svelte';
+import { loadMore, mail, refreshCounts, refreshList, restoreAfterUndo, select, setUnread, takeOut } from './mail.svelte';
 import { settings, updateSettings } from './settings.svelte';
 
 function errorToast(e: unknown) {
@@ -33,7 +34,10 @@ export async function blockSenderOf(id: MessageId): Promise<boolean> {
   try {
     const r = await call('sender_block', { id });
     if (r.ids.length && mail.view.kind === 'inbox') takeOut(r.ids);
-    void refreshList();
+    // Okunan posta yerinde kaldıysa (arşiv, arama sonucu) yeniden yüklenir: uyarı "engelledin" der.
+    void refreshList().then(() => {
+      if (selected != null && mail.selectedId === selected) void select(selected, { markRead: false });
+    });
     void refreshCounts();
     showToast({
       text: r.moved ? t('block.doneMoved', { email: r.address, n: r.moved }) : t('block.done', { email: r.address }),
@@ -103,8 +107,21 @@ export async function deleteForever(ids: MessageId[]): Promise<boolean> {
   }
 }
 
-/** Çöp ya da İstenmeyen kutusunu boşaltır (`mailbox_empty`). Onayı çağıran sorar. */
-export async function emptyMailbox(role: 'trash' | 'junk', accountId: string | null = mail.accountId): Promise<boolean> {
+/**
+ * Boşaltılacak kutunun hesabı: klasör görünümünde o klasörün hesabı (yalnız görünen
+ * kutu boşalsın), diğer görünümlerde hesap kapsamı (null: tüm hesaplar).
+ */
+function emptyScope(): string | null {
+  const view = mail.view;
+  const box = view.kind === 'mailbox' ? mail.mailboxes.find((b) => b.id === view.id) : undefined;
+  return box ? box.accountId : mail.accountId;
+}
+
+/**
+ * Çöp ya da İstenmeyen kutusunu boşaltır (`mailbox_empty`). Onayı çağıran sorar.
+ * Hesap verilmezse açık görünümün kapsamı kullanılır (`emptyScope`).
+ */
+export async function emptyMailbox(role: 'trash' | 'junk', accountId: string | null = emptyScope()): Promise<boolean> {
   try {
     const n = await call('mailbox_empty', { accountId, role });
     showToast({ text: n ? t(role === 'trash' ? 'purge.emptiedTrash' : 'purge.emptiedJunk', { n }) : t('purge.nothing') });
@@ -130,11 +147,38 @@ function olderKey(): string {
   return JSON.stringify([mail.view, mail.accountId]);
 }
 
+// Görünüm (ya da hesap kapsamı) değişince durum sıfırlanır: `older.done` hep açık görünümü anlatır.
+$effect.root(() => {
+  $effect(() => {
+    const key = olderKey();
+    untrack(() => {
+      if (older.key === key) return;
+      older.key = key;
+      older.done = false;
+    });
+  });
+});
+
+/** Görünüm sunucu kutularına karşılık geliyor mu (arama, süzgeç ve sanal görünümlerde hayır). */
+function olderScope(): boolean {
+  if (mail.search != null || mail.category != null || mail.only != null) return false;
+  return ['inbox', 'mailbox', 'trash', 'sent', 'archive', 'drafts'].includes(mail.view.kind);
+}
+
+/** `older.done` açık görünüme mi ait (anahtarı bu görünümün anahtarı mı)? Yalnız durumu söyler. */
+export function olderDoneHere(): boolean {
+  return older.done && older.key === olderKey();
+}
+
+/** Bu görünümde sunucudaki postaların sonuna gelindi mi ("Hepsi bu kadar" gösterilsin mi). */
+export function olderDone(): boolean {
+  return olderScope() && olderDoneHere() && !mail.nextCursor && mail.items.length > 0;
+}
+
 /** Bu görünümde sunucudan daha eski posta istenebilir mi (arama ve sanal görünümlerde hayır). */
 export function olderAvailable(): boolean {
-  if (mail.search != null || mail.category != null || mail.only != null) return false;
-  if (!['inbox', 'mailbox', 'trash', 'sent', 'archive', 'drafts'].includes(mail.view.kind)) return false;
-  return !mail.nextCursor && !mail.loading && mail.items.length > 0 && !(older.key === olderKey() && older.done);
+  if (!olderScope()) return false;
+  return !mail.nextCursor && !mail.loading && mail.items.length > 0 && !olderDoneHere();
 }
 
 /** Yerel liste bitince sunucudan bir sonraki eski partiyi indirir (`messages_older`). */
@@ -147,9 +191,16 @@ export async function loadOlder(): Promise<void> {
   try {
     const r = await call('messages_older', { view: mail.view, accountId: mail.accountId });
     if (olderKey() !== key) return;
-    if (r.fetched) await refreshList();
+    if (r.fetched) {
+      // Yenileme yüklenmiş sayfaları korur (liste ilk sayfaya dönmez, kaydırma konumu kalır);
+      // inen postalar listenin sonuna eklenir, sıradaki sayfa da yüklenir ki hemen görünsünler.
+      await refreshList();
+      await loadMore();
+    }
     older.done = !r.more;
-    if (!r.fetched) showToast({ text: t('older.none') });
+    // Hiç posta inmediyse nedeni söylenir: sunucuda kalmadı ("Hepsi bu kadar") ya da kutu henüz
+    // hazır değil (eşitlenmedi, bir hesap yanıt vermedi); ikincisinde düğme yerinde kalır.
+    if (!r.fetched) showToast({ text: t(r.more ? 'older.retry' : 'older.none') });
   } catch (e) {
     errorToast(e);
   } finally {

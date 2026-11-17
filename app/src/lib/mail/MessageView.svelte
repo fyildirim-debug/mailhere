@@ -1,20 +1,23 @@
 <script lang="ts">
   // Tek bir iletinin tam görünümü: gönderen (kişi kartı), davet, şeritler,
   // gövde ve ekler. Okuma alanında ve konuşma görünümünde kullanılır.
-  import { call, toAppError, type MessageDetail } from '../api';
+  import type { Snippet } from 'svelte';
+  import { call, toAppError, type Attachment, type MessageDetail } from '../api';
   import { locale, t, when } from '../i18n/index.svelte';
   import Avatar from '../ui/Avatar.svelte';
   import FileBadge from '../ui/FileBadge.svelte';
   import Icon from '../ui/Icon.svelte';
   import { showToast } from '../ui/toast.svelte';
   import { displayName, fileSize } from '../util/format';
+  import { copyCode } from '../stores/guard.svelte';
   import { allowRemote, mail, toggleStar, unsubscribe } from '../stores/mail.svelte';
   import { darkMailWanted, settings } from '../stores/settings.svelte';
   import ContactCard from './ContactCard.svelte';
   import { openCompose } from './open';
   import InviteCard from './InviteCard.svelte';
   import MailBody from './MailBody.svelte';
-  import { copyText, groupCode } from './otp';
+  import { groupCode } from './otp';
+  import SpamNotice from './SpamNotice.svelte';
   import { isMobileShell } from '../shell';
 
   interface Props {
@@ -23,9 +26,14 @@
     actions?: boolean;
     /** İleti burada değişince (yıldız, uzak içerik izni) kapsayıcı kendi kopyasını günceller. */
     onupdate?: (d: MessageDetail) => void;
+    /**
+     * Ek kartının altında çizilecek, eke özgü eylemler (mobil: Kaydet / Paylaş).
+     * Verilmezse ek kartı yalnız açma düğmesidir.
+     */
+    attachmentActions?: Snippet<[Attachment, MessageDetail]>;
   }
 
-  let { detail: d, actions = false, onupdate }: Props = $props();
+  let { detail: d, actions = false, onupdate, attachmentActions }: Props = $props();
 
   const account = $derived(mail.accounts.find((a) => a.id === d.accountId));
   const recipients = $derived.by(() => {
@@ -111,10 +119,11 @@
     return d.cleanedLinks > 0 ? `${text} ${t('read.linksCleaned', { n: d.cleanedLinks })}` : text;
   }
 
+  /** Kodu kopyalar; "kopyalayınca okundu say" açıksa okunmamış posta okundu sayılır (ortak yardımcı). */
   async function copyOtp() {
     if (!d.otp) return;
-    const ok = await copyText(d.otp);
-    showToast({ text: ok ? t('read.otpCopied') : t('read.otpCopyFailed') });
+    const unread = d.unread;
+    if ((await copyCode(d.id, d.otp, unread)) && unread && settings.value.otpMarkRead) onupdate?.({ ...d, unread: false });
   }
 </script>
 
@@ -155,7 +164,10 @@
   <ContactCard address={d.from} accountId={d.accountId} at={card} onclose={closeCard} />
 {/if}
 
-{#if warning}
+{#if d.spamVerdict}
+  <!-- Şüpheli posta: neden satırları ve eylemler; tek satırlık gönderen uyarısının yerine geçer. -->
+  <SpamNotice detail={d} verdict={d.spamVerdict} {onupdate} />
+{:else if warning}
   <!-- Dar alanda (telefon, dar okuma bölmesi) kısa metin; kap sorgusu karar verir. -->
   <div class="trust">
     <p class="trust-row">
@@ -240,13 +252,24 @@
     </div>
     <div class="atts-list">
       {#each d.attachments as a (a.index)}
-        <button class="att" onclick={() => openAttachment(a.index)} title={a.name}>
-          <FileBadge name={a.name} mime={a.mime} />
-          <span class="att-text">
-            <span class="trunc att-name">{a.name}</span>
-            <span class="meta">{fileSize(a.size, locale())} · {t('read.preview')}</span>
-          </span>
-        </button>
+        {#snippet card()}
+          <button class="att" onclick={() => openAttachment(a.index)} title={a.name}>
+            <FileBadge name={a.name} mime={a.mime} />
+            <span class="att-text">
+              <span class="trunc att-name">{a.name}</span>
+              <span class="meta">{fileSize(a.size, locale())} · {t('read.preview')}</span>
+            </span>
+          </button>
+        {/snippet}
+        {#if attachmentActions}
+          <!-- Eke özgü eylemler kartın altında; kart düğmesinin içine düğme konmaz. -->
+          <div class="att-group">
+            {@render card()}
+            <div class="att-acts">{@render attachmentActions(a, d)}</div>
+          </div>
+        {:else}
+          {@render card()}
+        {/if}
       {/each}
     </div>
   </div>
@@ -548,6 +571,25 @@
   .att:hover {
     border-color: var(--line-strong);
     background: var(--hover);
+  }
+
+  /* Eylemli ek: kart ve altında eylem sırası; genişlik kartınki. */
+  .att-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 252px;
+    max-width: 100%;
+  }
+
+  .att-group .att {
+    width: 100%;
+  }
+
+  .att-acts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
   }
 
   .att-text {

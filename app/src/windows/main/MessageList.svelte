@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { toAppError, SAVED_SEARCHES_MAX, SAVED_SEARCH_NAME_CHARS, type Category, type ListOnly } from '../../lib/api';
   import { t, type MessageKey } from '../../lib/i18n/index.svelte';
   import Icon from '../../lib/ui/Icon.svelte';
@@ -11,11 +11,13 @@
   import { call } from '../../lib/api';
   import { displayName, snoozeOptions } from '../../lib/util/format';
   import { loadMore, mail, markAllRead, moveTo, pullMail, rowsOf, setCategory, setOnly, setUnread, setView, snooze, syncing, toggleStar, type Row } from '../../lib/stores/mail.svelte';
+  import { blockSenderOf, loadOlder, older, olderAvailable, olderDone, trustSenderOf } from '../../lib/stores/guard.svelte';
   import { settings, updateSettings } from '../../lib/stores/settings.svelte';
   import { tagById } from '../../lib/stores/tags.svelte';
   import MessageRow from './MessageRow.svelte';
   import SearchChips from './SearchChips.svelte';
   import { desk } from './layout.svelte';
+  import { emptyConfirmed, emptyTarget, purgeBox, removeMessages } from './purge';
   import { startTriage } from './triage-state.svelte';
 
   interface Props {
@@ -71,13 +73,36 @@
     if (scrollTop + viewport > layout.total - 600) void loadMore();
   }
 
-  // Klavyeyle seçim değişince satırı görünür tut.
+  // İçerik kısalınca (yenileme, konuşmaların katlanması) kaydırma olayı gelmez;
+  // sona yakınken sıradaki yerel sayfa kendiliğinden istenir.
+  $effect(() => {
+    if (mail.nextCursor && !mail.loading && scrollTop + viewport > layout.total - 600) void loadMore();
+  });
+
+  // Yerel sayfalar bitince liste sonunda: "Daha eski postalar" (sunucudan bir
+  // parti daha) ya da sona gelindiyse "Hepsi bu kadar".
+  const moreOlder = $derived(older.busy || olderAvailable());
+  const allLoaded = $derived(!moreOlder && olderDone());
+
+  // Çöp / İstenmeyen görünümü: başlıkta "Çöpü boşalt" / "İstenmeyen'i boşalt".
+  const purgeTarget = $derived(emptyTarget());
+
+  // Seçim değişince (klavye, bildirimden açma) ya da seçili satır listeye girince
+  // (geri alma) satır görünür tutulur. Liste yalnız içerik değiştiği için (yeni
+  // posta, sıradaki sayfa, daha eski postalar) seçili satıra geri sarılmaz:
+  // aşağı kaydırmış kullanıcı yerinde kalır.
+  const selectedPresent = $derived.by(() => {
+    const id = mail.selectedId;
+    return id != null && rows.some((r) => r.ids.includes(id));
+  });
   $effect(() => {
     const id = mail.selectedId;
-    if (id == null || !scroller) return;
-    const i = rows.findIndex((r) => r.ids.includes(id));
-    const target = scrollToReveal(layout, i, scroller.scrollTop, viewport);
-    if (target != null) scroller.scrollTop = target;
+    if (id == null || !selectedPresent || !scroller) return;
+    untrack(() => {
+      const i = rows.findIndex((r) => r.ids.includes(id));
+      const target = scrollToReveal(layout, i, scroller.scrollTop, viewport);
+      if (target != null) scroller.scrollTop = target;
+    });
   });
 
   const tabs: { key: Category | null; label: MessageKey }[] = [
@@ -122,6 +147,10 @@
     if (!rowMenu) return [];
     const m = rowMenu.row;
     const tomorrow = snoozeOptions(now).find((o) => o.key === 'tomorrow')!.at;
+    const role = mail.mailboxes.find((b) => b.id === m.mailboxId)?.role;
+    const purge = purgeBox(m.mailboxId);
+    // Kendi adresimiz engellenemez (Gönderilenler, Taslaklar, kendimize yazdığımız posta).
+    const own = role === 'sent' || role === 'drafts' || mail.accounts.some((a) => a.email.trim().toLowerCase() === m.from.email.trim().toLowerCase());
     return [
       { label: t('read.openQuick'), icon: 'external', onclick: () => void call('open_quick', { id: m.id }) },
       { label: m.unread ? t('act.markRead') : t('act.markUnread'), icon: 'mail', kbd: m.unread ? undefined : 'U', onclick: () => void setUnread(m.ids, !m.unread) },
@@ -134,7 +163,14 @@
           ] as MenuItem[])
         : []),
       { label: t('snooze.tomorrow'), icon: 'clock', kbd: 'H', onclick: () => void snooze(m.ids, tomorrow) },
-      { label: t('act.delete'), icon: 'trash', kbd: '#', danger: true, onclick: () => void moveTo(m.ids, 'trash') },
+      // İstenmeyen'deki posta gelen kutusuna döner; şüpheli satırda uyarı kalkar.
+      ...(role === 'junk'
+        ? ([{ label: t('spam.notJunk'), icon: 'inbox', onclick: () => void trustSenderOf(m.id) }] as MenuItem[])
+        : m.spam
+          ? ([{ label: t('spam.markSafe'), icon: 'shield', onclick: () => void trustSenderOf(m.id) }] as MenuItem[])
+          : []),
+      ...(own ? [] : ([{ label: t('spam.block'), icon: 'block', hint: m.from.email, onclick: () => void blockSenderOf(m.id) }] as MenuItem[])),
+      { label: t(purge ? 'purge.delete' : 'act.delete'), icon: 'trash', kbd: '#', danger: true, onclick: () => void removeMessages(m.ids) },
     ];
   });
   const filterItems = $derived<MenuItem[]>([
@@ -216,6 +252,13 @@
       </div>
     </div>
     {#if mail.search != null}<SearchChips />{/if}
+    {#if purgeTarget && rows.length}
+      <div class="purge-row">
+        <button class="btn-soft small empty-btn" onclick={() => void emptyConfirmed()}>
+          <Icon name="trash" size={16} />{t(purgeTarget.role === 'trash' ? 'purge.emptyTrash' : 'purge.emptyJunk')}
+        </button>
+      </div>
+    {/if}
     {#if mail.only && mail.search == null}
       <div class="pill-row">
         <span class="pill">
@@ -246,6 +289,15 @@
           </div>
         {/each}
       </div>
+      {#if moreOlder}
+        <div class="tail">
+          <button class="btn-soft small" disabled={older.busy} aria-busy={older.busy} onclick={() => void loadOlder()}>
+            <Icon name={older.busy ? 'refresh' : 'download'} size={16} class={older.busy ? 'spin' : undefined} />{t(older.busy ? 'older.busy' : 'list.loadMore')}
+          </button>
+        </div>
+      {:else if allLoaded}
+        <p class="tail meta" role="status">{t('older.end')}</p>
+      {/if}
     {:else if !mail.loading}
       <div class="empty">
         <span class="empty-icon"><Icon name={empty.icon} size={26} /></span>
@@ -410,6 +462,38 @@
     left: 0;
     right: 0;
     top: 0;
+  }
+
+  /* Çöp / İstenmeyen: kutuyu boşaltma (geri alınamaz; metin --danger). */
+  .purge-row {
+    display: flex;
+    margin-top: -4px;
+  }
+
+  .empty-btn {
+    color: var(--danger);
+  }
+
+  /* Liste sonu: daha eski postalar ya da "Hepsi bu kadar". */
+  .tail {
+    display: flex;
+    justify-content: center;
+    padding: 14px 20px 22px;
+    text-align: center;
+  }
+
+  p.tail {
+    display: block;
+  }
+
+  .tail :global(.spin) {
+    animation: pull-spin calc(var(--t-panel) * 3) linear infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .tail :global(.spin) {
+      animation: none;
+    }
   }
 
   .group {

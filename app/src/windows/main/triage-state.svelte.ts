@@ -6,6 +6,8 @@
 import type { Mailbox, MessageId } from '../../lib/api';
 import { currentRows, mail, moveTo, moveToFolder, select, selectedIds, snooze, type Row } from '../../lib/stores/mail.svelte';
 import { clearChecked } from '../../lib/stores/selection.svelte';
+import { deleteForever } from '../../lib/stores/guard.svelte';
+import { askPurge, purgeable } from './purge';
 import { afterToastAction, lastToastId } from '../../lib/ui/toast.svelte';
 
 export const triage = $state({
@@ -127,6 +129,14 @@ function leave(run: (ids: MessageId[]) => Promise<void>): Promise<void> {
 }
 
 export const archiveCurrent = () => leave((ids) => moveTo(ids, 'archive'));
-export const deleteCurrent = () => leave((ids) => moveTo(ids, 'trash'));
+
+/** Sil: Çöp / İstenmeyen'deki postada önce onay sorulur, sonra kalıcı silinir (geri alınamaz). */
+export async function deleteCurrent(): Promise<void> {
+  const cur = triage.cursor;
+  const ids = selectedIds();
+  if (!purgeable(ids)) return leave((list) => moveTo(list, 'trash'));
+  if (!(await askPurge(ids.length)) || triage.cursor !== cur) return;
+  return leave(async (list) => void (await deleteForever(list)));
+}
 export const snoozeCurrent = (until: number) => leave((ids) => snooze(ids, until));
 export const moveCurrent = (box: Mailbox, label: string) => leave((ids) => moveToFolder(ids, box, label));

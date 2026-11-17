@@ -6,6 +6,7 @@
   import Icon from '../../lib/ui/Icon.svelte';
   import LockScreen from '../../lib/ui/LockScreen.svelte';
   import Logo from '../../lib/ui/Logo.svelte';
+  import ConfirmHost from '../../lib/ui/ConfirmHost.svelte';
   import ToastHost from '../../lib/ui/ToastHost.svelte';
   import WindowControls from '../../lib/ui/WindowControls.svelte';
   import { runToastAction, showToast } from '../../lib/ui/toast.svelte';
@@ -50,6 +51,7 @@
     watchWidth,
   } from './layout.svelte';
   import { applyStoredScale, percent, scale, setScale, stepped } from './scale.svelte';
+  import { removeMessages } from './purge';
   import { learned } from './teach.svelte';
   import { archiveCurrent, back, deleteCurrent, moveCurrent, skip, startTriage, stopTriage, triage } from './triage-state.svelte';
 
@@ -387,7 +389,7 @@
           // Çoklu seçimde tek tuşlar seçili satırların tümüne uygulanır.
           const ids = checkedIds();
           if (sc === 'archive') void bulkMove(ids, 'archive');
-          else if (sc === 'delete') void bulkMove(ids, 'trash');
+          else if (sc === 'delete') void removeMessages(ids, { bulk: true });
           else if (sc === 'star') void bulkStar(ids, true);
           else if (sc === 'unread') void bulkSetUnread(ids, true);
           else if (sc === 'pin') void togglePin(ids);
@@ -396,7 +398,7 @@
         }
         if (id == null) return;
         if (sc === 'archive') void moveTo(selectedIds(), 'archive');
-        else if (sc === 'delete') void moveTo(selectedIds(), 'trash');
+        else if (sc === 'delete') void removeMessages(selectedIds());
         else if (sc === 'star') void toggleStar(id);
         else if (sc === 'unread') void setUnread([id], true);
         else if (sc === 'pin') void togglePin(selectedIds());
@@ -503,6 +505,7 @@
     />
   {/if}
   {#if chord}<ChordHint />{/if}
+  <ConfirmHost />
   <ToastHost />
 </div>
 
