@@ -193,6 +193,12 @@ pub struct GetResponse<T> {
 pub struct QueryResponse {
     #[serde(default)]
     pub ids: Vec<String>,
+    /// Sorguya uyan toplam posta (`calculateTotal` istendiyse).
+    #[serde(default)]
+    pub total: Option<u64>,
+    /// Sunucu istenen sınırı kıstıysa uyguladığı sınır.
+    #[serde(default)]
+    pub limit: Option<u64>,
 }
 
 /// Kimlik (RFC 8621 §6).
