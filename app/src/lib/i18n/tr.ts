@@ -1297,6 +1297,22 @@ export const tr = {
   'otp.expire.off': 'Kapalı',
   'otp.expire.hour': '1 saat sonra',
   'otp.expire.day': '1 gün sonra',
+  // Arama: yeni işleçler (çipler ve palet ipuçları).
+  'chip.more': 'Diğer',
+  'chip.moreTitle': 'Diğer süzgeçler',
+  'chip.code': 'Kod içeren',
+  'chip.spam': 'Şüpheli',
+  'chip.read': 'Okunmuş',
+  'chip.size': 'Boyut',
+  'chip.sizeOver': '{size} üstü',
+  'chip.sizeUnder': '{size} altı',
+  'palette.op.to': 'Alıcıya göre, ör. to:mert (kime: de olur)',
+  'palette.op.cc': 'Bilgi alıcısına göre, ör. cc:ayse',
+  'palette.op.code': 'Doğrulama kodu içerenler',
+  'palette.op.spam': 'Şüpheli görünenler',
+  'palette.op.read': 'Okunmuşlar',
+  'palette.op.larger': 'Bu boyuttan büyük, ör. larger:5mb (büyük: de olur)',
+  'palette.op.smaller': 'Bu boyuttan küçük, ör. smaller:100kb (küçük: de olur)',
 } as const;
 
 export type MessageKey = keyof typeof tr;
