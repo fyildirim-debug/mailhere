@@ -5,7 +5,7 @@
 //! dinleyen görev. Akış yokken ya da koptuğunda iki dakikada bir yoklanır.
 //! Bağlantı koparsa üstel bekleme ile yeniden denenir.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -14,7 +14,7 @@ use mh_core::{
     Account, AccountId, AccountKind, AppError, AppResult, ErrorCode, MailboxRole, MessageId,
     Millis, MoveTarget, SyncState, SyncStatus,
 };
-use mh_store::{NewMessage, Store};
+use mh_store::{Action, NewMessage, Store};
 use mh_sync::{EventSink, SecretStore};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
@@ -52,6 +52,15 @@ impl Default for Timing {
 const ACTION_TIMEOUT: Duration = Duration::from_secs(120);
 const SYNC_TIMEOUT: Duration = Duration::from_secs(20 * 60);
 const BODY_TIMEOUT: Duration = Duration::from_secs(90);
+/// "Daha eski postalar" isteğinin (kutu başına bir parti) süre sınırı.
+const OLDER_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+/// Kalıcı silme ve kutu boşaltma binlerce postayı parça parça siler.
+const PURGE_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+/// Tek kuyruk kaydına yazılan en fazla posta kimliği.
+const PURGE_CHUNK: usize = 500;
+/// Kutu boşaltılırken son eşitlemeden beri bundan çok posta değiştiyse
+/// sunucudaki tarama yapılmaz (yalnız yerelde bilinenler silinir).
+const SWEEP_MAX_CHANGES: usize = 5000;
 
 /// Taşıma hedefi.
 enum Dest {
@@ -90,6 +99,11 @@ enum Command {
     },
     /// Postaları sunucudan siler (taslak silme).
     Destroy { jmap_ids: Vec<String> },
+    /// Kalıcı kuyruktaki (`mh_store::Action`) işlemleri, kimliği `upto`ya
+    /// kadar olanları uygular: kalıcı silme ve kutu boşaltma. Uygulama
+    /// kapanıp açılsa da kaybolmazlar; sıra, aynı anda bekleyen taşımalarla
+    /// korunur (önce yazılan taşıma önce uygulanır).
+    Actions { upto: i64 },
 }
 
 impl Command {
@@ -619,6 +633,184 @@ impl JmapManager {
         }
         Ok(vec![taken.mailbox_id])
     }
+
+    /// Postaları **kalıcı** siler: yerelden hemen, sunucudan kalıcı kuyruk
+    /// üzerinden (çevrimdışıyken ve uygulama yeniden açılınca da kaybolmaz).
+    /// Yalnız Çöp ya da İstenmeyen kutusunda görünen postalar silinir: başka
+    /// kutuda bir posta varsa hiçbirine dokunulmaz (`Invalid`). Artık var
+    /// olmayan kimlikler sessizce atlanır. Etkilenen kutuları döner.
+    ///
+    /// Sunucuda posta yalnız Çöp / İstenmeyen kutularından çıkarılır
+    /// ([`ops::purge_emails`]): başka bir kutuda da duruyorsa oradaki kopya
+    /// kalır.
+    pub fn purge_messages(&self, ids: &[MessageId]) -> AppResult<Vec<String>> {
+        let store = &self.shared.store;
+        let locations = store.jmap_locations(ids)?;
+        if locations.iter().any(|l| !is_purgeable(l.role)) {
+            return Err(not_purgeable());
+        }
+        let mut groups: HashMap<String, Vec<mh_store::JmapLocation>> = HashMap::new();
+        for loc in locations {
+            groups.entry(loc.account_id.clone()).or_default().push(loc);
+        }
+        let mut touched = Vec::new();
+        for (account, list) in groups {
+            let jmap_ids: Vec<String> = list.iter().filter_map(|l| l.jmap_id.clone()).collect();
+            // Önce kuyruk, sonra yerel silme: araya hata girerse posta yerelde
+            // kalır (listeden kalkıp sunucuda kalan postadan iyidir).
+            let mut last = None;
+            if self.syncable(&account)? {
+                for chunk in jmap_ids.chunks(PURGE_CHUNK) {
+                    let action = Action::Purge {
+                        ids: chunk.to_vec(),
+                    };
+                    last = store
+                        .action_push(&account, &action, None, now_ms())?
+                        .or(last);
+                }
+            }
+            let local: Vec<MessageId> = list.iter().map(|l| l.id).collect();
+            store.delete_messages(&local)?;
+            if let Some(upto) = last {
+                self.send(&account, Command::Actions { upto });
+            }
+            touched.extend(list.into_iter().map(|l| l.mailbox_id));
+        }
+        touched.sort();
+        touched.dedup();
+        Ok(touched)
+    }
+
+    /// Çöp ya da İstenmeyen kutusunu boşaltır: yerelde görünen tüm postalar
+    /// kalıcı silinir ve sunucuda kutunun yerelde hiç indirilmemiş eski
+    /// postaları da silinmek üzere kuyruğa yazılır. Son eşitlemeden sonra
+    /// gelen ya da değişen (kullanıcının bu hâliyle görmediği) postaya
+    /// dokunulmaz. Başka roldeki kutu reddedilir (`Invalid`). (yerelden
+    /// silinen posta sayısı, etkilenen kutular) döner.
+    pub fn empty_mailbox(&self, mailbox_id: &str) -> AppResult<(u32, Vec<String>)> {
+        let store = &self.shared.store;
+        let info = store.mailbox(mailbox_id)?.ok_or_else(|| {
+            AppError::new(
+                ErrorCode::NotFound,
+                "Klasör bulunamadı; sunucuda silinmiş ya da yeniden adlandırılmış olabilir.",
+            )
+        })?;
+        if !is_purgeable(info.mailbox.role) {
+            return Err(not_purgeable());
+        }
+        let account = info.mailbox.account_id.clone();
+        // Durum yerel silmeden önce okunur: kullanıcının gördüğü kutu budur.
+        let since = store.jmap_account_state(&account)?.email_state;
+        let ids = store.message_ids_in(mailbox_id)?;
+        let mut touched = self.purge_messages(&ids)?;
+        if self.syncable(&account)? && since.is_some() {
+            let action = Action::Empty {
+                path: info.mailbox.path.clone(),
+                upto: 0,
+                uidvalidity: None,
+                since,
+            };
+            if let Some(upto) = store.action_push(&account, &action, None, now_ms())? {
+                self.send(&account, Command::Actions { upto });
+            }
+            if !touched.iter().any(|t| t == mailbox_id) {
+                touched.push(mailbox_id.to_owned());
+            }
+        }
+        Ok((ids.len() as u32, touched))
+    }
+
+    /// Kutunun bir sonraki eski partisini indirir (`messages_older`;
+    /// [`sync::fetch_older`]). İzlenmeyen kutuda (gizli klasör), tanıtım
+    /// hesabında ve başına ulaşılmış kutuda sunucuya gidilmez. Bağlantı
+    /// kurulamazsa `Network`.
+    pub async fn fetch_older(&self, mailbox_id: &str) -> AppResult<sync::OlderOutcome> {
+        let store = &self.shared.store;
+        let info = store.mailbox(mailbox_id)?.ok_or_else(|| {
+            AppError::new(
+                ErrorCode::NotFound,
+                "Klasör bulunamadı; sunucuda silinmiş ya da yeniden adlandırılmış olabilir.",
+            )
+        })?;
+        if info.older_done || !sync::tracked(info.mailbox.role, info.mailbox.hidden) {
+            return Ok(sync::OlderOutcome::default());
+        }
+        let Some(account) = store.account(&info.mailbox.account_id)?.filter(is_syncable) else {
+            return Ok(sync::OlderOutcome::default());
+        };
+        // Kutu henüz hiç eşitlenmedi: önce olağan eşitleme kursun.
+        if store.jmap_account_state(&account.id)?.email_state.is_none() {
+            self.sync_account(&account.id);
+            return Ok(sync::OlderOutcome {
+                fetched: 0,
+                more: true,
+                changed: Vec::new(),
+            });
+        }
+        // Kalıcı silinmesi sırada bekleyen postalar yeniden indirilmez; kutu
+        // boşaltılıyorsa hiçbir şey indirilmez.
+        let mut skip: HashSet<String> = HashSet::new();
+        for a in store.actions(&account.id)? {
+            match a.action {
+                Action::Purge { ids } => skip.extend(ids),
+                Action::Empty { path, .. } if path == info.mailbox.path => {
+                    return Ok(sync::OlderOutcome::default())
+                }
+                _ => {}
+            }
+        }
+        let work = async {
+            let client = self.shared.client(&account).await?;
+            sync::fetch_older(
+                &client,
+                store,
+                &account.id,
+                &info.mailbox.id,
+                &info.mailbox.path,
+                info.mailbox.total as usize,
+                &skip,
+            )
+            .await
+        };
+        let res = match timeout(OLDER_TIMEOUT, work).await {
+            Ok(r) => r,
+            Err(_) => Err(JmapError::Timeout),
+        };
+        res.map_err(|e| {
+            if e.is_connection() || matches!(e, JmapError::Auth) {
+                self.shared.forget(&account.id);
+            }
+            e.to_app()
+        })
+    }
+
+    /// Hesap gerçek bir JMAP sunucusuyla mı eşitleniyor?
+    fn syncable(&self, account_id: &str) -> AppResult<bool> {
+        Ok(self
+            .shared
+            .store
+            .account(account_id)?
+            .is_some_and(|a| is_syncable(&a)))
+    }
+}
+
+/// Kalıcı silme yalnız Çöp ve İstenmeyen kutularında yapılır.
+fn is_purgeable(role: MailboxRole) -> bool {
+    matches!(role, MailboxRole::Trash | MailboxRole::Junk)
+}
+
+fn not_purgeable() -> AppError {
+    AppError::new(
+        ErrorCode::Invalid,
+        "Yalnız Çöp ya da İstenmeyen kutusundaki postalar kalıcı silinebilir. Postayı önce Çöp'e taşı.",
+    )
+}
+
+fn now_ms() -> Millis {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as Millis)
+        .unwrap_or(0)
 }
 
 /// Hesabın JMAP sunucusu ve kapısı (oturum adresinden).
@@ -696,6 +888,13 @@ async fn run_session(
     let timing = ctx.shared.timing;
     let mut client = ctx.shared.client(&ctx.account).await?;
     *backoff = timing.min_backoff;
+    // Önceki çalışmadan kalan kalıcı işlemler (kalıcı silme, kutu boşaltma):
+    // bu oturumda sıraya girmiş bir uygulama isteği yoksa şimdi girer.
+    if !pending.iter().any(|c| matches!(c, Command::Actions { .. }))
+        && ctx.shared.store.action_head(&ctx.account.id)?.is_some()
+    {
+        pending.push_back(Command::Actions { upto: i64::MAX });
+    }
     let mut poll = tokio::time::interval_at(Instant::now() + timing.poll, timing.poll);
     poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut periodic = tokio::time::interval_at(Instant::now() + timing.periodic, timing.periodic);
@@ -709,10 +908,10 @@ async fn run_session(
                 ctx.shared.forget(&ctx.account.id);
                 client = ctx.shared.client(&ctx.account).await?;
             }
-            let limit = if cmd.is_action() {
-                ACTION_TIMEOUT
-            } else {
-                SYNC_TIMEOUT
+            let limit = match cmd {
+                Command::Actions { .. } => PURGE_TIMEOUT,
+                ref c if c.is_action() => ACTION_TIMEOUT,
+                _ => SYNC_TIMEOUT,
             };
             let res = match timeout(limit, execute(ctx, &client, &cmd)).await {
                 Ok(r) => r,
@@ -831,7 +1030,126 @@ async fn execute(ctx: &Ctx, client: &Client, cmd: &Command) -> JmapResult<()> {
             ops::destroy_emails(client, &old).await
         }
         Command::Destroy { jmap_ids } => ops::destroy_emails(client, jmap_ids).await,
+        Command::Actions { upto } => run_actions(ctx, client, *upto).await,
     }
+}
+
+/// Hesabın şu an Çöp ve İstenmeyen rolündeki kutuları (JMAP kutu kimlikleri).
+/// İşlem çalışırken okunur: rolü bu arada değişen kutudan posta silinmez.
+fn purgeable_boxes(store: &Store, account_id: &str) -> JmapResult<HashSet<String>> {
+    Ok(store
+        .mailboxes_for(account_id)?
+        .into_iter()
+        .filter(|m| is_purgeable(m.mailbox.role))
+        .map(|m| m.mailbox.path)
+        .collect())
+}
+
+/// `since` durumundan beri oluşan ya da değişen postalar; fark
+/// hesaplanamıyorsa (ya da çok büyükse) `None`.
+async fn changed_since(client: &Client, since: &str) -> JmapResult<Option<HashSet<String>>> {
+    let mut out: HashSet<String> = HashSet::new();
+    let mut state = since.to_owned();
+    loop {
+        let res = client
+            .call(
+                "Email/changes",
+                serde_json::json!({ "accountId": client.account_id(), "sinceState": state }),
+            )
+            .await;
+        let c: crate::types::Changes = match res {
+            Ok(v) => sync::parse(v)?,
+            Err(e) if e.cannot_calculate_changes() => return Ok(None),
+            Err(e) => return Err(e),
+        };
+        out.extend(c.created);
+        out.extend(c.updated);
+        if out.len() > SWEEP_MAX_CHANGES {
+            return Ok(None);
+        }
+        if !c.has_more_changes || c.new_state == state {
+            return Ok(Some(out));
+        }
+        state = c.new_state;
+    }
+}
+
+/// Kalıcı kuyruğun tek işlemi. Yerelden silinmiş ama sunucuda duran posta
+/// kaldıysa `false` döner (yerel durum baştan eşitlenmeli).
+async fn run_action(ctx: &Ctx, client: &Client, action: &Action) -> JmapResult<bool> {
+    let store = &ctx.shared.store;
+    let account = &ctx.account.id;
+    match action {
+        Action::Purge { ids } => {
+            let kept = ops::purge_emails(client, ids, &purgeable_boxes(store, account)?).await?;
+            Ok(kept.is_empty())
+        }
+        Action::Empty { path, since, .. } => {
+            let allowed = purgeable_boxes(store, account)?;
+            if !allowed.contains(path) {
+                tracing::warn!(account = %account, "boşaltılacak kutu artık çöp ya da istenmeyen değil, atlandı");
+                return Ok(true);
+            }
+            let Some(since) = since else {
+                return Ok(true);
+            };
+            match changed_since(client, since).await? {
+                Some(keep) => {
+                    ops::sweep_mailbox(client, path, &allowed, &keep).await?;
+                    Ok(true)
+                }
+                None => {
+                    // Son görülen durumdan beri ne değiştiği bilinmiyor:
+                    // görülmemiş postayı silmemek için tarama yapılmaz.
+                    tracing::warn!(account = %account, "kutu sunucuda taranamadı; yalnız yerelde bilinen postalar silindi");
+                    Ok(true)
+                }
+            }
+        }
+        // IMAP hesaplarının işlemleri; JMAP kuyruğunda işi yoktur.
+        _ => {
+            tracing::warn!(account = %account, "IMAP işlemi JMAP kuyruğunda, atlandı");
+            Ok(true)
+        }
+    }
+}
+
+/// Kalıcı kuyruğu (kimliği `upto`ya kadar) sırayla uygular. Her işlem sunucu
+/// onayından sonra silinir; bağlantı koparsa kuyrukta kalır ve yeniden
+/// bağlanınca tekrar denenir. Sunucunun reddettiği işlem kuyruğu tıkamasın
+/// diye düşürülür. Bir şey uygulandıysa yerel durum eşitlenir; sunucuda
+/// kalan posta olduysa baştan.
+async fn run_actions(ctx: &Ctx, client: &Client, upto: i64) -> JmapResult<()> {
+    let store = &ctx.shared.store;
+    let mut ran = false;
+    while let Some(qa) = store
+        .action_head(&ctx.account.id)?
+        .filter(|qa| qa.id <= upto)
+    {
+        let settled = match run_action(ctx, client, &qa.action).await {
+            Ok(settled) => settled,
+            Err(e) if e.is_connection() || matches!(e, JmapError::Auth) => return Err(e),
+            Err(e) => {
+                tracing::warn!(account = %ctx.account.id, error = %e, "JMAP kalıcı işlemi başarısız, düşürüldü");
+                ctx.status(SyncState::Error {
+                    message: e.to_app().message,
+                });
+                false
+            }
+        };
+        store.action_done(qa.id)?;
+        if !settled {
+            // Yerelden silinen ama sunucuda duran posta var (sunucu reddetti
+            // ya da posta çöpte değildi): sessizce kaybolmasın diye hesap
+            // baştan eşitlenir, sunucudaki postalar listeye geri döner.
+            store.set_jmap_email_state(&ctx.account.id, None)?;
+        }
+        ran = true;
+    }
+    if ran {
+        run_sync(ctx, client).await?;
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------- durum akışı

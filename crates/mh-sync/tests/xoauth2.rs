@@ -148,7 +148,7 @@ async fn dovecot_xoauth2_uctan_uca() {
 
     let has_mail = |store: &Store| {
         store
-            .search(&subject, 10)
+            .search(&subject, 10, None)
             .map(|r| r.iter().any(|m| m.subject == subject))
             .unwrap_or(false)
     };

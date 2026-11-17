@@ -3,9 +3,10 @@
 use std::path::{Path, PathBuf};
 
 use mh_core::{
-    events, Account, AccountKind, AppError, AppResult, ComposePrefill, Counts, DiscoveredConfig,
-    ErrorCode, ListQuery, Mailbox, MessageDetail, MessageId, MessageSummary, Millis, MoveTarget,
-    NewAccount, OutboxItem, OutgoingMessage, Page, Settings, SyncState, SyncStatus,
+    events, Account, AccountId, AccountKind, AppError, AppResult, ComposePrefill, Counts,
+    DiscoveredConfig, ErrorCode, ListQuery, Mailbox, MessageDetail, MessageId, MessageSummary,
+    Millis, MoveTarget, NewAccount, OutboxItem, OutgoingMessage, Page, Settings, SyncState,
+    SyncStatus,
 };
 use tauri::{AppHandle, Emitter, State};
 
@@ -220,9 +221,17 @@ pub fn messages_snooze(
     Ok(())
 }
 
+/// Tam metin arama. `account_ids` (`accountIds`) verilirse yalnız o hesaplar
+/// aranır; süzme depoda, sınırdan önce yapılır. Yoksa tüm hesaplar, boş
+/// listeyse sonuç yok.
 #[tauri::command]
-pub fn search(state: State<'_, AppState>, q: String, limit: u32) -> Res<Vec<MessageSummary>> {
-    state.store.search(&q, limit)
+pub fn search(
+    state: State<'_, AppState>,
+    q: String,
+    limit: u32,
+    account_ids: Option<Vec<AccountId>>,
+) -> Res<Vec<MessageSummary>> {
+    state.store.search(&q, limit, account_ids.as_deref())
 }
 
 /// Göndericinin uzak görsellerine izin verir (ayara kalıcı yazılır) ve

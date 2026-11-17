@@ -33,10 +33,11 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
 use tokio::time::{timeout, Instant};
 
+use crate::checked::{command_ok, uid_search};
 use crate::conn::ImapSession;
 use crate::credentials::{connect_account, TokenProvider};
 use crate::error::{SyncError, SyncResult};
-use crate::mailbox::{sync_mailbox, uid_set};
+use crate::mailbox::{sync_mailbox, uid_set, OlderOutcome};
 use crate::roles;
 use crate::secrets::SecretStore;
 use crate::EventSink;
@@ -65,6 +66,12 @@ const FULL_SYNC_TIMEOUT: Duration = Duration::from_secs(20 * 60);
 /// 20 dakikasına kadar bekletmesin: aşılınca bağlantı baştan kurulur.
 const QUICK_SYNC_TIMEOUT: Duration = Duration::from_secs(90);
 const ACTION_TIMEOUT: Duration = Duration::from_secs(120);
+/// Kalıcı silme ve kutu boşaltma binlerce postayı parça parça siler.
+const PURGE_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+/// "Daha eski postalar" isteğinin (kutu başına bir parti) süre sınırı.
+const OLDER_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+/// Tek komutta kalıcı silinen en fazla posta (komut satırı kısa kalsın).
+const PURGE_CHUNK: usize = 500;
 /// Bağlantı kopması yüzünden bu kadar kez yarıda kalan işlemden vazgeçilir
 /// (kuyruğu sonsuza dek tıkamasın).
 const ACTION_MAX_ATTEMPTS: u32 = 5;
@@ -217,6 +224,18 @@ fn jittered(backoff: Duration, max: Duration) -> Duration {
     let pay = u64::from(nanos % 256);
     let extra = backoff.as_millis() as u64 * pay / 1024;
     (backoff + Duration::from_millis(extra)).min(max)
+}
+
+/// Kalıcı silme yalnız Çöp ve İstenmeyen kutularında yapılır.
+fn is_purgeable(role: MailboxRole) -> bool {
+    matches!(role, MailboxRole::Trash | MailboxRole::Junk)
+}
+
+fn not_purgeable() -> AppError {
+    AppError::new(
+        ErrorCode::Invalid,
+        "Yalnız Çöp ya da İstenmeyen kutusundaki postalar kalıcı silinebilir. Postayı önce Çöp'e taşı.",
+    )
 }
 
 /// Hesaba göre gruplanmış postalar: (hesap, eşitleniyor mu, yerler).
@@ -452,11 +471,26 @@ impl SyncManager {
         Ok(touched)
     }
 
-    /// Postaları yerelden siler ve sunucudan kalıcı silmeyi kuyruğa yazar.
-    /// Etkilenen kutuları döner.
-    pub fn delete_messages(&self, ids: &[MessageId]) -> AppResult<Vec<String>> {
+    /// Postaları **kalıcı** siler: yerelden hemen, sunucudan kalıcı kuyruk
+    /// üzerinden (çevrimdışıyken de kaybolmaz; bağlanınca uygulanır). Yalnız
+    /// Çöp ya da İstenmeyen kutusunda görünen postalar silinir: başka kutuda
+    /// bir posta varsa hiçbirine dokunulmaz (`Invalid`). Artık var olmayan
+    /// kimlikler sessizce atlanır. Etkilenen kutuları döner.
+    ///
+    /// Taşıması sunucuya henüz gitmemiş posta (ör. az önce silinip Çöp'e
+    /// düşen) sunucuda hâlâ kaynak kutusundadır; orada yalnız kendi UID'siyle
+    /// silinir (`apply_delete`).
+    pub fn purge_messages(&self, ids: &[MessageId]) -> AppResult<Vec<String>> {
+        let groups = self.by_account(ids)?;
+        if groups
+            .iter()
+            .flat_map(|(_, _, list)| list)
+            .any(|l| !is_purgeable(l.role))
+        {
+            return Err(not_purgeable());
+        }
         let mut touched = Vec::new();
-        for (account, syncable, list) in self.by_account(ids)? {
+        for (account, syncable, list) in groups {
             if syncable {
                 let items: Vec<ServerRef> = list
                     .iter()
@@ -466,17 +500,127 @@ impl SyncManager {
                         uid: l.server_uid,
                         uidvalidity: l.server_uidvalidity,
                         message_id: l.message_id_header.clone(),
+                        fallback_path: l.pending.then(|| l.mailbox_path.clone()),
                     })
                     .collect();
-                self.queue(&account, &Action::Delete { items }, None)?;
+                // Önce kuyruk, sonra yerel silme: araya hata girerse posta
+                // yerelde kalır (sunucudan silinecek ama listede duran posta,
+                // listeden kalkıp sunucuda kalan postadan iyidir).
+                for chunk in items.chunks(PURGE_CHUNK) {
+                    let action = Action::Delete {
+                        items: chunk.to_vec(),
+                    };
+                    self.store.action_push(&account, &action, None, now_ms())?;
+                }
             }
             let ids: Vec<MessageId> = list.iter().map(|l| l.id).collect();
             self.store.delete_messages(&ids)?;
+            if syncable {
+                self.send(&account, Command::Wake);
+            }
             touched.extend(list.into_iter().map(|l| l.mailbox_id));
         }
         touched.sort();
         touched.dedup();
         Ok(touched)
+    }
+
+    /// Çöp ya da İstenmeyen kutusunu boşaltır: yerelde görünen tüm postalar
+    /// kalıcı silinir ve sunucuda kutunun yerelde hiç indirilmemiş eski
+    /// postaları da (istek anındaki filigrana kadar) silinmek üzere kuyruğa
+    /// yazılır. Filigranın üstündeki (son eşitlemeden sonra gelen, kullanıcının
+    /// hiç görmediği) postaya dokunulmaz. Başka roldeki kutu
+    /// reddedilir (`Invalid`). (yerelden silinen posta sayısı, etkilenen
+    /// kutular) döner.
+    pub fn empty_mailbox(&self, mailbox_id: &str) -> AppResult<(u32, Vec<String>)> {
+        let info = self.store.mailbox(mailbox_id)?.ok_or_else(|| {
+            AppError::new(
+                ErrorCode::NotFound,
+                "Klasör bulunamadı; sunucuda silinmiş ya da yeniden adlandırılmış olabilir.",
+            )
+        })?;
+        if !is_purgeable(info.mailbox.role) {
+            return Err(not_purgeable());
+        }
+        let ids = self.store.message_ids_in(mailbox_id)?;
+        let mut touched = self.purge_messages(&ids)?;
+        let account = &info.mailbox.account_id;
+        // Kutu sunucuyla hiç eşitlenmediyse (yerelde yeni oluşturulmuş rol
+        // kutusu) sunucuda silinecek bilinen bir aralık yoktur.
+        if self.syncable(account)? && info.uidvalidity.is_some() && info.highest_uid > 0 {
+            let action = Action::Empty {
+                path: info.mailbox.path.clone(),
+                upto: info.highest_uid,
+                uidvalidity: info.uidvalidity,
+                since: None,
+            };
+            self.queue(account, &action, None)?;
+            if !touched.iter().any(|t| t == mailbox_id) {
+                touched.push(mailbox_id.to_owned());
+            }
+        }
+        Ok((ids.len() as u32, touched))
+    }
+
+    /// Kutunun bir sonraki eski partisini ayrı bir bağlantıyla indirir
+    /// (`messages_older`; `crate::mailbox::fetch_older`). Eşitlenmeyen kutuda
+    /// (tanıtım hesabı, gizli klasör, Gmail "Tüm Postalar") ve başına
+    /// ulaşılmış kutuda sunucuya gidilmez. Bağlantı kurulamazsa `Network`.
+    pub async fn fetch_older(&self, mailbox_id: &str) -> AppResult<OlderOutcome> {
+        let info = self.store.mailbox(mailbox_id)?.ok_or_else(|| {
+            AppError::new(
+                ErrorCode::NotFound,
+                "Klasör bulunamadı; sunucuda silinmiş ya da yeniden adlandırılmış olabilir.",
+            )
+        })?;
+        if info.older_done || !syncs(&info) {
+            return Ok(OlderOutcome::default());
+        }
+        let Some(account) = self
+            .store
+            .account(&info.mailbox.account_id)?
+            .filter(is_syncable)
+        else {
+            return Ok(OlderOutcome::default());
+        };
+        // Kalıcı silinmesi sırada bekleyen postalar yeniden indirilmez; kutu
+        // boşaltılıyorsa hiçbir şey indirilmez.
+        let mut skip: HashSet<u32> = HashSet::new();
+        for a in self.store.actions(&account.id)? {
+            match a.action {
+                Action::Delete { items } => skip.extend(
+                    items
+                        .into_iter()
+                        .filter(|r| r.path == info.mailbox.path)
+                        .filter_map(|r| r.uid),
+                ),
+                Action::Empty { path, .. } if path == info.mailbox.path => {
+                    return Ok(OlderOutcome::default())
+                }
+                _ => {}
+            }
+        }
+        let cfg = account
+            .imap
+            .clone()
+            .ok_or_else(|| AppError::new(ErrorCode::Invalid, "Hesabın IMAP ayarı yok."))?;
+        let work = async {
+            let mut session = connect_account(&cfg, &self.secrets, &self.tokens, &account).await?;
+            let out = crate::mailbox::fetch_older(&mut session, &self.store, &info, &skip).await;
+            let _ = timeout(Duration::from_secs(5), session.logout()).await;
+            out
+        };
+        let out = match timeout(OLDER_TIMEOUT, work).await {
+            Ok(Ok(out)) => out,
+            Ok(Err(e)) => return Err(e.to_app()),
+            Err(_) => return Err(SyncError::Timeout.to_app()),
+        };
+        if out.fetched == 0 && out.more {
+            // Kutu henüz eşitlenmemiş (ya da UIDVALIDITY değişmiş): önce
+            // olağan eşitleme kursun.
+            self.sync_path(&account.id, &info.mailbox.path);
+        }
+        Ok(out)
     }
 
     /// Roldeki kutu; yoksa yerelde oluşturulur (sunucuda ilk kullanımda
@@ -807,6 +951,9 @@ async fn run_session(
 
 /// İşlemin süre sınırı: ekleme boyutla uzar (yavaş bağlantıda büyük ek).
 fn action_timeout(a: &QueuedAction) -> Duration {
+    if matches!(a.action, Action::Delete { .. } | Action::Empty { .. }) {
+        return PURGE_TIMEOUT;
+    }
     let size = a.raw.as_ref().map_or(0, Vec::len) as u64;
     ACTION_TIMEOUT + Duration::from_secs(size / 20_000)
 }
@@ -850,14 +997,23 @@ async fn run_actions(
                     None => ctx.store.action_attempt(qa.id)?,
                 };
                 if attempts >= ACTION_MAX_ATTEMPTS {
-                    tracing::warn!(account = %ctx.account.id, action = ?qa.action, "sunucu işleminden vazgeçildi");
+                    tracing::warn!(account = %ctx.account.id, action = action_kind(&qa.action), "sunucu işleminden vazgeçildi");
                     ctx.store.action_done(qa.id)?;
+                    for path in purge_abandoned(ctx, &qa.action)? {
+                        enqueue(pending, Command::SyncPath(path));
+                    }
                 }
                 return Err(e);
             }
             Err(e) => {
                 tracing::warn!(account = %ctx.account.id, error = %e, "sunucu işlemi başarısız");
                 ctx.store.action_done(qa.id)?;
+                for path in purge_abandoned(ctx, &qa.action)? {
+                    let cmd = Command::SyncPath(path);
+                    if !pending.contains(&cmd) {
+                        pending.push_front(cmd);
+                    }
+                }
                 ctx.status(SyncState::Error {
                     message: e.to_app().message,
                 });
@@ -868,6 +1024,56 @@ async fn run_actions(
         }
     }
     Ok(())
+}
+
+/// Günlük için işlemin türü: içeriği (kutu yolu, Message-ID, yüzlerce posta
+/// yeri) yazılmaz.
+fn action_kind(action: &Action) -> &'static str {
+    match action {
+        Action::SetFlag { .. } => "bayrak",
+        Action::Moves => "taşıma",
+        Action::Append { .. } => "ekleme",
+        Action::Delete { .. } => "kalıcı silme",
+        Action::Draft { .. } => "taslak",
+        Action::Empty { .. } => "kutu boşaltma",
+        Action::Purge { .. } => "jmap silme",
+    }
+}
+
+/// Kalıcı silme ya da kutu boşaltma sunucuda uygulanamadı (sunucu reddetti
+/// ya da bağlantı art arda koptu) ve işlemden vazgeçildi: postalar yerelden
+/// silinmişti ama sunucuda duruyor. Sessizce kaybolmasınlar diye ilgili Çöp /
+/// İstenmeyen kutuları baştan (ilk eşitleme gibi, bildirimsiz) eşitlenir ve
+/// "daha eskisi yok" işaretleri kalkar: sunucuda kalan postalar listeye geri
+/// döner. Yeniden eşitlenecek kutu yollarını döner.
+fn purge_abandoned(ctx: &AccountCtx, action: &Action) -> SyncResult<Vec<String>> {
+    let mut paths: Vec<&str> = match action {
+        Action::Delete { items } => items
+            .iter()
+            .flat_map(|r| [Some(r.path.as_str()), r.fallback_path.as_deref()])
+            .flatten()
+            .collect(),
+        Action::Empty { path, .. } => vec![path.as_str()],
+        _ => return Ok(Vec::new()),
+    };
+    paths.sort_unstable();
+    paths.dedup();
+    let mut resync = Vec::new();
+    for path in paths {
+        let id = mh_store::mailbox_id(ctx.id(), path);
+        let Some(info) = ctx.store.mailbox(&id)? else {
+            continue;
+        };
+        ctx.store.set_mailbox_older_done(&id, false)?;
+        // Gelen kutusu gibi bir kaynak kutunun filigranı sıfırlanmaz: o an
+        // gelen yeni postanın bildirimi kaybolmasın.
+        if is_purgeable(info.mailbox.role) {
+            ctx.store
+                .set_mailbox_sync_state(&id, info.uidvalidity, info.uidnext, 0)?;
+            resync.push(path.to_owned());
+        }
+    }
+    Ok(resync)
 }
 
 /// Tek işlemi uygular; ardından eşitlenecek kutuları döner.
@@ -903,12 +1109,20 @@ async fn run_action(
                 .await?;
             Ok(vec![path.clone()])
         }
-        Action::Delete { items } => {
-            apply_delete(conn, items).await?;
-            Ok(Vec::new())
-        }
+        Action::Delete { items } => apply_delete(ctx, conn, items).await,
+        Action::Empty {
+            path,
+            upto,
+            uidvalidity,
+            ..
+        } => apply_empty(ctx, conn, path, *upto, *uidvalidity).await,
         Action::Draft { path, remove } => {
             drafts::apply(conn, path, qa.raw.as_deref(), remove).await
+        }
+        // JMAP hesaplarının işlemi; IMAP kuyruğunda işi yoktur.
+        Action::Purge { .. } => {
+            tracing::warn!(account = %ctx.account.id, "JMAP silme işlemi IMAP kuyruğunda, atlandı");
+            Ok(Vec::new())
         }
     }
 }
@@ -1374,22 +1588,62 @@ async fn apply_flag(
 }
 
 /// UID'leri taşır (MOVE; yoksa COPY + \Deleted + EXPUNGE).
-async fn move_uids(conn: &mut Conn, set: &str, dest: &str) -> SyncResult<()> {
+async fn move_uids(conn: &mut Conn, uids: &[u32], dest: &str) -> SyncResult<()> {
+    let set = uid_set(uids);
     if conn.has_move {
-        conn.session.uid_mv(set, dest).await?;
+        conn.session.uid_mv(&set, dest).await?;
     } else {
-        conn.session.uid_copy(set, dest).await?;
-        store_flags(conn, set, "+FLAGS.SILENT (\\Deleted)").await?;
-        expunge(conn, set).await?;
+        conn.session.uid_copy(&set, dest).await?;
+        expunge_uids(conn, uids).await?;
     }
     Ok(())
 }
 
-async fn expunge(conn: &mut Conn, set: &str) -> SyncResult<()> {
-    if conn.has_uidplus {
-        let _: Vec<u32> = conn.session.uid_expunge(set).await?.try_collect().await?;
-    } else {
-        let _: Vec<u32> = conn.session.expunge().await?.try_collect().await?;
+/// Seçili kutudan **yalnız** verilen UID'leri kalıcı siler (\Deleted +
+/// EXPUNGE), parça parça.
+///
+/// UIDPLUS varsa `UID EXPUNGE` yalnız bu UID'leri siler. Yoksa düz EXPUNGE
+/// kutudaki \Deleted işaretli HER postayı siler: başka bir istemcinin
+/// işaretleyip bıraktığı (henüz silmediği) postalar da giderdi. Bu yüzden
+/// önce onların işareti kaldırılır, yalnız bizimkiler işaretlenip silinir,
+/// sonra işaretleri geri konur. Araya bağlantı kopması girerse en kötü sonuç
+/// işaretin geri konmamasıdır: posta silinmez, yalnız "silinecek" işareti
+/// kalkar. Geriye kalan tek açık, arama ile EXPUNGE arasındaki birkaç
+/// milisaniyede başka bir istemcinin yeni bir postayı işaretlemesidir;
+/// UIDPLUS'sız sunucuda bundan kaçınmanın yolu yoktur.
+///
+/// Komutların durumu denetlenir (`crate::checked`): sunucu işaretlemeyi ya da
+/// silmeyi reddederse (salt okunur kutu, izin yok) hata döner; "silindi"
+/// sanılmaz.
+async fn expunge_uids(conn: &mut Conn, uids: &[u32]) -> SyncResult<()> {
+    for chunk in uids.chunks(PURGE_CHUNK) {
+        let set = uid_set(chunk);
+        let mark =
+            |set: &str, sign: char| format!("UID STORE {set} {sign}FLAGS.SILENT (\\Deleted)");
+        if conn.has_uidplus {
+            command_ok(&mut conn.session, &mark(&set, '+')).await?;
+            command_ok(&mut conn.session, &format!("UID EXPUNGE {set}")).await?;
+            continue;
+        }
+        let ours: HashSet<u32> = chunk.iter().copied().collect();
+        let others: Vec<u32> = uid_search(&mut conn.session, "DELETED")
+            .await?
+            .into_iter()
+            .filter(|u| !ours.contains(u))
+            .collect();
+        for part in others.chunks(PURGE_CHUNK) {
+            command_ok(&mut conn.session, &mark(&uid_set(part), '-')).await?;
+        }
+        let res = async {
+            command_ok(&mut conn.session, &mark(&set, '+')).await?;
+            command_ok(&mut conn.session, "EXPUNGE").await
+        }
+        .await;
+        // Sunucu reddetse de başkalarının işareti geri konur.
+        for part in others.chunks(PURGE_CHUNK) {
+            command_ok(&mut conn.session, &mark(&uid_set(part), '+')).await?;
+        }
+        res?;
     }
     Ok(())
 }
@@ -1476,7 +1730,7 @@ async fn move_group(
     let found = resolve(conn, validity, &wants, true).await?;
     let uids: Vec<u32> = found.iter().flatten().copied().collect();
     if !uids.is_empty() {
-        move_uids(conn, &uid_set(&uids), dest).await?;
+        move_uids(conn, &uids, dest).await?;
         out.moved = true;
         for (p, _) in items.iter().zip(&found).filter(|(_, f)| f.is_some()) {
             out.again |= ctx.store.confirm_move(p.id, dest_id, None, None)?;
@@ -1514,33 +1768,131 @@ async fn move_group(
     Ok(out)
 }
 
-/// Sunucudan kalıcı siler.
-async fn apply_delete(conn: &mut Conn, items: &[ServerRef]) -> SyncResult<()> {
+/// Kutu şu an Çöp ya da İstenmeyen rolünde mi (işlem çalışırken denetlenir)?
+fn purgeable_path(ctx: &AccountCtx, path: &str) -> SyncResult<bool> {
+    Ok(ctx
+        .store
+        .mailbox(&mh_store::mailbox_id(ctx.id(), path))?
+        .is_some_and(|m| is_purgeable(m.mailbox.role)))
+}
+
+/// Kalıcı silinecek postanın seçili kutudaki UID'si, UIDVALIDITY tutuyorsa.
+fn exact_uid(r: &ServerRef, validity: Option<u32>) -> Option<u32> {
+    r.uid
+        .filter(|_| r.uidvalidity.is_none() || validity.is_none() || r.uidvalidity == validity)
+}
+
+/// Postaları sunucudan kalıcı siler (`purge_messages`); ardından eşitlenecek
+/// kutuları döner.
+///
+/// Her posta kayıtlı kutusunda kendi UID'siyle aranır (varlığı denetlenir).
+/// Message-ID ile arama yalnız Çöp ve İstenmeyen kutularında yapılır: başka
+/// bir kutuda (taşıması bekleyen postanın kaynağı) aynı Message-ID'yi taşıyan
+/// bir kopya yanlışlıkla silinemez. Kaynağında bulunamayan posta (taşıması
+/// tam bu sırada uygulanmış) `fallback_path` kutusunda Message-ID ile aranır.
+async fn apply_delete(
+    ctx: &AccountCtx,
+    conn: &mut Conn,
+    items: &[ServerRef],
+) -> SyncResult<Vec<String>> {
+    let mut touched: Vec<String> = Vec::new();
+    let mut retry: Vec<ServerRef> = Vec::new();
+    let has_fallback = |r: &ServerRef| r.fallback_path.is_some() && r.message_id.is_some();
     for (path, group) in group_by(items.to_vec(), |r| r.path.clone()) {
         let Some(validity) = try_select(conn, &path).await? else {
+            retry.extend(group.into_iter().filter(has_fallback));
             continue;
         };
-        let wants: Vec<Want> = group
-            .into_iter()
-            .map(|r| Want {
-                uid: r.uid,
-                uidvalidity: r.uidvalidity,
-                message_id: r.message_id,
-            })
-            .collect();
-        let uids: Vec<u32> = resolve(conn, validity, &wants, false)
-            .await?
-            .into_iter()
-            .flatten()
-            .collect();
-        if uids.is_empty() {
+        let by_message_id = purgeable_path(ctx, &path)?;
+        let mut uids: Vec<u32> = Vec::new();
+        for chunk in group.chunks(PURGE_CHUNK) {
+            let known: Vec<u32> = chunk
+                .iter()
+                .filter_map(|r| exact_uid(r, validity))
+                .collect();
+            let existing: HashSet<u32> = if known.is_empty() {
+                HashSet::new()
+            } else {
+                uid_search(&mut conn.session, &format!("UID {}", uid_set(&known))).await?
+            };
+            for r in chunk {
+                if let Some(uid) = exact_uid(r, validity).filter(|u| existing.contains(u)) {
+                    uids.push(uid);
+                    continue;
+                }
+                let found = match r.message_id.as_deref() {
+                    Some(mid) if by_message_id => search_message_id(&mut conn.session, mid).await?,
+                    _ => None,
+                };
+                match found {
+                    Some(uid) => uids.push(uid),
+                    None if has_fallback(r) => retry.push(r.clone()),
+                    None => {}
+                }
+            }
+        }
+        if !uids.is_empty() {
+            expunge_uids(conn, &uids).await?;
+            touched.push(path);
+        }
+    }
+    // Taşıması bu arada uygulanmış postalar: hedef kutuda (Çöp / İstenmeyen).
+    for (path, group) in group_by(retry, |r| r.fallback_path.clone().unwrap_or_default()) {
+        if !purgeable_path(ctx, &path)? || try_select(conn, &path).await?.is_none() {
             continue;
         }
-        let set = uid_set(&uids);
-        store_flags(conn, &set, "+FLAGS.SILENT (\\Deleted)").await?;
-        expunge(conn, &set).await?;
+        let mut uids: Vec<u32> = Vec::new();
+        for r in &group {
+            if let Some(mid) = r.message_id.as_deref() {
+                uids.extend(search_message_id(&mut conn.session, mid).await?);
+            }
+        }
+        if !uids.is_empty() {
+            expunge_uids(conn, &uids).await?;
+            if !touched.contains(&path) {
+                touched.push(path);
+            }
+        }
     }
-    Ok(())
+    Ok(touched)
+}
+
+/// Kutuyu sunucuda boşaltır (`empty_mailbox`): `upto` ve altındaki UID'lerin
+/// tümü kalıcı silinir (yerelde hiç indirilmemiş eski postalar dahil). Kutu
+/// artık Çöp ya da İstenmeyen değilse (rol bu arada değişti) ya da
+/// UIDVALIDITY tutmuyorsa (UID'ler başka postaları gösteriyor olabilir)
+/// hiçbir şey silinmez; kutu yeniden eşitlenir.
+async fn apply_empty(
+    ctx: &AccountCtx,
+    conn: &mut Conn,
+    path: &str,
+    upto: u32,
+    uidvalidity: Option<u32>,
+) -> SyncResult<Vec<String>> {
+    if upto == 0 || !conn.server_paths.contains(path) {
+        return Ok(Vec::new());
+    }
+    if !purgeable_path(ctx, path)? {
+        tracing::warn!(account = %ctx.account.id, "boşaltılacak kutu artık çöp ya da istenmeyen değil, atlandı");
+        return Ok(Vec::new());
+    }
+    let Some(validity) = try_select(conn, path).await? else {
+        return Ok(Vec::new());
+    };
+    if uidvalidity.is_none() || validity != uidvalidity {
+        tracing::warn!(account = %ctx.account.id, "kutu boşaltılamadı: UIDVALIDITY değişmiş");
+        return Ok(vec![path.to_owned()]);
+    }
+    let mut uids: Vec<u32> = uid_search(&mut conn.session, &format!("UID 1:{upto}"))
+        .await?
+        .into_iter()
+        .filter(|u| *u <= upto)
+        .collect();
+    uids.sort_unstable();
+    if !uids.is_empty() {
+        expunge_uids(conn, &uids).await?;
+    }
+    Ok(vec![path.to_owned()])
 }
 
 // ------------------------------------------------------------------- IDLE
@@ -1835,6 +2187,7 @@ mod tests {
             uidnext: None,
             highest_uid: 0,
             nosync,
+            older_done: false,
         }
     }
 

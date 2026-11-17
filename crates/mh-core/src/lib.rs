@@ -608,6 +608,16 @@ pub struct BlockResult {
     pub ids: Vec<MessageId>,
 }
 
+/// `messages_older` komutunun sonucu.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct OlderResult {
+    /// Bu çağrıda sunucudan indirilen posta sayısı.
+    pub fetched: u32,
+    /// Görünümün kutularından en az birinde hâlâ daha eski posta var mı.
+    pub more: bool,
+}
+
 /// Engellenenler listesinin üst sınırı.
 pub const BLOCKED_MAX: usize = 500;
 
@@ -2404,6 +2414,40 @@ mod tests {
             .unwrap(),
             serde_json::json!({"address": "a@b.com", "moved": 3, "ids": [7, 8, 9]})
         );
+    }
+
+    #[test]
+    fn daha_eski_postalar_sonucu_ve_gorunum_sozlesmesi() {
+        assert_eq!(
+            serde_json::to_value(OlderResult {
+                fetched: 300,
+                more: true,
+            })
+            .unwrap(),
+            serde_json::json!({"fetched": 300, "more": true})
+        );
+        assert_eq!(
+            OlderResult::default(),
+            OlderResult {
+                fetched: 0,
+                more: false
+            }
+        );
+        // Arayüzün gönderdiği görünümler (`View`).
+        let v: View = serde_json::from_value(serde_json::json!({"kind": "inbox"})).unwrap();
+        assert_eq!(v, View::Inbox);
+        let v: View =
+            serde_json::from_value(serde_json::json!({"kind": "mailbox", "id": "a:Projeler"}))
+                .unwrap();
+        assert_eq!(
+            v,
+            View::Mailbox {
+                id: "a:Projeler".into()
+            }
+        );
+        // `mailbox_empty` rolü: 'trash' | 'junk'.
+        let r: MailboxRole = serde_json::from_value(serde_json::json!("junk")).unwrap();
+        assert_eq!(r, MailboxRole::Junk);
     }
 
     #[test]

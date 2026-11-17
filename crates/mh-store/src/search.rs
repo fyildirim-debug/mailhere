@@ -109,6 +109,9 @@ pub fn fts_query(input: &str) -> Option<String> {
     (!terms.is_empty()).then(|| terms.join(" "))
 }
 
+/// Tek aramada dönen en fazla sonuç (arayüzün arama listesi bu kadar ister).
+pub const SEARCH_LIMIT_MAX: u32 = 300;
+
 /// `in:` işlecinin hedefi.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Place {
@@ -122,12 +125,20 @@ enum Place {
 enum Filter {
     From(String),
     To(String),
+    /// Yalnız bilgi (Cc) alıcılarında (`cc:`).
+    Cc(String),
     Subject(String),
     HasAttachment,
     /// Doğrulama kodu içeren postalar (`has:kod` / `has:code`).
     HasCode,
     Unread,
+    /// Okunmuş postalar (`is:okunmuş` / `is:read`).
+    Read,
     Starred,
+    /// Bu bayttan büyük postalar (`larger:5mb` / `büyük:`).
+    Larger(u64),
+    /// Bu bayttan küçük postalar (`smaller:100kb` / `küçük:`).
+    Smaller(u64),
     /// Şüpheli postalar (`is:spam` / `is:şüpheli`): istenmeyen puanı eşiğin
     /// üstünde. İstenmeyen kutusu da aranır.
     Spam,
@@ -195,6 +206,29 @@ fn day_start(v: &str) -> Option<Millis> {
     Some(t.timestamp_millis())
 }
 
+/// Boyut değeri: sayı ve isteğe bağlı birim (`b`, `kb`, `mb`; 1 kb = 1024
+/// bayt). Birimsiz sayı bayttır; ondalık nokta ya da virgülle yazılabilir
+/// ("1,5mb"). Tanınmayan değer `None` (parça düz metin sayılır).
+fn size_bytes(v: &str) -> Option<u64> {
+    let v = v.trim().to_ascii_lowercase().replace(',', ".");
+    let (number, unit) = match v.find(|c: char| !(c.is_ascii_digit() || c == '.')) {
+        Some(i) => v.split_at(i),
+        None => (v.as_str(), ""),
+    };
+    let scale: f64 = match unit.trim() {
+        "" | "b" => 1.0,
+        "kb" => 1024.0,
+        "mb" => 1024.0 * 1024.0,
+        _ => return None,
+    };
+    if number.is_empty() || number.matches('.').count() > 1 || number.len() > 15 {
+        return None;
+    }
+    let n: f64 = number.parse().ok()?;
+    let bytes = n * scale;
+    (bytes.is_finite() && bytes >= 0.0).then_some(bytes.round() as u64)
+}
+
 /// Tek bir `anahtar:değer` parçasını işlece çevirir; tanınmazsa `None`
 /// (parça düz metin sayılır).
 fn filter_of(key: &str, raw: &str) -> Option<Filter> {
@@ -204,9 +238,12 @@ fn filter_of(key: &str, raw: &str) -> Option<Filter> {
     }
     let folded = fold_loose(value);
     Some(match fold_loose(key).as_str() {
-        "from" => Filter::From(folded),
-        "to" => Filter::To(folded),
+        "from" | "kimden" => Filter::From(folded),
+        "to" | "kime" => Filter::To(folded),
+        "cc" => Filter::Cc(folded),
         "subject" | "konu" => Filter::Subject(folded),
+        "larger" | "buyuk" => Filter::Larger(size_bytes(value)?),
+        "smaller" | "kucuk" => Filter::Smaller(size_bytes(value)?),
         "has" => match folded.as_str() {
             "attachment" | "ek" => Filter::HasAttachment,
             "code" | "kod" => Filter::HasCode,
@@ -214,6 +251,7 @@ fn filter_of(key: &str, raw: &str) -> Option<Filter> {
         },
         "is" => match folded.as_str() {
             "unread" | "okunmamis" => Filter::Unread,
+            "read" | "okunmus" => Filter::Read,
             "starred" | "yildizli" => Filter::Starred,
             "spam" | "supheli" => Filter::Spam,
             _ => return None,
@@ -251,13 +289,24 @@ impl Store {
     /// metin varsa en alakalı ve yeni önce, yoksa yeniden eskiye. `in:`
     /// verilmedikçe çöp ve istenmeyen kutuları hariçtir; `is:şüpheli`
     /// istenmeyen kutusunu da arar (taşınan şüpheli postalar oradadır).
-    pub fn search(&self, q: &str, limit: u32) -> AppResult<Vec<MessageSummary>> {
+    ///
+    /// `account_ids` verilirse yalnız o hesaplar aranır; süzme SQL'de, sınırdan
+    /// (`limit`) önce uygulanır. `None` tüm hesaplar, boş liste sonuç yok.
+    pub fn search(
+        &self,
+        q: &str,
+        limit: u32,
+        account_ids: Option<&[String]>,
+    ) -> AppResult<Vec<MessageSummary>> {
         let parsed = parse_query(q);
         let text = fts_query(&parsed.text);
         if text.is_none() && parsed.filters.is_empty() {
             return Ok(Vec::new());
         }
-        let limit = limit.clamp(1, 200) as i64;
+        if account_ids.is_some_and(<[String]>::is_empty) {
+            return Ok(Vec::new());
+        }
+        let limit = limit.clamp(1, SEARCH_LIMIT_MAX) as i64;
         self.with(|c| {
             let mut sql = match &text {
                 Some(_) => format!(
@@ -286,6 +335,10 @@ impl Store {
                         p.push(Value::Text(v.clone()));
                         p.push(Value::Text(v.clone()));
                     }
+                    Filter::Cc(v) => {
+                        sql += " AND instr(mh_addrs(m.cc_addrs), ?) > 0";
+                        p.push(Value::Text(v.clone()));
+                    }
                     Filter::Subject(v) => {
                         sql += " AND instr(mh_fold(m.subject), ?) > 0";
                         p.push(Value::Text(v.clone()));
@@ -293,6 +346,15 @@ impl Store {
                     Filter::HasAttachment => sql += " AND m.has_attachments = 1",
                     Filter::HasCode => sql += " AND m.otp IS NOT NULL",
                     Filter::Unread => sql += " AND m.unread = 1",
+                    Filter::Read => sql += " AND m.unread = 0",
+                    Filter::Larger(bytes) => {
+                        sql += " AND m.size > ?";
+                        p.push(Value::Integer((*bytes).min(i64::MAX as u64) as i64));
+                    }
+                    Filter::Smaller(bytes) => {
+                        sql += " AND m.size < ?";
+                        p.push(Value::Integer((*bytes).min(i64::MAX as u64) as i64));
+                    }
                     Filter::Starred => sql += " AND m.starred = 1",
                     Filter::Spam => {
                         junk_too = true;
@@ -335,6 +397,13 @@ impl Store {
                         p.extend(ids.into_iter().map(Value::Text));
                     }
                 }
+            }
+            if let Some(accounts) = account_ids {
+                sql += &format!(
+                    " AND m.account_id IN ({})",
+                    vec!["?"; accounts.len()].join(",")
+                );
+                p.extend(accounts.iter().cloned().map(Value::Text));
             }
             if !placed {
                 sql += if junk_too {
@@ -523,7 +592,7 @@ mod tests {
         let junk = add("a:Junk", "Ödül kazandınız", 14, Some("111222"), 90);
         let trash = add("a:Trash", "Silinmiş kod", 15, Some("333444"), 100);
         let ids = |q: &str| {
-            s.search(q, 50)
+            s.search(q, 50, None)
                 .unwrap()
                 .into_iter()
                 .map(|m| m.id)
@@ -545,6 +614,174 @@ mod tests {
         assert!(!row(code).spam && !row(low).spam && !row(plain).spam);
         assert!(row(spam).spam && row(junk).spam);
         assert_eq!(row(plain).otp, None);
+    }
+
+    #[test]
+    fn boyut_degeri() {
+        assert_eq!(size_bytes("0"), Some(0));
+        assert_eq!(size_bytes("1500"), Some(1500));
+        assert_eq!(size_bytes("1500b"), Some(1500));
+        assert_eq!(size_bytes("100kb"), Some(100 * 1024));
+        assert_eq!(size_bytes("5MB"), Some(5 * 1024 * 1024));
+        assert_eq!(size_bytes("5 mb"), Some(5 * 1024 * 1024));
+        assert_eq!(size_bytes("1.5mb"), Some(1_572_864));
+        assert_eq!(size_bytes("1,5mb"), Some(1_572_864), "virgüllü ondalık");
+        assert_eq!(size_bytes(".5kb"), Some(512));
+        // Tanınmayan birim, sayı olmayan ya da anlamsız değer işleç sayılmaz.
+        for bad in [
+            "", "mb", "5gb", "5k", "beş", "-5mb", "1.2.3mb", "5mbx", "1e9", "..",
+        ] {
+            assert_eq!(size_bytes(bad), None, "{bad}");
+        }
+        // Aşırı büyük sayı taşmaz.
+        assert_eq!(size_bytes("9999999999999999"), None);
+        assert!(size_bytes("999999999999999mb").is_some());
+    }
+
+    #[test]
+    fn yeni_isleclere_ayrilir() {
+        let p = parse_query(
+            "larger:5mb smaller:100KB büyük:1,5mb küçük:2000 cc:ayşe is:okunmuş IS:read kimden:Kerem kime:\"Ayşe D\"",
+        );
+        assert!(p.text.is_empty(), "{}", p.text);
+        assert_eq!(
+            p.filters,
+            vec![
+                Filter::Larger(5 * 1024 * 1024),
+                Filter::Smaller(100 * 1024),
+                Filter::Larger(1_572_864),
+                Filter::Smaller(2000),
+                Filter::Cc("ayse".into()),
+                Filter::Read,
+                Filter::Read,
+                Filter::From("kerem".into()),
+                Filter::To("ayse d".into()),
+            ]
+        );
+        // Aksansız yazım da geçer; bozuk boyut düz metindir.
+        assert_eq!(
+            parse_query("buyuk:1kb kucuk:1kb is:okunmus").filters,
+            vec![Filter::Larger(1024), Filter::Smaller(1024), Filter::Read]
+        );
+        let p = parse_query("larger:çok smaller: büyük:5gb");
+        assert!(p.filters.is_empty(), "{:?}", p.filters);
+        assert_eq!(p.text, "larger:çok smaller: büyük:5gb");
+    }
+
+    #[test]
+    fn boyut_bilgi_okunmus_ve_es_anlamli_islecler() {
+        let s = store_with_account("a");
+        s.upsert_mailbox("a", "INBOX", "INBOX", MailboxRole::Inbox, None, false)
+            .unwrap();
+        let add = |subject: &str, date, size: u64, f: &dyn Fn(&mut crate::NewMessage)| {
+            let mut m = msg("a", "a:INBOX", subject, date);
+            m.size = size;
+            f(&mut m);
+            s.upsert_message(&m).unwrap().id
+        };
+        let kucuk = add("Kısa not", 10, 900, &|m| {
+            m.from = Address::new(Some("Kerem Öz"), "kerem@ornek.com.tr");
+            m.to = vec![Address::new(Some("Furkan"), "furkan@ornek.com.tr")];
+        });
+        let orta = add("Sunum taslağı", 11, 200 * 1024, &|m| {
+            m.from = Address::new(Some("Ayşe Demir"), "ayse@eposta.com");
+            m.to = vec![Address::new(Some("Furkan"), "furkan@ornek.com.tr")];
+            m.cc = vec![Address::new(Some("Kerem Öz"), "kerem@ornek.com.tr")];
+        });
+        let buyuk = add("Video kaydı", 12, 6 * 1024 * 1024, &|m| {
+            m.from = Address::new(Some("Ayşe Demir"), "ayse@eposta.com");
+            m.to = vec![Address::new(Some("Kerem Öz"), "kerem@ornek.com.tr")];
+        });
+        // Boyutu bilinmeyen (0) eski satır "küçük" sayılır, "büyük" sayılmaz.
+        let bilinmeyen = add("Boyutsuz", 13, 0, &|_| {});
+        s.set_flags(&[orta, buyuk], Some(false), None).unwrap();
+        let ids = |q: &str| {
+            s.search(q, 50, None)
+                .unwrap()
+                .into_iter()
+                .map(|m| m.id)
+                .collect::<Vec<_>>()
+        };
+        // Boyut: kesin büyük / kesin küçük.
+        assert_eq!(ids("larger:5mb"), vec![buyuk]);
+        assert_eq!(ids("büyük:100kb"), vec![buyuk, orta]);
+        assert_eq!(
+            ids("larger:204800"),
+            vec![buyuk],
+            "eşit boyut büyük sayılmaz"
+        );
+        assert_eq!(ids("larger:204799"), vec![buyuk, orta]);
+        assert_eq!(ids("smaller:100kb"), vec![bilinmeyen, kucuk]);
+        assert_eq!(
+            ids("küçük:900"),
+            vec![bilinmeyen],
+            "eşit boyut küçük sayılmaz"
+        );
+        assert_eq!(ids("larger:1kb smaller:1mb"), vec![orta]);
+        assert_eq!(ids("larger:1kb sunum"), vec![orta], "serbest metinle");
+        // Bilgi (Cc): yalnız bilgi alıcıları; `to:` ikisini de arar.
+        assert_eq!(ids("cc:kerem"), vec![orta]);
+        assert_eq!(ids("cc:\"kerem öz\""), vec![orta]);
+        assert!(ids("cc:furkan").is_empty());
+        assert_eq!(ids("to:kerem"), vec![buyuk, orta]);
+        // Okunmuş / okunmamış.
+        assert_eq!(ids("is:okunmuş"), vec![buyuk, orta]);
+        assert_eq!(ids("is:read"), ids("is:okunmus"));
+        assert_eq!(ids("is:unread"), vec![bilinmeyen, kucuk]);
+        assert!(ids("is:read is:unread").is_empty());
+        // kimden: / kime: from: / to: ile aynıdır.
+        assert_eq!(ids("kimden:ayşe"), ids("from:ayse"));
+        assert_eq!(ids("kimden:ayşe"), vec![buyuk, orta]);
+        assert_eq!(ids("kime:kerem"), ids("to:kerem"));
+        assert_eq!(ids("kimden:kerem kime:furkan"), vec![bilinmeyen, kucuk]);
+    }
+
+    #[test]
+    fn hesap_suzgeci_sinirdan_once() {
+        let s = store_with_account("a");
+        s.insert_account(&crate::testutil::account("b")).unwrap();
+        for acc in ["a", "b"] {
+            s.upsert_mailbox(acc, "INBOX", "INBOX", MailboxRole::Inbox, None, false)
+                .unwrap();
+        }
+        // `a` hesabında daha yeni 5 posta, `b` hesabında daha eski 2 posta.
+        for i in 0..5 {
+            s.upsert_message(&msg("a", "a:INBOX", &format!("Rapor a{i}"), 100 + i))
+                .unwrap();
+        }
+        let b1 = s
+            .upsert_message(&msg("b", "b:INBOX", "Rapor b1", 10))
+            .unwrap()
+            .id;
+        let b2 = s
+            .upsert_message(&msg("b", "b:INBOX", "Rapor b2", 11))
+            .unwrap()
+            .id;
+        let ids = |q: &str, limit: u32, accounts: Option<&[String]>| {
+            s.search(q, limit, accounts)
+                .unwrap()
+                .into_iter()
+                .map(|m| m.id)
+                .collect::<Vec<_>>()
+        };
+        let only_b = ["b".to_string()];
+        // Süzgeç yokken sınır yeni postalarla dolar: `b` hiç görünmez.
+        let top = ids("is:unread", 3, None);
+        assert_eq!(top.len(), 3);
+        assert!(!top.contains(&b1) && !top.contains(&b2));
+        // Süzme SQL'de, sınırdan önce: `b` postaları sınıra takılmaz.
+        assert_eq!(ids("is:unread", 3, Some(&only_b)), vec![b2, b1]);
+        assert_eq!(ids("rapor", 3, Some(&only_b)).len(), 2, "serbest metinle");
+        // Yok (`None`) tüm hesaplar; boş liste sonuç yok; bilinmeyen hesap boş.
+        assert_eq!(ids("rapor", 50, None).len(), 7);
+        assert!(ids("rapor", 50, Some(&[])).is_empty());
+        assert!(ids("rapor", 50, Some(&["yok".to_string()])).is_empty());
+        let both = ["a".to_string(), "b".to_string()];
+        assert_eq!(ids("rapor", 50, Some(&both)).len(), 7);
+        // Hesap kimliği sorguya parametreyle girer.
+        assert!(ids("rapor", 50, Some(&["' OR 1=1 --".to_string()])).is_empty());
+        // Sınır üst sınırı aşamaz.
+        assert_eq!(ids("rapor", 100_000, None).len(), 7);
     }
 
     #[test]
@@ -578,7 +815,7 @@ mod tests {
         s.set_message_tag(&[m2], "e2", true).unwrap();
         s.set_message_tag(&[m3], "e3", true).unwrap();
         let ids = |q: &str| {
-            s.search(q, 50)
+            s.search(q, 50, None)
                 .unwrap()
                 .into_iter()
                 .map(|m| m.id)
@@ -616,7 +853,7 @@ mod tests {
         s.upsert_message(&gone).unwrap();
 
         let subj = |q: &str| {
-            s.search(q, 10)
+            s.search(q, 10, None)
                 .unwrap()
                 .into_iter()
                 .map(|m| m.subject)
@@ -694,7 +931,7 @@ mod tests {
         s.set_flags(&[eski], None, Some(true)).unwrap();
 
         let ids = |q: &str| {
-            s.search(q, 50)
+            s.search(q, 50, None)
                 .unwrap()
                 .into_iter()
                 .map(|m| m.id)

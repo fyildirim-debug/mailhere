@@ -966,6 +966,13 @@ mod tests {
             assert!(!allows(cmd, true, true), "{cmd}");
             assert!(allows(cmd, true, false), "{cmd}");
         }
+        // Kalıcı silme, kutu boşaltma ve daha eski postaların indirilmesi de
+        // kilitliyken çalışmaz.
+        for cmd in ["messages_delete", "mailbox_empty", "messages_older"] {
+            assert!(!allows(cmd, false, false), "{cmd}");
+            assert!(!allows(cmd, true, true), "{cmd}");
+            assert!(allows(cmd, true, false), "{cmd}");
+        }
         // Açık: her şey.
         assert!(allows("messages_list", true, false));
         assert!(allows("settings_get", true, false));

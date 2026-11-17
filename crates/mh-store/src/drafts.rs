@@ -133,8 +133,8 @@ mod tests {
         assert_eq!(s.summary(first.id).unwrap().unwrap().subject, "İkinci");
         assert_eq!(s.counts(0).unwrap().drafts, 1);
         // Arama dizini yeni sürümü bilir.
-        assert_eq!(s.search("ikinci", 10).unwrap().len(), 1);
-        assert!(s.search("ilk", 10).unwrap().is_empty());
+        assert_eq!(s.search("ikinci", 10, None).unwrap().len(), 1);
+        assert!(s.search("ilk", 10, None).unwrap().is_empty());
     }
 
     #[test]

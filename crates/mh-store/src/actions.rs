@@ -34,6 +34,11 @@ pub struct ServerRef {
     pub uidvalidity: Option<u32>,
     /// UID bilinmiyor ya da geçersizse Message-ID ile aranır.
     pub message_id: Option<String>,
+    /// Posta `path` kutusunda bulunamazsa Message-ID ile aranacak ikinci
+    /// kutu: taşıması sunucuya henüz gitmemiş postanın hedefi (kalıcı silme
+    /// kuyruğa yazılırken taşıma tam o anda uygulanmış olabilir).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback_path: Option<String>,
 }
 
 /// Sıradaki sunucu işlemi.
@@ -63,6 +68,29 @@ pub enum Action {
         path: String,
         remove: Vec<ServerRef>,
     },
+    /// Kutuyu boşalt (Çöp ya da İstenmeyen; `mailbox_empty`): yerelde hiç
+    /// indirilmemiş eski postalar da sunucudan kalıcı silinir. Kullanıcının
+    /// son gördüğü durumdan sonra gelen ya da değişen postaya dokunulmaz:
+    /// IMAP'te yalnız `upto` ve altındaki UID'ler (istek anındaki filigran;
+    /// `uidvalidity` tutmuyorsa hiçbiri), JMAP'te `since` durumundan beri
+    /// oluşmamış ve değişmemiş postalar (durum yoksa ya da fark
+    /// hesaplanamıyorsa hiçbiri). Kutunun rolü işlem çalışırken yeniden
+    /// denetlenir.
+    Empty {
+        /// IMAP kutu yolu ya da JMAP kutu kimliği.
+        path: String,
+        #[serde(default)]
+        upto: u32,
+        #[serde(default)]
+        uidvalidity: Option<u32>,
+        /// JMAP: istek anında yerelde eşitlenmiş `Email` durumu.
+        #[serde(default)]
+        since: Option<String>,
+    },
+    /// JMAP: postaları sunucudan kalıcı sil (`messages_delete`,
+    /// `mailbox_empty`). Yalnız Çöp ve İstenmeyen kutularından çıkarılır;
+    /// başka kutuda da duran posta yok edilmez (`mh_jmap::ops::purge_emails`).
+    Purge { ids: Vec<String> },
 }
 
 /// Kuyruktaki bir işlem.
@@ -160,7 +188,12 @@ impl Store {
                     }
                 }
                 Action::Delete { items } if items.is_empty() => return Ok(None),
-                Action::Append { .. } | Action::Delete { .. } | Action::Draft { .. } => {}
+                Action::Purge { ids } if ids.is_empty() => return Ok(None),
+                Action::Append { .. }
+                | Action::Delete { .. }
+                | Action::Draft { .. }
+                | Action::Empty { .. }
+                | Action::Purge { .. } => {}
             }
             tx.execute(
                 "INSERT INTO actions (account_id, payload, raw, created_at) VALUES (?1, ?2, ?3, ?4)",
@@ -399,6 +432,7 @@ mod tests {
                         uid: Some(4),
                         uidvalidity: Some(9),
                         message_id: None,
+                        fallback_path: None,
                     }],
                 },
                 None,
@@ -411,5 +445,53 @@ mod tests {
         assert_eq!(list.len(), 2);
         assert_eq!(list[0], flag(&[7], ServerFlag::Seen, true));
         assert!(matches!(&list[1], Action::Delete { items } if items[0].uid == Some(4)));
+    }
+
+    #[test]
+    fn kalici_silme_islemleri_kuyrukta() {
+        let s = store_with_account("a");
+        // Önceki sürümün yazdığı silme kaydı (fallbackPath yok) okunur.
+        s.with(|c| {
+            c.execute(
+                "INSERT INTO actions (account_id, payload, created_at) VALUES ('a',
+                 '{\"kind\":\"delete\",\"items\":[{\"path\":\"Trash\",\"uid\":4,\"uidvalidity\":9,\"messageId\":null}]}', 0)",
+                [],
+            )
+        })
+        .unwrap();
+        let empty = Action::Empty {
+            path: "Trash".into(),
+            upto: 120,
+            uidvalidity: Some(9),
+            since: None,
+        };
+        s.action_push("a", &empty, None, 1).unwrap();
+        let purge = Action::Purge {
+            ids: vec!["M1".into(), "M2".into()],
+        };
+        s.action_push("a", &purge, None, 2).unwrap();
+        // Boş silme kuyruğa girmez.
+        assert_eq!(
+            s.action_push("a", &Action::Purge { ids: vec![] }, None, 3)
+                .unwrap(),
+            None
+        );
+        let list = kinds(&s, "a");
+        assert_eq!(list.len(), 3);
+        assert_eq!(
+            list[0],
+            Action::Delete {
+                items: vec![ServerRef {
+                    path: "Trash".into(),
+                    uid: Some(4),
+                    uidvalidity: Some(9),
+                    message_id: None,
+                    fallback_path: None,
+                }]
+            }
+        );
+        // Aynı kutu iki kez boşaltılabilir: birleştirilmez, sırası korunur.
+        assert_eq!(list[1], empty);
+        assert_eq!(list[2], purge);
     }
 }

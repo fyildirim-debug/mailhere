@@ -77,6 +77,10 @@ pub struct State {
     pub session_overrides: Vec<(String, String)>,
     /// Gelen API isteklerinin yöntem adları.
     pub calls: Vec<String>,
+    /// `maxObjectsInGet` (0: varsayılan 2; istemcinin parçalı istekleri denensin).
+    pub max_get: usize,
+    /// Sunucunun `Email/query` için uyguladığı en büyük sınır (0: yok).
+    pub query_limit: usize,
 }
 
 impl State {
@@ -98,6 +102,23 @@ impl State {
 
     pub fn subscriber_count(&self) -> usize {
         self.subscribers.iter().filter(|s| !s.is_closed()).count()
+    }
+
+    fn max_get(&self) -> usize {
+        if self.max_get == 0 {
+            2
+        } else {
+            self.max_get
+        }
+    }
+
+    /// Kutudaki postaların kimlikleri.
+    pub fn ids_in(&self, mailbox: &str) -> Vec<String> {
+        self.emails
+            .values()
+            .filter(|e| e.mailbox_ids.contains(mailbox))
+            .map(|e| e.id.clone())
+            .collect()
     }
 
     pub fn role_id(&self, role: &str) -> Option<String> {
@@ -413,7 +434,7 @@ async fn handle(
         let st = state.lock().unwrap();
         // Küçük sınırlar: istemcinin parçalı istekleri denensin.
         let caps = json!({
-            "urn:ietf:params:jmap:core": { "maxObjectsInGet": 2, "maxCallsInRequest": 4, "maxSizeUpload": 50_000_000 },
+            "urn:ietf:params:jmap:core": { "maxObjectsInGet": st.max_get(), "maxCallsInRequest": 4, "maxSizeUpload": 50_000_000 },
             "urn:ietf:params:jmap:mail": {},
             "urn:ietf:params:jmap:submission": {},
         });
@@ -594,7 +615,7 @@ fn api(st: &mut State, name: &str, a: &Value) -> Vec<(String, Value)> {
                 .iter()
                 .map(|v| v.as_str().unwrap().to_owned())
                 .collect();
-            if ids.len() > 2 {
+            if ids.len() > st.max_get() {
                 return err("requestTooLarge");
             }
             let mut list = Vec::new();
@@ -617,11 +638,30 @@ fn api(st: &mut State, name: &str, a: &Value) -> Vec<(String, Value)> {
                 .values()
                 .filter(|e| e.mailbox_ids.contains(mb))
                 .collect();
-            list.sort_by_key(|e| std::cmp::Reverse(e.received_at));
-            let ids: Vec<&String> = list.iter().take(limit).map(|e| &e.id).collect();
-            one(
-                json!({ "accountId": ACCOUNT, "queryState": "q", "canCalculateChanges": false, "position": 0, "ids": ids }),
-            )
+            // Kararlı sıra (RFC 8620 §5.5): alınış zamanı, eşitse kimlik.
+            list.sort_by(|a, b| {
+                b.received_at
+                    .cmp(&a.received_at)
+                    .then_with(|| a.id.cmp(&b.id))
+            });
+            let position = a["position"].as_u64().unwrap_or(0) as usize;
+            let clamped = st.query_limit > 0 && limit > st.query_limit;
+            let limit = if clamped { st.query_limit } else { limit };
+            let ids: Vec<&String> = list
+                .iter()
+                .skip(position)
+                .take(limit)
+                .map(|e| &e.id)
+                .collect();
+            let mut r = json!({ "accountId": ACCOUNT, "queryState": "q", "canCalculateChanges": false,
+                "position": position, "ids": ids });
+            if a["calculateTotal"].as_bool() == Some(true) {
+                r["total"] = json!(list.len());
+            }
+            if clamped {
+                r["limit"] = json!(limit);
+            }
+            one(r)
         }
         "Email/changes" => {
             let Some(since) = state_num(&a["sinceState"], 'e') else {

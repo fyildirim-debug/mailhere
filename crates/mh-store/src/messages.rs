@@ -101,6 +101,9 @@ impl NewMessage {
     }
 }
 
+/// Tek sorguda `IN (...)` listesine giren en fazla kimlik.
+const ID_CHUNK: usize = 400;
+
 /// Ekleme sonucu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UpsertOutcome {
@@ -813,16 +816,29 @@ impl Store {
 
     /// Sunucu işlemi için postaların yerleri.
     pub fn locations(&self, ids: &[MessageId]) -> AppResult<Vec<MessageLocation>> {
-        if ids.is_empty() {
-            return Ok(Vec::new());
+        let mut out = Vec::with_capacity(ids.len());
+        // Parça parça: kutuyu boşaltmak binlerce kimlik verebilir.
+        for chunk in ids.chunks(ID_CHUNK) {
+            let rows: Vec<MessageLocation> = self.with(|c| {
+                let mut st = c.prepare(&format!(
+                    "SELECT {LOCATION_COLS} FROM messages m JOIN mailboxes b ON b.id = m.mailbox_id
+                     WHERE m.id IN ({})",
+                    in_list(chunk.len())
+                ))?;
+                let rows = st.query_map(params_from_iter(ids_params(chunk)), row_to_location)?;
+                rows.collect()
+            })?;
+            out.extend(rows);
         }
+        Ok(out)
+    }
+
+    /// Kutuda yerelde görünen tüm postaların kimlikleri (`mailbox_empty`).
+    pub fn message_ids_in(&self, mailbox_id: &str) -> AppResult<Vec<MessageId>> {
         self.with(|c| {
-            let mut st = c.prepare(&format!(
-                "SELECT {LOCATION_COLS} FROM messages m JOIN mailboxes b ON b.id = m.mailbox_id
-                 WHERE m.id IN ({})",
-                in_list(ids.len())
-            ))?;
-            let rows = st.query_map(params_from_iter(ids_params(ids)), row_to_location)?;
+            let mut st =
+                c.prepare_cached("SELECT id FROM messages WHERE mailbox_id = ?1 ORDER BY id")?;
+            let rows = st.query_map([mailbox_id], |r| r.get(0))?;
             rows.collect()
         })
     }
@@ -1134,11 +1150,16 @@ impl Store {
         if ids.is_empty() {
             return Ok(());
         }
-        self.with(|c| {
-            c.execute(
-                &format!("DELETE FROM messages WHERE id IN ({})", in_list(ids.len())),
-                params_from_iter(ids_params(ids)),
-            )?;
+        self.with_tx(|tx| {
+            for chunk in ids.chunks(ID_CHUNK) {
+                tx.execute(
+                    &format!(
+                        "DELETE FROM messages WHERE id IN ({})",
+                        in_list(chunk.len())
+                    ),
+                    params_from_iter(ids_params(chunk)),
+                )?;
+            }
             Ok(())
         })
     }
@@ -1165,7 +1186,7 @@ impl Store {
 
     /// UIDVALIDITY değişince kutunun sunucu kopyalarını siler. Bu kutudan
     /// taşınmayı bekleyen postaların eski UID'si unutulur (taşıma sırasında
-    /// Message-ID ile aranır).
+    /// Message-ID ile aranır). "Daha eskisi yok" işareti de kalkar.
     pub fn clear_mailbox_uids(&self, mailbox_id: &str) -> AppResult<()> {
         self.with_tx(|tx| {
             tx.execute(
@@ -1174,6 +1195,11 @@ impl Store {
             )?;
             tx.execute(
                 "UPDATE messages SET src_uid = NULL, src_uidvalidity = NULL WHERE src_mailbox_id = ?1",
+                [mailbox_id],
+            )?;
+            // Kutu baştan indirilecek: daha eski postalar yeniden sorulabilir.
+            tx.execute(
+                "UPDATE mailboxes SET older_done = 0 WHERE id = ?1",
                 [mailbox_id],
             )?;
             Ok(())

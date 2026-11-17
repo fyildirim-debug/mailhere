@@ -2,8 +2,10 @@
 //!
 //! İlk eşitleme her önemli kutunun en yeni 300 postasını `Email/query` ile
 //! bulur; sonraki eşitlemeler `Email/changes` ve `Mailbox/changes` ile yalnız
-//! farkı alır. Durum dizgeleri depoda (`jmap_accounts`) kalıcıdır. Gövde
-//! (ham RFC 5322) gerektiğinde blob olarak indirilir.
+//! farkı alır. Daha eski postalar istenince ([`fetch_older`]) kutu başına
+//! parti parti iner; baştan eşitleme onları silmez. Durum dizgeleri depoda
+//! (`jmap_accounts`) kalıcıdır. Gövde (ham RFC 5322) gerektiğinde blob olarak
+//! indirilir.
 
 use std::collections::{HashMap, HashSet};
 
@@ -454,7 +456,7 @@ fn apply_light(
     Ok(refetch)
 }
 
-/// Tam alınmış postaları yazar.
+/// Tam alınmış postaları yazar; yerele yeni eklenen posta sayısını döner.
 fn apply_full(
     store: &Store,
     account_id: &str,
@@ -462,8 +464,9 @@ fn apply_full(
     emails: &[Email],
     notify: bool,
     out: &mut SyncOutcome,
-) -> JmapResult<()> {
+) -> JmapResult<u32> {
     let now = now_ms();
+    let mut inserted = 0u32;
     let mut remove = Vec::new();
     for e in emails {
         let Some((mailbox, role)) = boxes.primary(e) else {
@@ -474,6 +477,9 @@ fn apply_full(
         let thread = e.thread_id.as_deref().map(|t| format!("j:{t}"));
         let r = store.jmap_upsert(&m, &e.id, e.blob_id.as_deref(), thread.as_deref())?;
         out.changed.extend(r.touched);
+        if r.inserted {
+            inserted += 1;
+        }
         if r.inserted && notify {
             if role == MailboxRole::Inbox && m.unread && !e.keyword("$draft") {
                 out.new_unread.push(r.id);
@@ -488,7 +494,7 @@ fn apply_full(
     if !remove.is_empty() {
         out.changed.extend(store.jmap_remove(account_id, &remove)?);
     }
-    Ok(())
+    Ok(inserted)
 }
 
 /// Baştan eşitleme: kutular ve her önemli kutunun en yeni postaları. İlk
@@ -546,21 +552,35 @@ pub async fn full_sync(
         }
     }
     let known = store.jmap_known(account_id)?;
-    let gone: Vec<String> = known
+    // Yerelde bilinen ama en yeni pencerenin dışında kalan postalar: "daha
+    // eski postalar" ile inmiş ya da zamanla pencereden çıkmış olabilirler.
+    // Pencerede olmamak silinmiş olmak değildir; sunucuya sorulur ve yalnız
+    // gerçekten yok olanlar (ya da izlenen kutulardan çıkanlar) yerelden kalkar.
+    let (mut old, new): (Vec<String>, Vec<String>) =
+        ids.into_iter().partition(|id| known.contains_key(id));
+    let mut outside: Vec<String> = known
         .keys()
         .filter(|k| !seen.contains(*k))
         .cloned()
         .collect();
+    outside.sort();
+    old.extend(outside.iter().cloned());
+    let (light, _) = get_emails(client, &old, &light_props(), &|_, _| {}).await?;
+    let alive: HashSet<&str> = light.iter().map(|e| e.id.as_str()).collect();
+    let gone: Vec<String> = outside
+        .into_iter()
+        .filter(|id| !alive.contains(id.as_str()))
+        .collect();
     if !gone.is_empty() {
         out.changed.extend(store.jmap_remove(account_id, &gone)?);
     }
-    let (old, new): (Vec<String>, Vec<String>) =
-        ids.into_iter().partition(|id| known.contains_key(id));
-    let (light, _) = get_emails(client, &old, &light_props(), &|_, _| {}).await?;
     let mut new = new;
     new.extend(apply_light(store, account_id, &boxes, &light, &mut out)?);
     let (full, _) = get_emails(client, &new, &email_properties(), progress).await?;
     apply_full(store, account_id, &boxes, &full, false, &mut out)?;
+    // Durum kaybolmuşken başka bir yerden eski posta taşınmış olabilir:
+    // "daha eskisi yok" işaretleri yeniden sorulmak üzere kalkar.
+    store.reset_older_done(account_id)?;
     store.set_jmap_email_state(account_id, Some(&state))?;
     Ok(out.finish())
 }
@@ -682,6 +702,166 @@ pub async fn incremental_sync(
     }
     store.set_jmap_email_state(account_id, Some(&since))?;
     Ok(out.finish())
+}
+
+/// "Daha eski postalar" isteğinde kutu başına indirilen posta sayısı.
+pub const OLDER_BATCH: usize = 300;
+/// Kutu taranırken tek sorguda istenen kimlik sayısı.
+const OLDER_PAGE: usize = 500;
+/// Tarama, yereldeki son postanın bu kadar gerisinden başlar ve sayfalar bu
+/// kadar üst üste biner: sorgular arasında silinen birkaç posta sırayı
+/// kaydırsa da arada posta atlanmaz.
+const OLDER_OVERLAP: usize = 16;
+
+/// [`fetch_older`] sonucu.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct OlderOutcome {
+    /// Bu çağrıda yerele yeni yazılan posta sayısı.
+    pub fetched: u32,
+    /// Sunucuda hâlâ daha eski posta var mı.
+    pub more: bool,
+    /// İçeriği değişen yerel kutular.
+    pub changed: Vec<String>,
+}
+
+/// Kutunun `position` konumundan başlayan kimlik sayfası (yeniden eskiye).
+async fn query_page(client: &Client, mailbox: &str, position: usize) -> JmapResult<QueryResponse> {
+    let v = client
+        .call(
+            "Email/query",
+            json!({
+                "accountId": client.account_id(),
+                "filter": { "inMailbox": mailbox },
+                "sort": [{ "property": "receivedAt", "isAscending": false }],
+                "position": position,
+                "limit": OLDER_PAGE,
+                "calculateTotal": true,
+            }),
+        )
+        .await?;
+    parse(v)
+}
+
+/// Taramada sıradaki kimliğin değerlendirilmesi (saf): yerelde olmayan ve
+/// atlanmayan kimlikler partiye girer. Henüz bilinen bir posta görülmeden
+/// karşılaşılan bilinmeyenler `leading`e yazılır: yereldeki en yeni postadan
+/// daha yenidirler (henüz eşitlenmemiş yeni posta); onları olağan eşitleme
+/// bildirimle indirir.
+#[derive(Default)]
+struct OlderScan {
+    anchored: bool,
+    leading: Vec<String>,
+    batch: Vec<String>,
+    more: bool,
+    seen: HashSet<String>,
+}
+
+impl OlderScan {
+    /// Kimliği işler; parti dolup bir bilinmeyen daha görülünce `false`.
+    fn push(&mut self, id: &str, known: bool, skip: bool) -> bool {
+        if !self.seen.insert(id.to_owned()) {
+            return true;
+        }
+        if known {
+            self.anchored = true;
+            return true;
+        }
+        if skip {
+            return true;
+        }
+        if !self.anchored {
+            self.leading.push(id.to_owned());
+            // Yerelde bu kutudan hiç posta yoksa tüm kutu taranmaz.
+            if self.leading.len() > OLDER_BATCH {
+                self.more = true;
+                return false;
+            }
+            return true;
+        }
+        if self.batch.len() < OLDER_BATCH {
+            self.batch.push(id.to_owned());
+            true
+        } else {
+            self.more = true;
+            false
+        }
+    }
+
+    /// İndirilecek parti ve gerisinin kalıp kalmadığı. Yerelde bu kutudan
+    /// hiç posta görülmediyse (hepsi silinmiş ya da taşınmış) baştaki
+    /// bilinmeyenler eski posta sayılır.
+    fn finish(mut self) -> (Vec<String>, bool) {
+        if !self.anchored {
+            self.more |= self.leading.len() > OLDER_BATCH;
+            self.leading.truncate(OLDER_BATCH);
+            return (self.leading, self.more);
+        }
+        (self.batch, self.more)
+    }
+}
+
+/// Kutunun bir sonraki eski partisini indirir (`messages_older`).
+///
+/// Kutu `Email/query` ile yeniden eskiye taranır ve yerelde olmayan postaların
+/// ilk `OLDER_BATCH` tanesi olağan alım yolundan (`apply_full`, bildirimsiz)
+/// yazılır. Sınır bir tarih değil küme farkıdır: aynı ana alınmış postalar
+/// (eşit `receivedAt`) ya da aradaki boşluklar posta kaybettirmez; sıra
+/// sunucunun kararlı sıralamasına (RFC 8620 §5.5) bırakılır. Tarama yereldeki
+/// posta sayısının biraz gerisinden başlar; o konumdaki posta yerelde yoksa
+/// (sunucuda silinenler sırayı kaydırmış) geriye çekilir.
+///
+/// `local_count`: kutuda yerelde görünen posta sayısı (başlangıç tahmini);
+/// `skip`: kalıcı silinmesi sırada bekleyen postalar (yeniden indirilmez).
+pub async fn fetch_older(
+    client: &Client,
+    store: &Store,
+    account_id: &str,
+    mailbox_id: &str,
+    mailbox_path: &str,
+    local_count: usize,
+    skip: &HashSet<String>,
+) -> JmapResult<OlderOutcome> {
+    let known = store.jmap_known(account_id)?;
+    let mut position = local_count.saturating_sub(OLDER_OVERLAP);
+    let mut page = query_page(client, mailbox_path, position).await?;
+    // Başlangıç bilinen bir postaya denk gelmeli (ya da kutunun başına).
+    while position > 0 && !page.ids.first().is_some_and(|id| known.contains_key(id)) {
+        position = position.saturating_sub(OLDER_PAGE);
+        page = query_page(client, mailbox_path, position).await?;
+    }
+    let mut scan = OlderScan::default();
+    loop {
+        let full = page
+            .limit
+            .map_or(OLDER_PAGE, |l| (l as usize).min(OLDER_PAGE));
+        let got = page.ids.len();
+        let stop = !page
+            .ids
+            .iter()
+            .all(|id| scan.push(id, known.contains_key(id), skip.contains(id)));
+        position += got;
+        let end = got == 0 || got < full.max(1) || page.total.is_some_and(|t| position as u64 >= t);
+        if stop || end {
+            break;
+        }
+        let next = position.saturating_sub(OLDER_OVERLAP.min(got - 1));
+        page = query_page(client, mailbox_path, next).await?;
+        position = next;
+    }
+    let (batch, more) = scan.finish();
+    let boxes = Boxes::load(store, account_id)?;
+    let (emails, _) = get_emails(client, &batch, &email_properties(), &|_, _| {}).await?;
+    let mut out = SyncOutcome::default();
+    let fetched = apply_full(store, account_id, &boxes, &emails, false, &mut out)?;
+    if !more {
+        // Parti eksiksiz indi ve gerisi yok: kutunun başına ulaşıldı.
+        store.set_mailbox_older_done(mailbox_id, true)?;
+    }
+    Ok(OlderOutcome {
+        fetched,
+        more,
+        changed: out.finish().changed,
+    })
 }
 
 async fn resync(
@@ -972,6 +1152,60 @@ mod tests {
         }));
         let m = to_new_message(&e, "a", "a:mb1", 1_791_800_000_000);
         assert_eq!((m.otp, m.spam.score), (None, 0));
+    }
+
+    #[test]
+    fn daha_eski_tarama_karari() {
+        // Bilinen görülmeden karşılaşılan bilinmeyenler yeni postadır; bilinen
+        // görüldükten sonrakiler eski posta (ya da boşluk).
+        let mut scan = OlderScan::default();
+        for (id, known, skip) in [
+            ("yeni1", false, false),
+            ("yeni2", false, false),
+            ("b1", true, false),
+            ("bosluk", false, false),
+            ("b2", true, false),
+            ("silinecek", false, true),
+            ("eski1", false, false),
+            ("eski1", false, false),
+            ("eski2", false, false),
+        ] {
+            assert!(scan.push(id, known, skip));
+        }
+        let (batch, more) = scan.finish();
+        assert_eq!(batch, ["bosluk", "eski1", "eski2"]);
+        assert!(!more);
+
+        // Parti dolunca bir bilinmeyen daha görülürse gerisi var.
+        let mut scan = OlderScan::default();
+        assert!(scan.push("b", true, false));
+        for i in 0..OLDER_BATCH {
+            assert!(scan.push(&format!("e{i}"), false, false));
+        }
+        assert!(scan.push("b-sonra", true, false), "bilinen parti saymaz");
+        assert!(!scan.push("fazla", false, false));
+        let (batch, more) = scan.finish();
+        assert_eq!(batch.len(), OLDER_BATCH);
+        assert!(more);
+
+        // Yerelde bu kutudan hiç posta yok: baştakiler eski posta sayılır.
+        let mut scan = OlderScan::default();
+        for i in 0..5 {
+            assert!(scan.push(&format!("e{i}"), false, false));
+        }
+        let (batch, more) = scan.finish();
+        assert_eq!(batch.len(), 5);
+        assert!(!more);
+        // ... ve tüm kutu taranmaz: parti dolunca durur.
+        let mut scan = OlderScan::default();
+        let mut pushed = 0;
+        while scan.push(&format!("e{pushed}"), false, false) {
+            pushed += 1;
+        }
+        assert_eq!(pushed, OLDER_BATCH);
+        let (batch, more) = scan.finish();
+        assert_eq!(batch.len(), OLDER_BATCH);
+        assert!(more);
     }
 
     #[test]

@@ -497,6 +497,209 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// Bildirimleri, panoya yazılanları ve sayaç yenilemelerini kaydeden kabuk.
+    #[derive(Default)]
+    struct KayitKabuk {
+        /// (posta kimliği, karttaki kod)
+        cards: Mutex<Vec<(i64, Option<String>)>>,
+        copied: Mutex<Vec<String>>,
+        counts: std::sync::atomic::AtomicUsize,
+        /// Pano yazılamıyor (izin yok, pano meşgul).
+        copy_fails: bool,
+    }
+
+    impl HeadlessShell for KayitKabuk {
+        fn notify(&self, ev: NotifyEvent, _: &Settings) {
+            self.cards.lock().unwrap().push((ev.message.id, ev.otp));
+        }
+        fn counts_changed(&self) {
+            self.counts
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+        fn copy_text(&self, text: &str) -> bool {
+            self.copied.lock().unwrap().push(text.to_owned());
+            !self.copy_fails
+        }
+    }
+
+    impl KayitKabuk {
+        fn cards(&self) -> Vec<(i64, Option<String>)> {
+            self.cards.lock().unwrap().clone()
+        }
+        fn copied(&self) -> Vec<String> {
+            self.copied.lock().unwrap().clone()
+        }
+    }
+
+    /// Saatten bağımsız ayarlar (sessiz saat yok, her posta kart açar) üstüne `f`.
+    fn settings(state: &AppState, f: impl FnOnce(&mut Settings)) {
+        let mut s = Settings {
+            notify: mh_core::NotifyMode::All,
+            quiet_start: None,
+            quiet_end: None,
+            ..Settings::default()
+        };
+        f(&mut s);
+        state.store.set_settings(&s).unwrap();
+    }
+
+    /// Yeni postayı gelen kutusuna yazar ve akıştan geçirir.
+    async fn arrive(
+        state: &AppState,
+        shell: &KayitKabuk,
+        account: &str,
+        raw: Vec<u8>,
+    ) -> MessageSummary {
+        let m = crate::testutil::deliver(state, account, raw, crate::state::now_ms());
+        let acc = state.store.account(account).unwrap().unwrap();
+        pipeline(state, &acc, vec![m.clone()], shell).await;
+        m
+    }
+
+    fn plain(from: &str, mid: &str) -> Vec<u8> {
+        crate::testutil::raw_mail(from, "Selam", mid, "", "Yarın görüşelim mi?")
+    }
+
+    fn flagged(from: &str, mid: &str) -> Vec<u8> {
+        crate::testutil::raw_mail(
+            from,
+            "Hesabınız askıya alındı",
+            mid,
+            "X-Spam-Flag: YES\r\n",
+            "Hemen tıklayın.",
+        )
+    }
+
+    #[tokio::test]
+    async fn yeni_posta_akisi_temiz_posta_kart_acar() {
+        let st = crate::testutil::state();
+        settings(&st, |_| {});
+        let shell = KayitKabuk::default();
+        let m = arrive(&st, &shell, "a", plain("Ayşe <ayse@eposta.com>", "h1@x")).await;
+        assert_eq!(shell.cards(), [(m.id, None)]);
+        assert!(shell.copied().is_empty());
+        assert!(
+            shell.counts.load(std::sync::atomic::Ordering::SeqCst) >= 1,
+            "sayaç yenilenir"
+        );
+        assert_eq!(crate::testutil::mailbox_of(&st, m.id), "a:INBOX");
+    }
+
+    #[tokio::test]
+    async fn yeni_posta_akisi_engellenen_gonderici() {
+        let st = crate::testutil::state();
+        settings(&st, |s| {
+            s.blocked = vec!["reklam@firma.com".into(), "@kotu.example".into()];
+        });
+        let shell = KayitKabuk::default();
+        // Engellenen adres: İstenmeyen'e gider, kart açmaz.
+        let m = arrive(&st, &shell, "a", plain("Reklam <Reklam@Firma.com>", "h2@x")).await;
+        assert_eq!(crate::testutil::mailbox_of(&st, m.id), "a:Junk");
+        // Engellenen alan adı (alt alan adı dahil); İstenmeyen kutusu olmayan
+        // hesapta Çöp'e gider.
+        let m2 = arrive(&st, &shell, "b", plain("X <x@posta.kotu.example>", "h3@x")).await;
+        assert_eq!(crate::testutil::mailbox_of(&st, m2.id), "b:Trash");
+        assert!(shell.cards().is_empty(), "engellenen gönderici kart açmaz");
+        // Engellenmeyen gönderici olağan akışta.
+        let ok = arrive(&st, &shell, "a", plain("Ayşe <ayse@eposta.com>", "h4@x")).await;
+        assert_eq!(shell.cards(), [(ok.id, None)]);
+        // Koruma kapalıyken de engellenenler çalışır.
+        settings(&st, |s| {
+            s.blocked = vec!["reklam@firma.com".into()];
+            s.spam_filter = mh_core::SpamFilter::Off;
+        });
+        let m3 = arrive(&st, &shell, "a", plain("Reklam <reklam@firma.com>", "h5@x")).await;
+        assert_eq!(crate::testutil::mailbox_of(&st, m3.id), "a:Junk");
+        assert_eq!(shell.cards().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn yeni_posta_akisi_supheli_posta_uyar_tasi_kapali() {
+        let st = crate::testutil::state();
+        let shell = KayitKabuk::default();
+        // Uyar (varsayılan): gelen kutusunda kalır, kart açmaz.
+        settings(&st, |_| {});
+        let warn = arrive(&st, &shell, "a", flagged("Banka <x@kotu.example>", "s1@x")).await;
+        assert!(warn.spam);
+        assert_eq!(crate::testutil::mailbox_of(&st, warn.id), "a:INBOX");
+        assert!(shell.cards().is_empty());
+        // Taşı: İstenmeyen'e gider, kart açmaz; kutusu olmayan hesapta yerinde
+        // kalır ama yine kart açmaz.
+        settings(&st, |s| s.spam_filter = mh_core::SpamFilter::Move);
+        let moved = arrive(&st, &shell, "a", flagged("Banka <x@kotu.example>", "s2@x")).await;
+        assert_eq!(crate::testutil::mailbox_of(&st, moved.id), "a:Junk");
+        let stays = arrive(&st, &shell, "b", flagged("Banka <x@kotu.example>", "s3@x")).await;
+        assert_eq!(crate::testutil::mailbox_of(&st, stays.id), "b:INBOX");
+        assert!(shell.cards().is_empty());
+        // Kapalı: olağan akış, kart açar.
+        settings(&st, |s| s.spam_filter = mh_core::SpamFilter::Off);
+        let off = arrive(&st, &shell, "a", flagged("Banka <x@kotu.example>", "s4@x")).await;
+        assert_eq!(crate::testutil::mailbox_of(&st, off.id), "a:INBOX");
+        assert_eq!(shell.cards(), [(off.id, None)]);
+    }
+
+    #[tokio::test]
+    async fn yeni_posta_akisi_kod_kendiliginden_kopyalanir() {
+        let st = crate::testutil::state();
+        let code = |mid: &str| {
+            crate::testutil::raw_mail(
+                "Banka <bildirim@banka.example>",
+                "Giriş bildirimi",
+                mid,
+                "",
+                "Doğrulama kodunuz: 604218",
+            )
+        };
+        let unread = |id| st.store.summary(id).unwrap().unwrap().unread;
+        // Kapalı (varsayılan): panoya dokunulmaz; kart kodu taşır.
+        settings(&st, |_| {});
+        let shell = KayitKabuk::default();
+        let m = arrive(&st, &shell, "a", code("k1@x")).await;
+        assert_eq!(shell.cards(), [(m.id, Some("604218".into()))]);
+        assert!(shell.copied().is_empty());
+        assert!(unread(m.id));
+        // Açık: kabuğun panosuna yazılır, posta okundu sayılır, kart yine çıkar.
+        settings(&st, |s| s.otp_auto_copy = true);
+        let shell = KayitKabuk::default();
+        let m = arrive(&st, &shell, "a", code("k2@x")).await;
+        assert_eq!(shell.copied(), ["604218"]);
+        assert_eq!(shell.cards(), [(m.id, Some("604218".into()))]);
+        assert!(!unread(m.id));
+        // Pano yazılamazsa posta okunmamış kalır; kart yine çıkar.
+        let shell = KayitKabuk {
+            copy_fails: true,
+            ..KayitKabuk::default()
+        };
+        let m = arrive(&st, &shell, "a", code("k3@x")).await;
+        assert_eq!(shell.copied(), ["604218"]);
+        assert_eq!(shell.cards().len(), 1);
+        assert!(unread(m.id));
+        // Şüpheli postanın kodu kopyalanmaz.
+        let shell = KayitKabuk::default();
+        arrive(
+            &st,
+            &shell,
+            "a",
+            crate::testutil::raw_mail(
+                "Banka <x@kotu.example>",
+                "Giriş bildirimi",
+                "k4@x",
+                "X-Spam-Flag: YES\r\n",
+                "Doğrulama kodunuz: 111222",
+            ),
+        )
+        .await;
+        assert!(shell.copied().is_empty() && shell.cards().is_empty());
+        // Engellenen göndericinin kodu da kopyalanmaz.
+        settings(&st, |s| {
+            s.otp_auto_copy = true;
+            s.blocked = vec!["bildirim@banka.example".into()];
+        });
+        let shell = KayitKabuk::default();
+        arrive(&st, &shell, "a", code("k5@x")).await;
+        assert!(shell.copied().is_empty() && shell.cards().is_empty());
+    }
+
     #[test]
     fn penceresiz_platform_pencere_isteyen_isleri_reddeder() {
         let e = no_window();

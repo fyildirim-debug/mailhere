@@ -70,7 +70,7 @@ fn assert_no_plaintext(dir: &Path) {
 }
 
 fn found(s: &Store) -> Vec<String> {
-    s.search(SUBJECT, 10)
+    s.search(SUBJECT, 10, None)
         .unwrap()
         .into_iter()
         .map(|m| m.subject)
@@ -157,7 +157,7 @@ fn duz_veritabani_sifrelenir_veri_ve_arama_korunur() {
     {
         let s = Store::open(&path, &key).unwrap();
         assert_eq!(found(&s), vec![SUBJECT]);
-        assert_eq!(s.search(BODY, 10).unwrap().len(), 1, "gövde araması");
+        assert_eq!(s.search(BODY, 10, None).unwrap().len(), 1, "gövde araması");
         assert_eq!(s.accounts().unwrap().len(), 1);
         assert_eq!(s.schema_version().unwrap(), schema::latest_version() as i64);
     }

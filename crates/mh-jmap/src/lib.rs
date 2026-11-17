@@ -29,12 +29,15 @@ pub use client::{
 pub use discover::{candidates, discover, probe};
 pub use error::{JmapError, JmapResult};
 pub use manager::{JmapManager, Timing};
-pub use ops::{destroy_emails, ensure_role_mailbox, move_emails, set_keywords};
+pub use ops::{
+    destroy_emails, ensure_role_mailbox, move_emails, purge_emails, set_keywords, sweep_mailbox,
+};
 pub use push::{listen, touches_account, SseEvent, SseParser};
 pub use send::{delete_draft, envelope_recipients, save_draft, submit, SavedDraft};
 pub use sync::{
-    email_properties, fetch_body, full_sync, incremental_sync, prefetch, role_from, sync_mailboxes,
-    to_new_message, tracked, SyncOutcome, INITIAL_FETCH, SYNC_ROLES,
+    email_properties, fetch_body, fetch_older, full_sync, incremental_sync, prefetch, role_from,
+    sync_mailboxes, to_new_message, tracked, OlderOutcome, SyncOutcome, INITIAL_FETCH, OLDER_BATCH,
+    SYNC_ROLES,
 };
 pub use types::{Email, Session, CORE, MAIL, SUBMISSION};
 pub use vacation::{

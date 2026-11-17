@@ -21,6 +21,9 @@ pub struct MailboxInfo {
     pub highest_uid: u32,
     /// Hedef olarak kullanılır ama eşitlenmez (Gmail "Tüm Postalar").
     pub nosync: bool,
+    /// "Daha eski postalar" bu kutunun başına ulaştı: sunucuda yereldekinden
+    /// daha eski posta kalmadı.
+    pub older_done: bool,
 }
 
 /// Yeni rol kutularının açılacağı kişisel IMAP ad alanı.
@@ -34,7 +37,7 @@ pub struct Namespace {
 /// `b.hidden` -1 ("henüz karar verilmedi", önceki sürümden) görünür okunur.
 const SELECT: &str = "SELECT b.id, b.account_id, b.path, b.name, b.role,
         COALESCE(SUM(m.unread), 0), COUNT(m.id), b.uidvalidity, b.uidnext, b.highest_uid, b.nosync,
-        b.parent_id, b.hidden > 0
+        b.parent_id, b.hidden > 0, b.older_done
     FROM mailboxes b LEFT JOIN messages m ON m.mailbox_id = b.id";
 
 fn role_order(r: MailboxRole) -> u8 {
@@ -66,6 +69,7 @@ fn row_to_info(r: &Row<'_>) -> rusqlite::Result<MailboxInfo> {
         uidnext: r.get::<_, Option<i64>>(8)?.map(|v| v as u32),
         highest_uid: r.get::<_, i64>(9)? as u32,
         nosync: r.get(10)?,
+        older_done: r.get(13)?,
     })
 }
 
@@ -299,6 +303,29 @@ impl Store {
             c.execute(
                 "UPDATE mailboxes SET uidvalidity = ?2, uidnext = ?3, highest_uid = ?4 WHERE id = ?1",
                 params![id, uidvalidity.map(i64::from), uidnext.map(i64::from), i64::from(highest_uid)],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// "Daha eski postalar" kutunun başına ulaştı mı (`messages_older`)?
+    pub fn set_mailbox_older_done(&self, id: &str, done: bool) -> AppResult<()> {
+        self.with(|c| {
+            c.execute(
+                "UPDATE mailboxes SET older_done = ?2 WHERE id = ?1",
+                params![id, done],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Hesabın tüm kutularında "daha eskisi yok" işaretini kaldırır (JMAP
+    /// baştan eşitlenince: arada başka bir yerden eski posta taşınmış olabilir).
+    pub fn reset_older_done(&self, account_id: &str) -> AppResult<()> {
+        self.with(|c| {
+            c.execute(
+                "UPDATE mailboxes SET older_done = 0 WHERE account_id = ?1 AND older_done != 0",
+                [account_id],
             )?;
             Ok(())
         })
