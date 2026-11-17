@@ -21,6 +21,7 @@
   import TagsSection from '../main/settings/TagsSection.svelte';
   import AppBar from './AppBar.svelte';
   import MobileGestures from './MobileGestures.svelte';
+  import MobileGuard from './MobileGuard.svelte';
 
   interface Props {
     section: SettingsSection | null;
@@ -136,6 +137,7 @@
         <DevicesSection />
       {:else if section === 'privacy'}
         <PrivacySection />
+        <MobileGuard />
       {:else}
         <AboutSection />
       {/if}

@@ -4,10 +4,10 @@
   // alt sayfada seçenekleri açar (Menu → Sheet); seçim hemen kaydedilir.
   import type { AfterRemove, SwipeAction } from '../../lib/api';
   import { t, type MessageKey } from '../../lib/i18n/index.svelte';
-  import Icon from '../../lib/ui/Icon.svelte';
   import type { IconName } from '../../lib/ui/icons';
   import Menu, { type MenuItem } from '../../lib/ui/Menu.svelte';
   import { settings, updateSettings } from '../../lib/stores/settings.svelte';
+  import PickRow from './PickRow.svelte';
 
   // Sıra: listeden çıkaranlar, seçici, erteleme, işaretler, kapalı.
   const actions: { key: SwipeAction; label: MessageKey; icon: IconName }[] = [
@@ -58,21 +58,14 @@
 <h3 class="set-h">{t('mob.gestures.title')}</h3>
 <p class="lead set-hint">{t('mob.gestures.lead')}</p>
 
-<button class="pick" aria-haspopup="menu" onclick={() => pickSwipe('swipeLeft')}>
-  <span class="set-name">{t('mob.swipe.left')}</span>
-  <span class="value"><Icon name={actionOf(s.swipeLeft).icon} size={18} />{t(actionOf(s.swipeLeft).label)}</span>
-  <Icon name="chevronRight" size={18} class="chev" />
-</button>
-<button class="pick" aria-haspopup="menu" onclick={() => pickSwipe('swipeRight')}>
-  <span class="set-name">{t('mob.swipe.right')}</span>
-  <span class="value"><Icon name={actionOf(s.swipeRight).icon} size={18} />{t(actionOf(s.swipeRight).label)}</span>
-  <Icon name="chevronRight" size={18} class="chev" />
-</button>
-<button class="pick" aria-haspopup="menu" onclick={pickAfter}>
-  <span class="set-name">{t('mob.after.title')}<span class="set-hint">{t('mob.after.hint')}</span></span>
-  <span class="value">{t(afters.find((a) => a.key === s.afterRemove)?.label ?? 'mob.after.list')}</span>
-  <Icon name="chevronRight" size={18} class="chev" />
-</button>
+<PickRow name={t('mob.swipe.left')} value={t(actionOf(s.swipeLeft).label)} icon={actionOf(s.swipeLeft).icon} onclick={() => pickSwipe('swipeLeft')} />
+<PickRow name={t('mob.swipe.right')} value={t(actionOf(s.swipeRight).label)} icon={actionOf(s.swipeRight).icon} onclick={() => pickSwipe('swipeRight')} />
+<PickRow
+  name={t('mob.after.title')}
+  hint={t('mob.after.hint')}
+  value={t(afters.find((a) => a.key === s.afterRemove)?.label ?? 'mob.after.list')}
+  onclick={pickAfter}
+/>
 
 {#if menu}<Menu title={menu.title} items={menu.items} onclose={() => (menu = null)} />{/if}
 
@@ -81,48 +74,5 @@
     display: block;
     margin: 0 0 4px;
     max-width: 52ch;
-  }
-
-  /* Ayar satırı gibi: ad solda, seçili değer sağda, alt çizgi; tamamı dokunma hedefi. */
-  .pick {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    width: 100%;
-    min-height: 56px;
-    padding: 10px 0;
-    border: 0;
-    border-bottom: 1px solid var(--line);
-    background: transparent;
-    color: var(--ink);
-    text-align: left;
-    transition: background var(--t-fast);
-  }
-
-  .pick:active {
-    background: var(--hover);
-  }
-
-  .pick .set-name {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .value {
-    flex: none;
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    max-width: 55%;
-    color: var(--ink-2);
-    text-align: right;
-  }
-
-  .value :global(.icon) {
-    color: var(--ink-3);
-  }
-
-  .pick :global(.chev) {
-    color: var(--ink-3);
   }
 </style>
