@@ -140,7 +140,8 @@ test('"Android uygulamasını indir" dış tarayıcıda sürümler sayfasını a
   const popup = context.waitForEvent('page');
   await page.getByRole('button', { name: 'Android uygulamasını indir' }).click();
   const opened = await popup;
-  expect(opened.url()).toBe('https://github.com/fyildirim-debug/mailheremobile/releases');
+  // Yeni sekmenin adresi sayfa olayından hemen sonra boş olabilir; dolana kadar beklenir.
+  await expect.poll(() => opened.url()).toBe('https://github.com/fyildirim-debug/mailheremobile/releases');
   await opened.close();
 });
 
