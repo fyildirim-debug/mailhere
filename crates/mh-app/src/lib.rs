@@ -17,7 +17,9 @@ pub mod cmd_jmap;
 pub mod cmd_list;
 pub mod cmd_mailbox;
 pub mod cmd_oauth;
+pub mod cmd_older;
 pub mod cmd_outbox;
+pub mod cmd_purge;
 pub mod cmd_reading;
 pub mod cmd_rules;
 pub mod cmd_unsubscribe;
@@ -158,6 +160,9 @@ define_shared_commands! { $
     lock::lock_reset_local,
     spam::sender_block,
     spam::spam_trust,
+    cmd_older::messages_older,
+    cmd_purge::messages_delete,
+    cmd_purge::mailbox_empty,
 }
 
 /// `commands.txt` içindeki adlar (yorum ve boş satırlar atılır).
