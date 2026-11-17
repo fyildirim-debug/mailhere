@@ -1369,32 +1369,6 @@ impl Store {
             summary,
         })
     }
-
-    /// Postadaki doğrulama kodu (bildirim kartı için): gövde indirildiyse
-    /// metinden, yoksa konu ve önizlemeden.
-    pub fn otp(&self, id: MessageId) -> AppResult<Option<String>> {
-        let row = self.with(|c| {
-            c.query_row(
-                "SELECT subject, snippet, raw FROM messages WHERE id = ?1",
-                [id],
-                |r| {
-                    Ok((
-                        r.get::<_, String>(0)?,
-                        r.get::<_, String>(1)?,
-                        r.get::<_, Option<Vec<u8>>>(2)?,
-                    ))
-                },
-            )
-            .optional()
-        })?;
-        let Some((subject, snippet, raw)) = row else {
-            return Ok(None);
-        };
-        Ok(match raw {
-            Some(raw) => mh_mime::otp_of(&raw),
-            None => mh_mime::find_otp(&subject, &snippet),
-        })
-    }
 }
 
 #[cfg(test)]

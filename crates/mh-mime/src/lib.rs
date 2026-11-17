@@ -19,7 +19,7 @@ pub use html::{decode_entities, remote_image_urls, sanitize_html, Sanitized};
 pub use ics::{build_reply, calendar_text, invite, parse_calendar, to_invite, Calendar};
 pub use otp::find_otp;
 pub use parse::{
-    attachment, otp_of, parse, render, visible_attachments, AttachmentData, ParsedMessage, Rendered,
+    attachment, parse, render, visible_attachments, AttachmentData, ParsedMessage, Rendered,
 };
 pub use spam::{score as spam_score, SpamInput};
 pub use text::{

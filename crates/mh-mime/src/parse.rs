@@ -351,19 +351,6 @@ pub fn render(raw: &[u8], remote_allowed: bool) -> Option<Rendered> {
     })
 }
 
-/// Postadaki doğrulama kodu (bildirim kartı için): konu ve düz metin
-/// gövdeden (yoksa HTML'den çevrilen metinden) aranır.
-pub fn otp_of(raw: &[u8]) -> Option<String> {
-    let msg = parser().parse(raw)?;
-    let (text, html) = bodies(&msg);
-    let plain = text
-        .as_deref()
-        .map(tidy_lines)
-        .or_else(|| html.as_deref().map(html_to_text))
-        .unwrap_or_default();
-    crate::otp::find_otp(&clean_line(msg.subject().unwrap_or("")), &plain)
-}
-
 /// `index` sıradaki eki çıkarır.
 pub fn attachment(raw: &[u8], index: u32) -> Option<AttachmentData> {
     let msg = parser().parse(raw)?;
