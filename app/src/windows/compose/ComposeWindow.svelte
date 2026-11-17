@@ -185,6 +185,42 @@
     else await appWindow.close();
   }
 
+  /** Kapatırken taslak kaydı en çok bu kadar beklenir (ms); bitmezse pencere açık kalır. */
+  const CLOSE_SAVE_WAIT = 5000;
+  let closing = false;
+  /** Kayıt olmadı ve kullanıcı uyarıldı: yeniden kapatırsa pencere kaydetmeden kapanır. */
+  let closeWarned = false;
+
+  /**
+   * Başlık çubuğundaki kapat (X): bekleyen değişiklik taslağa yazıldıktan
+   * SONRA pencere kapanır (`pagehide` anında başlatılan kayıt, pencere yok
+   * olunca yarıda kalabiliyordu). Kayıt olmazsa pencere açık kalır ve nedenini
+   * söyler; ikinci kapatış kaydetmeden kapatır.
+   *
+   * İşletim sisteminin kapatma yolu (Alt F4, görev çubuğu) buradan geçmez;
+   * orada yine `pagehide` kaydı denenir.
+   */
+  async function closeWindow() {
+    if (closing) return;
+    if (discarded || locked || closeWarned || !dirty()) {
+      await appWindow.close();
+      return;
+    }
+    closing = true;
+    if (draftTimer) clearTimeout(draftTimer);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const slow = new Promise<'slow'>((resolve) => (timer = setTimeout(() => resolve('slow'), CLOSE_SAVE_WAIT)));
+    const result = await Promise.race([saveDraft().then(() => 'done' as const), slow]);
+    clearTimeout(timer);
+    closing = false;
+    if (result === 'done' && draftState !== 'error') {
+      await appWindow.close();
+      return;
+    }
+    closeWarned = true;
+    error = result === 'slow' ? t('compose.closeSlow') : t('compose.closeUnsaved', { message: draftError ?? '' });
+  }
+
   // Ayrı yazma penceresi arayüz kilitlenince örtülür: taslak bellekte kalır,
   // içerik görünmez ve etkileşimsizdir (`inert`); gömülü yazma (mobil) kabuğun
   // kilit ekranının altında kalır.
@@ -336,6 +372,8 @@
   $effect(() => {
     const snap = snapshot();
     if (!ready || locked || snap === baseline) return;
+    // Yeni değişiklik: kapatırken yeniden kayıt denenir.
+    closeWarned = false;
     if (draftTimer) clearTimeout(draftTimer);
     draftTimer = setTimeout(() => void saveDraft(), 1500);
   });
@@ -367,6 +405,11 @@
         baseline = snap;
         draftState = 'saved';
         draftError = null;
+        // Kapatırken verilen "kaydedilemedi" uyarısı artık geçerli değil.
+        if (closeWarned) {
+          closeWarned = false;
+          error = null;
+        }
       } catch (e) {
         draftState = 'error';
         draftError = toAppError(e).message;
@@ -722,7 +765,7 @@
     <header class="titlebar" data-tauri-drag-region inert={lockShown}>
       <span class="title trunc" data-tauri-drag-region>{title()}</span>
       <span class="grow" data-tauri-drag-region></span>
-      <WindowControls height={40} />
+      <WindowControls height={40} onclose={closeWindow} />
     </header>
   {/if}
 

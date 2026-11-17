@@ -1193,4 +1193,7 @@ export const en: Record<MessageKey, string> = {
   // Girdi yer tutucuları (örnek adres ve sunucu).
   'placeholder.email': 'name@example.com',
   'placeholder.jmapUrl': 'https://mail.example.com',
+  // Yazma: kapatırken taslak kaydı.
+  'compose.closeUnsaved': 'Your latest changes could not be saved to the draft, so the window stayed open. Closing again will discard them. Reason: {message}',
+  'compose.closeSlow': 'Saving the draft is taking long, so the window stayed open. Wait a moment and close again; closing right away may lose your latest changes.',
 };

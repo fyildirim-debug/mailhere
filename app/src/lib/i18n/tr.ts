@@ -1209,6 +1209,9 @@ export const tr = {
   // Girdi yer tutucuları (örnek adres ve sunucu).
   'placeholder.email': 'ad@alanadi.com',
   'placeholder.jmapUrl': 'https://posta.alanadi.com',
+  // Yazma: kapatırken taslak kaydı.
+  'compose.closeUnsaved': 'Son değişiklikler taslağa yazılamadı; pencere açık bırakıldı. Yeniden kapatırsan bu değişiklikler kaybolur. Neden: {message}',
+  'compose.closeSlow': 'Taslak kaydı uzun sürdü; pencere açık bırakıldı. Biraz bekleyip yeniden kapat; hemen kapatırsan son değişiklikler kaybolabilir.',
 } as const;
 
 export type MessageKey = keyof typeof tr;
