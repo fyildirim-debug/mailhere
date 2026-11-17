@@ -1226,4 +1226,7 @@ export const en: Record<MessageKey, string> = {
   'purge.emptyTrashCount': 'Delete the {n} messages in Trash permanently?',
   'purge.emptyJunkCount': 'Delete the {n} messages in Junk permanently?',
   'purge.emptyBody': 'Every message in the mailbox is removed from this computer and from the server. This cannot be undone.',
+  // End of the list: older mail.
+  'older.busy': 'Fetching older mail…',
+  'older.end': 'That is everything',
 };

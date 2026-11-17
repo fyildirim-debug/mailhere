@@ -11,6 +11,7 @@
   import { call } from '../../lib/api';
   import { displayName, snoozeOptions } from '../../lib/util/format';
   import { loadMore, mail, markAllRead, moveTo, pullMail, rowsOf, setCategory, setOnly, setUnread, setView, snooze, syncing, toggleStar, type Row } from '../../lib/stores/mail.svelte';
+  import { loadOlder, older, olderAvailable, olderDone } from '../../lib/stores/guard.svelte';
   import { settings, updateSettings } from '../../lib/stores/settings.svelte';
   import { tagById } from '../../lib/stores/tags.svelte';
   import MessageRow from './MessageRow.svelte';
@@ -72,7 +73,16 @@
     if (scrollTop + viewport > layout.total - 600) void loadMore();
   }
 
+  // İçerik kısalınca (yenileme, konuşmaların katlanması) kaydırma olayı gelmez;
+  // sona yakınken sıradaki yerel sayfa kendiliğinden istenir.
+  $effect(() => {
+    if (mail.nextCursor && !mail.loading && scrollTop + viewport > layout.total - 600) void loadMore();
+  });
 
+  // Yerel sayfalar bitince liste sonunda: "Daha eski postalar" (sunucudan bir
+  // parti daha) ya da sona gelindiyse "Hepsi bu kadar".
+  const moreOlder = $derived(older.busy || olderAvailable());
+  const allLoaded = $derived(!moreOlder && olderDone());
 
   // Çöp / İstenmeyen görünümü: başlıkta "Çöpü boşalt" / "İstenmeyen'i boşalt".
   const purgeTarget = $derived(emptyTarget());
@@ -260,6 +270,15 @@
           </div>
         {/each}
       </div>
+      {#if moreOlder}
+        <div class="tail">
+          <button class="btn-soft small" disabled={older.busy} aria-busy={older.busy} onclick={() => void loadOlder()}>
+            <Icon name={older.busy ? 'refresh' : 'download'} size={16} class={older.busy ? 'spin' : undefined} />{t(older.busy ? 'older.busy' : 'list.loadMore')}
+          </button>
+        </div>
+      {:else if allLoaded}
+        <p class="tail meta" role="status">{t('older.end')}</p>
+      {/if}
     {:else if !mail.loading}
       <div class="empty">
         <span class="empty-icon"><Icon name={empty.icon} size={26} /></span>
@@ -434,6 +453,28 @@
 
   .empty-btn {
     color: var(--danger);
+  }
+
+  /* Liste sonu: daha eski postalar ya da "Hepsi bu kadar". */
+  .tail {
+    display: flex;
+    justify-content: center;
+    padding: 14px 20px 22px;
+    text-align: center;
+  }
+
+  p.tail {
+    display: block;
+  }
+
+  .tail :global(.spin) {
+    animation: pull-spin calc(var(--t-panel) * 3) linear infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .tail :global(.spin) {
+      animation: none;
+    }
   }
 
   .group {

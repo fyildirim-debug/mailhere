@@ -2,12 +2,13 @@
 // ve mobil arayüzün ortak eylemleri. Bileşenler `call` yerine bunları kullanır ki
 // toast metni, geri alma ve liste yenileme iki kabukta aynı olsun.
 
+import { untrack } from 'svelte';
 import { call, toAppError, type MailboxRole, type MessageId, type View } from '../api';
 import { t } from '../i18n/index.svelte';
 import { copyText } from '../mail/otp';
 import { showToast } from '../ui/toast.svelte';
 import { isLockedError } from './lock.svelte';
-import { mail, refreshCounts, refreshList, restoreAfterUndo, select, setUnread, takeOut } from './mail.svelte';
+import { loadMore, mail, refreshCounts, refreshList, restoreAfterUndo, select, setUnread, takeOut } from './mail.svelte';
 import { settings, updateSettings } from './settings.svelte';
 
 function errorToast(e: unknown) {
@@ -130,10 +131,32 @@ function olderKey(): string {
   return JSON.stringify([mail.view, mail.accountId]);
 }
 
+// Görünüm (ya da hesap kapsamı) değişince durum sıfırlanır: `older.done` hep açık görünümü anlatır.
+$effect.root(() => {
+  $effect(() => {
+    const key = olderKey();
+    untrack(() => {
+      if (older.key === key) return;
+      older.key = key;
+      older.done = false;
+    });
+  });
+});
+
+/** Görünüm sunucu kutularına karşılık geliyor mu (arama, süzgeç ve sanal görünümlerde hayır). */
+function olderScope(): boolean {
+  if (mail.search != null || mail.category != null || mail.only != null) return false;
+  return ['inbox', 'mailbox', 'trash', 'sent', 'archive', 'drafts'].includes(mail.view.kind);
+}
+
+/** Bu görünümde sunucudaki postaların sonuna gelindi mi ("Hepsi bu kadar"). */
+export function olderDone(): boolean {
+  return olderScope() && older.done && older.key === olderKey() && !mail.nextCursor && mail.items.length > 0;
+}
+
 /** Bu görünümde sunucudan daha eski posta istenebilir mi (arama ve sanal görünümlerde hayır). */
 export function olderAvailable(): boolean {
-  if (mail.search != null || mail.category != null || mail.only != null) return false;
-  if (!['inbox', 'mailbox', 'trash', 'sent', 'archive', 'drafts'].includes(mail.view.kind)) return false;
+  if (!olderScope()) return false;
   return !mail.nextCursor && !mail.loading && mail.items.length > 0 && !(older.key === olderKey() && older.done);
 }
 
@@ -147,7 +170,11 @@ export async function loadOlder(): Promise<void> {
   try {
     const r = await call('messages_older', { view: mail.view, accountId: mail.accountId });
     if (olderKey() !== key) return;
-    if (r.fetched) await refreshList();
+    if (r.fetched) {
+      // İnen postalar yerel listenin sonuna eklenir; sıradaki sayfa da yüklenir ki hemen görünsünler.
+      await refreshList();
+      await loadMore();
+    }
     older.done = !r.more;
     if (!r.fetched) showToast({ text: t('older.none') });
   } catch (e) {

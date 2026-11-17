@@ -1242,6 +1242,9 @@ export const tr = {
   'purge.emptyTrashCount': 'Çöpteki {n} posta kalıcı silinsin mi?',
   'purge.emptyJunkCount': 'İstenmeyen kutusundaki {n} posta kalıcı silinsin mi?',
   'purge.emptyBody': 'Kutudaki tüm postalar bu bilgisayardan ve sunucudan silinir. Bu işlem geri alınamaz.',
+  // Liste sonu: daha eski postalar.
+  'older.busy': 'Daha eski postalar alınıyor…',
+  'older.end': 'Hepsi bu kadar',
 } as const;
 
 export type MessageKey = keyof typeof tr;
