@@ -111,6 +111,20 @@ impl EventSink for TauriSink {
     }
 }
 
+/// Bildirim kararında kullanılacak ayarlar. Ayarlar okunamazsa (depo hatası)
+/// yeni posta sessizce yutulmaz: hata günlüğe yazılır (içerik ve adres
+/// yazılmaz) ve varsayılan ayarlarla karar verilir. "Posta hızlı gelir":
+/// bozuk bir ayar kaydı bildirimi durdurmamalı.
+fn settings_or_default(read: mh_core::AppResult<mh_core::Settings>) -> mh_core::Settings {
+    read.unwrap_or_else(|e| {
+        tracing::warn!(
+            code = %e.code,
+            "ayarlar okunamadı; yeni posta varsayılan ayarlarla bildirilecek"
+        );
+        mh_core::Settings::default()
+    })
+}
+
 /// Bildirim kararı: hesabın bildirimi, kullanıcı ayarları (kime: herkes /
 /// kişiler / VIP, sessiz saat), susturma ve tam ekran bir arada; kart
 /// gösterilecek her posta için `notify` çağrılır. Pencereli (`TauriSink`) ve
@@ -127,10 +141,7 @@ pub(crate) fn decide(
     copy: impl FnOnce(&str) -> bool,
     mut notify: impl FnMut(NotifyEvent, &mh_core::Settings),
 ) -> Vec<String> {
-    let settings = match state.store.settings() {
-        Ok(s) => s,
-        Err(_) => return Vec::new(),
-    };
+    let settings = settings_or_default(state.store.settings());
     // Şüpheli posta (uyar kipi ya da taşınamayan) kart ve bildirim almaz;
     // kodu da kopyalanmaz.
     let (messages, suspicious): (Vec<_>, Vec<_>) = messages
@@ -255,6 +266,23 @@ mod tests {
             |ev, _| cards.borrow_mut().push((ev.message.id, ev.otp)),
         );
         (cards.into_inner(), copied.into_inner(), touched)
+    }
+
+    #[test]
+    fn ayarlar_okunamazsa_varsayilanla_bildirilir() {
+        // Depo hatası: karar sessizce düşmez, varsayılan ayarlar kullanılır.
+        let broken = Err(mh_core::AppError::new(
+            mh_core::ErrorCode::Storage,
+            "Veritabanı okunamadı.",
+        ));
+        assert_eq!(settings_or_default(broken), Settings::default());
+        let custom = Settings {
+            card_seconds: 20,
+            ..Settings::default()
+        };
+        assert_eq!(settings_or_default(Ok(custom.clone())), custom);
+        // Varsayılan ayarlar yeni postayı duyurur (bildirim kapalı değildir).
+        assert_eq!(Settings::default().notify, NotifyMode::All);
     }
 
     #[tokio::test]
