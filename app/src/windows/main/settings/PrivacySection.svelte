@@ -26,7 +26,8 @@
 
 <LockSettings />
 
-<GuardSettings />
+<!-- İstenmeyen koruması, engellenenler ve doğrulama kodları: mobil kabuk kendi bölümünü (MobileGuard) çizer. -->
+{#if !mobile}<GuardSettings />{/if}
 
 <h3 class="set-h">{t('set.remoteAllow')}</h3>
 <p class="set-lead">{t('priv.remoteLead')}</p>

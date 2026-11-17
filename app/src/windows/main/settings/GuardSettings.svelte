@@ -1,6 +1,7 @@
 <script lang="ts">
   // Gizlilik ve güvenlik › İstenmeyen koruması, Engellenen göndericiler ve
-  // Doğrulama kodları (masaüstü ve mobil ayarlar aynı bölümü kullanır).
+  // Doğrulama kodları (masaüstü). Mobil ayarlar aynı ayarları kendi bölümüyle
+  // (MobileGuard) sunar; PrivacySection bunu mobil kabukta çizmez.
   import { BLOCKED_MAX, normalizeBlocked, normalizeBlockedEntry, toAppError, type SpamFilter } from '../../../lib/api';
   import { t, type MessageKey } from '../../../lib/i18n/index.svelte';
   import { mail } from '../../../lib/stores/mail.svelte';
@@ -226,12 +227,5 @@
   .none {
     max-width: 62ch;
     margin-top: 12px;
-  }
-
-  /* Telefonda dokunma hedefi 44 px (mobil ölçü jetonu yalnız orada tanımlı). */
-  .add .input,
-  .add button,
-  .list-row .btn-ghost {
-    min-height: var(--m-touch, 0);
   }
 </style>
