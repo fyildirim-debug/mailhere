@@ -186,11 +186,10 @@ export async function refreshList(keepSelection = true) {
   mail.loading = true;
   try {
     if (mail.search != null) {
-      // `hesap:` işleci arayüzde çözülür: sorgudan çıkar, sonuçlar hesaba göre süzülür.
+      // `hesap:` işleci arayüzde hesap kimliklerine çevrilir; süzme arka uçta, sınırdan önce yapılır.
       const scope = accountScope(mail.search, mail.accounts);
-      const found = scope.query ? await call('search', { q: scope.query, limit: 300 }) : [];
+      const items = scope.query ? await call('search', { q: scope.query, limit: 300, accountIds: scope.accountIds }) : [];
       if (token !== listToken) return;
-      const items = scope.accountIds ? found.filter((m) => scope.accountIds!.includes(m.accountId)) : found;
       mail.items = items;
       mail.nextCursor = null;
       pruneChecked();

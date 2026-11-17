@@ -932,7 +932,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       emit(EVENTS.changed, { mailboxIds: [] });
       return null;
     },
-    search: ({ q, limit }) => {
+    search: ({ q, limit, accountIds }) => {
       // Arka uçtaki işleçlerin sade karşılığı: from:, to:, konu:, has:ek, has:kod, is:okunmamış, is:yıldızlı, is:şüpheli, in:, tag:, after:, before:.
       const tests: ((m: MessageDetail) => boolean)[] = [];
       let inBox = false;
@@ -977,6 +977,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       });
       const needle = lower(free.trim());
       if (!needle && !tests.length) return [];
+      if (accountIds) tests.push((m) => accountIds.includes(m.accountId));
       return state.messages
         // `in:` verilmedikçe çöp ve istenmeyen hariç (arka uçla aynı).
         .filter((m) => inBox || (roleOf(m.mailboxId) !== 'trash' && (junkToo || roleOf(m.mailboxId) !== 'junk')))
@@ -1760,6 +1761,16 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     background_mode_set: ({ on }) => {
       backgroundMode = on;
       return backgroundMode;
+    },
+    // Yalnız mobil kabuk: ek kaydetme ve paylaşma (sahte; seçilen yer hep aynı).
+    attachment_save: ({ id, index }) => {
+      const a = find(id).attachments[index];
+      if (!a) fail('notFound', 'Ek bulunamadı.');
+      return `content://mailhere.mock/kayitli/${a.name}`;
+    },
+    attachment_share: ({ id, index }) => {
+      if (!find(id).attachments[index]) fail('notFound', 'Ek bulunamadı.');
+      return null;
     },
     // Yalnız mobil kabuk: kamera yerine geçerli görünümlü örnek kod; bildirim izni verilmiş sayılır.
     qr_scan: () => `mailhere://aktar?v=1&h=192.168.1.20&p=51234&t=${fakeB64(16, 41)}&k=${fakeB64(32, 42)}`,

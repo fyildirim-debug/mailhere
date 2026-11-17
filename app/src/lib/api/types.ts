@@ -963,7 +963,11 @@ export interface Commands {
   /** Postaları kendi hesabının herhangi bir klasörüne taşır. */
   messages_move_to: [{ ids: MessageId[]; mailboxId: string }, null];
   messages_snooze: [{ ids: MessageId[]; until: Millis | null }, null];
-  search: [{ q: string; limit: number }, MessageSummary[]];
+  /**
+   * Tam metin arama. `accountIds` verilirse (`hesap:` işleci) yalnız o hesaplar aranır; süzme
+   * sınırdan önce uygulanır. `null` ya da yok: tüm hesaplar; boş dizi: sonuç yok.
+   */
+  search: [{ q: string; limit: number; accountIds?: AccountId[] | null }, MessageSummary[]];
   remote_allow: [{ id: MessageId }, MessageDetail];
   /**
    * Çerçevenin yükleyemediği (ör. `Cross-Origin-Resource-Policy` başlıklı) izinli uzak görselleri
@@ -1180,7 +1184,8 @@ export interface Commands {
   /** Açılışta başlamayı açar ya da kapatır; seçim kaydedilir (kapalıysa bir daha kendiliğinden açılmaz). Son durumu döner. */
   autostart_set: [{ on: boolean }, boolean];
   /**
-   * Yalnız masaüstü: dış bağlantıyı (http, https, mailto) varsayılan uygulamayla açar.
+   * Yalnız masaüstü: dış bağlantıyı (http, https) varsayılan uygulamayla açar. Postadaki
+   * `mailto:` bağlantısı buraya gelmez; arayüz yazma ekranını açar (`lib/mail/open.ts`).
    * AppImage'da açıcı paketin ortam değişkenlerinden arındırılır (yoksa tarayıcı açılmaz).
    */
   link_open: [{ url: string }, null];
@@ -1212,6 +1217,13 @@ export interface Commands {
   system_bars: [{ dark: boolean }, null];
   /** Android: kısa titreşim (kaydırma eşiği, uzun basış onayı, ret); sistemin dokunma geri bildirimi ayarına uyar. */
   haptic: [{ kind: HapticKind }, null];
+  /**
+   * Android: eki kullanıcının seçtiği yere kaydeder (sistemin belge oluşturucusu). Seçilen
+   * yerin adresi; kullanıcı vazgeçerse null.
+   */
+  attachment_save: [{ id: MessageId; index: number }, string | null];
+  /** Android: eki sistemin paylaşım sayfasına verir (başka uygulamaya gönder). */
+  attachment_share: [{ id: MessageId; index: number }, null];
 }
 
 export type CommandName = keyof Commands;
