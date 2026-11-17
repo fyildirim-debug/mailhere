@@ -374,6 +374,8 @@
     background: color-mix(in srgb, var(--ink) 42%, transparent);
     opacity: 0;
     visibility: hidden;
+    /* Sönerken dokunuş tutmaz: görünüm seçildikten hemen sonraki dokunuş listeye ulaşır. */
+    pointer-events: none;
     transition:
       opacity var(--t-state) var(--ease),
       visibility 0s var(--t-state);
@@ -382,6 +384,7 @@
   .scrim.open {
     opacity: 1;
     visibility: visible;
+    pointer-events: auto;
     transition: opacity var(--t-state) var(--ease);
   }
 
