@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Mailhere'nin Microsoft Store (MSIX) paket bildirimi; şablondur.
+  scripts/msix-paketle.ps1 çift süslü parantezli yerleri doldurur:
+    KIMLIK       Partner Center › Ürün kimliği › Package/Identity/Name
+    YAYINCI      Partner Center › Ürün kimliği › Package/Identity/Publisher (CN=…)
+    YAYINCI_ADI  Partner Center › Ürün kimliği › Package/Properties/PublisherDisplayName
+    AD           Partner Center'da ayrılan ad (Mailhere)
+    SURUM        X.Y.Z.0 (dördüncü hane Store'a ayrılmıştır, hep 0)
+  Değerler büyük-küçük harf ve boşluk dahil birebir aynı olmalıdır; yoksa
+  Partner Center paketi reddeder.
+
+  Uygulama tam güvenli (Win32) çalışır: runFullTrust. Açılışta başlama
+  paketin başlangıç göreviyle yapılır; TaskId, src-tauri/src/autostart.rs
+  içindeki store_task::TASK_ID ile aynıdır. Görev kapalı gelir, uygulama ilk
+  çalıştırmada açar (kullanıcı ayardan kapatabilir).
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap desktop rescap">
+
+  <Identity
+    Name="{{KIMLIK}}"
+    Publisher="{{YAYINCI}}"
+    Version="{{SURUM}}"
+    ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>{{AD}}</DisplayName>
+    <PublisherDisplayName>{{YAYINCI_ADI}}</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="tr-TR" />
+    <Resource Language="en-US" />
+  </Resources>
+
+  <Applications>
+    <Application Id="Mailhere" Executable="mailhere.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="{{AD}}"
+        Description="Mailhere: hızlı, sakin, klavyeyle yönetilen e-posta istemcisi"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png">
+        <uap:DefaultTile
+          Wide310x150Logo="Assets\Wide310x150Logo.png"
+          Square71x71Logo="Assets\Square71x71Logo.png" />
+      </uap:VisualElements>
+      <Extensions>
+        <desktop:Extension Category="windows.startupTask" Executable="mailhere.exe" EntryPoint="Windows.FullTrustApplication">
+          <desktop:StartupTask TaskId="MailhereBaslangic" Enabled="false" DisplayName="{{AD}}" />
+        </desktop:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <Capability Name="internetClient" />
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>

@@ -1,0 +1,155 @@
+name: Mağaza paketi
+
+# Microsoft Store için MSIX paketi: uygulamayı derler, paketler, paketi
+# Windows'a kurup açarak dener (docs/MAGAZA.md).
+#
+# Kimlik değerleri depo değişkenlerinden okunur (Settings › Secrets and
+# variables › Actions › Variables): STORE_KIMLIK, STORE_YAYINCI,
+# STORE_YAYINCI_ADI (Partner Center › Ürün kimliği) ve isteğe bağlı STORE_AD.
+# Tanımlı değilse DENEME kimliğiyle paketlenir: o paket yalnız hattı sınar,
+# Store kabul etmez.
+#
+# Paket imzalanmaz; Store gönderimini Microsoft imzalar. İlk gönderim Partner
+# Center'dan elle yapılır.
+
+on:
+  workflow_dispatch:
+    inputs:
+      surum:
+        description: "Paketin ekleneceği sürüm etiketi (ör. v0.11.1). Boş: paket yalnız iş çıktısı olur."
+        required: false
+        type: string
+  # Hat üzerinde çalışılırken dal gönderimiyle de denenir.
+  push:
+    branches: ["fy/**"]
+    paths:
+      - ".github/workflows/magaza.yml"
+      - "scripts/msix-*"
+      - "src-tauri/msix/**"
+      - "src-tauri/src/msix.rs"
+      - "src-tauri/src/autostart.rs"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: magaza-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  msix:
+    name: MSIX (x64)
+    runs-on: windows-latest
+    timeout-minutes: 75
+    outputs:
+      deneme: ${{ steps.paketle.outputs.deneme }}
+      surum: ${{ steps.surum.outputs.surum }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Sürüm
+        id: surum
+        shell: bash
+        env:
+          ETIKET: ${{ inputs.surum }}
+        run: |
+          SURUM=$(node -p "require('./package.json').version")
+          if [ -n "${ETIKET}" ] && [ "v${SURUM}" != "${ETIKET}" ]; then
+            echo "Etiket (${ETIKET}) paket sürümüyle (${SURUM}) aynı değil."; exit 1
+          fi
+          echo "surum=${SURUM}" >> "$GITHUB_OUTPUT"
+      # Hat sınanırken (main dışı dal) aynı kaynaktan derlenmiş uygulama
+      # yeniden kullanılır. main'de önbellek yok: Store'a giden paket her
+      # seferinde baştan derlenir, başka işlerin önbelleğiyle zehirlenemez.
+      - name: Derlenmiş uygulama (yalnız dal denemesi)
+        id: hazir
+        if: github.ref != 'refs/heads/main'
+        uses: actions/cache@v4
+        with:
+          path: target/release/mailhere.exe
+          key: magaza-exe-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'pnpm-lock.yaml', 'crates/**', 'src-tauri/src/**', 'src-tauri/Cargo.toml', 'src-tauri/build.rs', 'src-tauri/tauri.conf.json', 'src-tauri/capabilities/**', 'src-tauri/commands.txt', 'src-tauri/icons/**', 'app/src/**', 'app/index.html', 'app/package.json', 'app/vite.config.ts') }}
+      - name: OpenSSL için Perl
+        # SQLCipher'in OpenSSL'i kaynaktan derlenir (openssl-src); Configure
+        # Windows perl'i ister (bkz. release.yml).
+        if: steps.hazir.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $perl = 'C:\Strawberry\perl\bin\perl.exe'
+          if (-not (Test-Path $perl)) { choco install strawberryperl -y --no-progress }
+          "OPENSSL_SRC_PERL=$perl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.hazir.outputs.cache-hit != 'true'
+      - uses: pnpm/action-setup@v4
+        if: steps.hazir.outputs.cache-hit != 'true'
+      - uses: actions/setup-node@v4
+        if: steps.hazir.outputs.cache-hit != 'true'
+        with:
+          node-version: 22
+      - run: pnpm install --frozen-lockfile
+        if: steps.hazir.outputs.cache-hit != 'true'
+      - name: Derle
+        # Kurucu üretilmez (--no-bundle): yalnız mailhere.exe gerekir. OAuth
+        # istemci kimlikleri derlemeye gömülür (bkz. release.yml).
+        if: steps.hazir.outputs.cache-hit != 'true'
+        env:
+          MAILHERE_GOOGLE_CLIENT_ID: ${{ secrets.MAILHERE_GOOGLE_CLIENT_ID }}
+          MAILHERE_GOOGLE_CLIENT_SECRET: ${{ secrets.MAILHERE_GOOGLE_CLIENT_SECRET }}
+          MAILHERE_MICROSOFT_CLIENT_ID: ${{ secrets.MAILHERE_MICROSOFT_CLIENT_ID }}
+        run: pnpm tauri build --no-bundle -- --locked
+      - name: Paketle
+        id: paketle
+        shell: pwsh
+        env:
+          STORE_KIMLIK: ${{ vars.STORE_KIMLIK }}
+          STORE_YAYINCI: ${{ vars.STORE_YAYINCI }}
+          STORE_YAYINCI_ADI: ${{ vars.STORE_YAYINCI_ADI }}
+          STORE_AD: ${{ vars.STORE_AD }}
+          SURUM: ${{ steps.surum.outputs.surum }}
+        run: ./scripts/msix-paketle.ps1 -Exe target\release\mailhere.exe -Surum $env:SURUM
+      - name: Kur ve aç (duman testi)
+        shell: pwsh
+        env:
+          PAKET: ${{ steps.paketle.outputs.paket }}
+          KIMLIK: ${{ steps.paketle.outputs.kimlik }}
+          YAYINCI: ${{ steps.paketle.outputs.yayinci }}
+        run: ./scripts/msix-dene.ps1 -Paket $env:PAKET -Kimlik $env:KIMLIK -Yayinci $env:YAYINCI
+      - name: Deneme çıktıları
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: msix-deneme
+          path: |
+            target/msix/deneme/*.png
+            target/msix/deneme/*.log
+            target/msix/duzen/AppxManifest.xml
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        with:
+          name: msix
+          path: target/msix/*.msix
+          if-no-files-found: error
+
+  # Paketi sürüme ekler: yalnız main'den, etiket verildiyse ve gerçek
+  # (Partner Center) kimliğiyle paketlendiyse.
+  yayin:
+    name: Sürüme ekle
+    needs: msix
+    if: inputs.surum != '' && github.ref == 'refs/heads/main' && needs.msix.outputs.deneme == 'false'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: msix
+          path: paket
+      - name: Sürüme yükle
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ETIKET: ${{ inputs.surum }}
+        run: gh release upload "${ETIKET}" paket/*.msix --clobber --repo "${GITHUB_REPOSITORY}"
