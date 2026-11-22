@@ -246,7 +246,7 @@ test('ertele alt sayfası (menüden menüye) listeye döner', async ({ page }) =
   await sheet(page, 'Diğer eylemler').getByRole('menuitem', { name: 'Ertele' }).click();
   const snooze = sheet(page, 'Ne zaman geri gelsin?');
   await expect(snooze).toBeVisible();
-  await snooze.getByRole('menuitem', { name: /Yarın/ }).click();
+  await snooze.getByRole('menuitem', { name: /^Yarın sabah/ }).click();
   await expect(toast(page, 'Ertelendi')).toBeVisible();
   await expect(page.getByRole('heading', { level: 1, name: 'Gelen Kutusu' })).toBeVisible();
   await expect(row(page, 'Gönderiniz dağıtıma çıktı')).toHaveCount(0);
