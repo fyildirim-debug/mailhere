@@ -1374,6 +1374,15 @@ pub struct UpdateInfo {
     pub date: Option<String>,
 }
 
+/// Güncellemeyi kimin kurduğu (`update_source`, yalnız masaüstü). `Store`:
+/// Microsoft Store kurulumu (MSIX); uygulama içi denetim ve kurulum kapalıdır.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum UpdateSource {
+    App,
+    Store,
+}
+
 // --------------------------------------------------------- parola kilidi
 
 /// Parola kilidinin durumu (`lock_status`; `mh:lock` olayı aynı yapıyı taşır).

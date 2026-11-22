@@ -10,7 +10,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use mh_app::AppState;
-use mh_core::{events, AppError, ErrorCode, UpdateInfo};
+use mh_core::{events, AppError, ErrorCode, UpdateInfo, UpdateSource};
 use tauri::utils::config::BundleType;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_updater::{Error as UpdaterError, Update, UpdaterExt};
@@ -125,10 +125,38 @@ async fn check(app: &AppHandle) -> Res<Option<Update>> {
     }
 }
 
+/// Güncellemeyi kimin kurduğu: uygulamanın kendisi (`App`) ya da Microsoft
+/// Store (`Store`, MSIX paketi). Store kurulumunda uygulama içi denetim ve
+/// kurulum kapalıdır; arayüz düğmeleri gizleyip bunu söyler.
+pub fn source() -> UpdateSource {
+    if crate::msix::packaged() {
+        UpdateSource::Store
+    } else {
+        UpdateSource::App
+    }
+}
+
+fn store_managed() -> AppError {
+    AppError::new(
+        ErrorCode::Invalid,
+        "Bu Mailhere kurulumu Microsoft Store'dan geldi; güncellemeleri Store kurar. \
+         Microsoft Store › Kitaplık'ı açıp \"Güncelleştirmeleri al\"a bas.",
+    )
+}
+
+/// Güncellemelerin kaynağı (`app` ya da `store`).
+#[tauri::command]
+pub fn update_source() -> UpdateSource {
+    source()
+}
+
 /// Yeni sürüm varsa bilgisini döner (arka plan bildirimi bu sürümü tekrar
-/// duyurmaz).
+/// duyurmaz). Store kurulumunda denetim yapılmaz, hep `None`.
 #[tauri::command]
 pub async fn update_check(app: AppHandle) -> Res<Option<UpdateInfo>> {
+    if source() == UpdateSource::Store {
+        return Ok(None);
+    }
     let Some(update) = check(&app).await? else {
         return Ok(None);
     };
@@ -141,6 +169,9 @@ pub async fn update_check(app: AppHandle) -> Res<Option<UpdateInfo>> {
 /// Windows'ta kurulum programı uygulamayı kendisi kapatıp yeniden açar.
 #[tauri::command]
 pub async fn update_install(app: AppHandle, desktop: State<'_, DesktopState>) -> Res<()> {
+    if source() == UpdateSource::Store {
+        return Err(store_managed());
+    }
     if let Some(reason) = install_blocker(tauri::utils::platform::bundle_type()) {
         return Err(AppError::new(ErrorCode::Invalid, reason));
     }
@@ -211,10 +242,12 @@ async fn background_check(app: &AppHandle) {
 }
 
 /// Güncelleme durumunu kurar ve arka plan denetimini başlatır (açılıştan 30 sn
-/// sonra, ardından 6 saatte bir). Tanıtım kipinde denetim yapılmaz.
+/// sonra, ardından 6 saatte bir). Tanıtım kipinde ve Microsoft Store
+/// kurulumunda denetim yapılmaz.
 pub fn start(app: &AppHandle, rt: &tokio::runtime::Handle) {
     app.manage(UpdateState::default());
-    if mh_app::state::demo_mode() {
+    // Store kurulumunu Store günceller: arka plan denetimi yok.
+    if mh_app::state::demo_mode() || source() == UpdateSource::Store {
         return;
     }
     let app = app.clone();
@@ -230,6 +263,14 @@ pub fn start(app: &AppHandle, rt: &tokio::runtime::Handle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_surecinde_kaynak_uygulama() {
+        // Test ikilisi paket kimliği taşımaz: güncellemeyi uygulama kurar.
+        assert_eq!(source(), UpdateSource::App);
+        assert_eq!(update_source(), UpdateSource::App);
+        assert!(store_managed().message.contains("Microsoft Store"));
+    }
 
     #[test]
     fn surum_bir_kez_duyurulur() {

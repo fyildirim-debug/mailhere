@@ -10,6 +10,7 @@ notify_pending
 demo_notify
 update_check
 update_install
+update_source
 autostart_get
 autostart_set
 link_open

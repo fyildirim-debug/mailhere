@@ -706,6 +706,12 @@ export interface UpdateInfo {
   date: string | null;
 }
 
+/**
+ * Güncellemeyi kimin kurduğu (yalnız masaüstü). `store`: Microsoft Store kurulumu (MSIX);
+ * uygulama içi denetim ve kurulum kapalıdır, güncellemeyi Store kurar.
+ */
+export type UpdateSource = 'app' | 'store';
+
 // --------------------------------------------------------- parola kilidi
 
 /**
@@ -1063,6 +1069,8 @@ export interface Commands {
   attachments_pick: [Record<string, never>, string[]];
 
   // Güncelleme
+  /** Güncellemelerin kaynağı; `store` ise `update_check` hep null döner, `update_install` reddeder. */
+  update_source: [Record<string, never>, UpdateSource];
   update_check: [Record<string, never>, UpdateInfo | null];
   /** İndirir, kurar ve uygulamayı yeniden başlatır. */
   update_install: [Record<string, never>, null];

@@ -1393,6 +1393,8 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       emit(EVENTS.changed, { mailboxIds: [] });
       return null;
     },
+    // `?magaza`: Microsoft Store kurulumu gibi davranır (güncellemeyi Store kurar).
+    update_source: () => (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('magaza') ? 'store' : 'app'),
     update_check: () =>
       typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('guncelleme')
         ? { version: '0.2.0', notes: 'JMAP ve Google girişi.', date: '2026-10-20' }

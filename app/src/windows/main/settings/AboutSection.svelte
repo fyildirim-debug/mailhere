@@ -26,6 +26,12 @@
 <h2 class="page">{t('set.nav.about')}</h2>
 
 <h3 class="set-h">{t('set.updates')}</h3>
+{#if update.source === 'store'}
+<div class="set-row top">
+  <span class="set-name">{t('set.version', { version })}<span class="set-hint">{t('set.license')}</span></span>
+  <span class="meta store-note">{t('set.storeUpdates')}</span>
+</div>
+{:else}
 <div class="set-row top">
   <span class="set-name">{t('set.autoUpdate')}<span class="set-hint">{t('set.autoUpdateHint')}</span></span>
   <input
@@ -57,6 +63,7 @@
     {#if update.error}<span class="set-error" role="alert">{update.error}</span>{/if}
   </div>
 </div>
+{/if}
 
 <h3 class="set-h">{t('keys.title')}</h3>
 <p class="set-lead">{t('keys.dialogHint')}</p>
@@ -78,6 +85,11 @@
     letter-spacing: -0.02em;
   }
 
+  /* Mağaza kurulumu notu: sürüm satırının sağında, iki satıra sığar. */
+  .store-note {
+    max-width: 360px;
+    text-align: right;
+  }
   .upd {
     display: flex;
     flex-wrap: wrap;

@@ -53,6 +53,7 @@
     "allow-mailbox-roles-reset",
     "allow-update-check",
     "allow-update-install",
+    "allow-update-source",
     "allow-autostart-get",
     "allow-autostart-set",
     "allow-oauth-providers",

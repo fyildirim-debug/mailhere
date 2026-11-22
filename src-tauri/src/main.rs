@@ -9,6 +9,7 @@ mod clipboard;
 mod files;
 mod links;
 mod logfile;
+mod msix;
 mod notify_card;
 mod platform;
 mod prefs;
@@ -62,6 +63,12 @@ fn setup(app: &mut App, rt: tokio::runtime::Handle) -> Result<(), Box<dyn std::e
     if !memory {
         logfile::open(&dirs.data);
     }
+    // Günlük dosyası açıldıktan sonra: kurulum türü ve açılış kaydının durumu
+    // (`autostart::init` dosyadan önce çalışır; sorun bildiriminde buradan okunur).
+    if msix::packaged() {
+        tracing::info!("Microsoft Store paketi (MSIX) olarak çalışıyor");
+    }
+    autostart::log_state(&handle);
     let platform = Arc::new(DesktopPlatform);
     let boot = mh_app::lock::Boot {
         rt: rt.clone(),
@@ -131,6 +138,10 @@ fn main() {
                     .with_writer(|| logfile::Writer),
             ),
     );
+    // Mağaza paketinde WebView2 yoksa pencere hiç açılamaz: söyle ve çık.
+    if msix::webview_missing() {
+        return;
+    }
     let runtime = mh_app::logging::runtime();
     let rt = runtime.handle().clone();
 
@@ -160,6 +171,7 @@ fn main() {
             notify_card::demo_notify,
             updater::update_check,
             updater::update_install,
+            updater::update_source,
             autostart::autostart_get,
             autostart::autostart_set,
             links::link_open,

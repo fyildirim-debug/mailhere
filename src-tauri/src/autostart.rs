@@ -9,6 +9,12 @@
 //!   korur). Görev Yöneticisi › Başlangıç'tan kapatılmışsa
 //!   (`Explorer\StartupApproved\Run`) kapalı sayılır; ayardan açınca o işaret
 //!   de kaldırılır.
+//! - **Windows, Microsoft Store paketi (MSIX):** paket bildirimindeki
+//!   başlangıç görevi (`MailhereBaslangic`). Paket içinde `Run` anahtarına
+//!   yazılan değer sisteme görünmez; görev WinRT `StartupTask` ile açılıp
+//!   kapatılır. Kullanıcı Ayarlar › Başlangıç'tan kapattıysa uygulama yeniden
+//!   açamaz (Windows izin vermez); hata metni oraya yönlendirir. Görev
+//!   argüman taşımaz: gizli başlatma etkinleştirme türünden anlaşılır.
 //! - **Linux:** XDG `~/.config/autostart/mailhere.desktop`
 //!   (`X-GNOME-Autostart-enabled=true`, `TryExec` ile kaldırılmış ikili
 //!   atlanır). AppImage'da yol, geçici bağlama noktası (`/tmp/.mount_*`)
@@ -49,10 +55,13 @@ where
         .any(|a| a.as_ref() == HIDDEN_ARG || a.as_ref() == HIDDEN_ALIAS)
 }
 
-/// Bu süreç açılış kaydından (`--tepside`) mı başladı.
+/// Bu süreç açılış kaydından (`--tepside`) ya da Microsoft Store paketinin
+/// başlangıç görevinden mi başladı.
 pub fn hidden_start() -> bool {
     static HIDDEN: OnceLock<bool> = OnceLock::new();
-    *HIDDEN.get_or_init(|| is_hidden_args(std::env::args_os().skip(1)))
+    *HIDDEN.get_or_init(|| {
+        is_hidden_args(std::env::args_os().skip(1)) || crate::msix::startup_activation()
+    })
 }
 
 /// Açılışta başlatılacak dosya. AppImage çalışırken `current_exe` geçici
@@ -454,6 +463,87 @@ pub mod windows_run {
     }
 }
 
+// ------------------------------------------------------------------ Windows (MSIX)
+
+/// Microsoft Store paketinin başlangıç görevi (`AppxManifest.xml` →
+/// `desktop:StartupTask`).
+#[cfg_attr(not(windows), allow(dead_code))]
+pub mod store_task {
+    #[cfg(windows)]
+    use std::io;
+    #[cfg(windows)]
+    use std::path::Path;
+
+    #[cfg(windows)]
+    use super::Backend;
+    use super::Entry;
+
+    /// Bildirimdeki `TaskId` ile aynı olmalı (`src-tauri/msix/AppxManifest.xml`).
+    pub const TASK_ID: &str = "MailhereBaslangic";
+
+    /// `StartupTaskState` değerinin kayıt durumu karşılığı: 0 kapalı (hiç
+    /// açılmamış ya da uygulama kapatmış), 1 kullanıcı kapatmış, 2 açık,
+    /// 3 ilkeyle kapalı, 4 ilkeyle açık. Bilinmeyen değer kapalı sayılır.
+    pub fn entry_of(state: i32) -> Entry {
+        match state {
+            2 | 4 => Entry::Present {
+                current: true,
+                enabled: true,
+            },
+            1 | 3 => Entry::Present {
+                current: true,
+                enabled: false,
+            },
+            _ => Entry::Absent,
+        }
+    }
+
+    /// Paketin başlangıç görevi.
+    #[cfg(windows)]
+    pub struct Task;
+
+    #[cfg(windows)]
+    fn task() -> ::windows::core::Result<::windows::ApplicationModel::StartupTask> {
+        use ::windows::core::HSTRING;
+        ::windows::ApplicationModel::StartupTask::GetAsync(&HSTRING::from(TASK_ID))?.join()
+    }
+
+    #[cfg(windows)]
+    impl Backend for Task {
+        fn read(&self, _exe: &Path) -> io::Result<Entry> {
+            crate::msix::off_thread(|| task()?.State()).map(|s| entry_of(s.0))
+        }
+
+        fn enable(&self, _exe: &Path) -> io::Result<()> {
+            let state = crate::msix::off_thread(|| task()?.RequestEnableAsync()?.join())?;
+            if entry_of(state.0).on() {
+                Ok(())
+            } else {
+                // Kullanıcı ya da kuruluş ilkesi kapatmış: Windows uygulamanın
+                // yeniden açmasına izin vermez.
+                Err(io::Error::other(
+                    "başlangıç görevi Windows ayarlarından kapatılmış",
+                ))
+            }
+        }
+
+        fn refresh(&self, _exe: &Path) -> io::Result<()> {
+            // Görev paketin içindeki ikiliyi başlatır; tazelenecek yol yok.
+            Ok(())
+        }
+
+        fn disable(&self) -> io::Result<()> {
+            crate::msix::off_thread(|| task()?.Disable())
+        }
+
+        fn restore_missing(&self) -> bool {
+            // "Kapalı" durumu yalnız yeni kurulumda görülür (kullanıcının
+            // kapatması ayrı durumdur): seçim açıksa yeniden açılır.
+            true
+        }
+    }
+}
+
 /// Bellek kipi (tanıtım, test) ve desteklenmeyen sistem: işletim sistemine
 /// dokunulmaz.
 pub struct Memory {
@@ -575,7 +665,11 @@ fn backend(app: &AppHandle) -> Box<dyn Backend> {
     #[cfg(windows)]
     {
         let _ = app;
-        Box::new(windows_run::RunKey)
+        if crate::msix::packaged() {
+            Box::new(store_task::Task)
+        } else {
+            Box::new(windows_run::RunKey)
+        }
     }
     #[cfg(target_os = "linux")]
     {
@@ -645,6 +739,18 @@ pub fn init(app: &AppHandle) {
         Err(e) => tracing::warn!(error = %e, "açılış kaydı okunamadı"),
     }
     app.manage(state);
+}
+
+/// Açılış kaydının durumunu günlüğe yazar. `init` günlük dosyası açılmadan
+/// önce çalıştığı için durum, dosya açıldıktan sonra ayrıca yazılır.
+pub fn log_state(app: &AppHandle) {
+    let Some(state) = app.try_state::<Autostart>() else {
+        return;
+    };
+    match state.read() {
+        Ok(entry) => tracing::info!(acik = entry.on(), "açılışta başlama"),
+        Err(e) => tracing::warn!(error = %e, "açılış kaydı okunamadı"),
+    }
 }
 
 fn read_error() -> AppError {
@@ -720,6 +826,39 @@ mod tests {
     use super::windows_run::*;
     use super::xdg::*;
     use super::*;
+
+    #[test]
+    fn baslangic_gorevi_durumu_kayda_cevrilir() {
+        use store_task::entry_of;
+        // Açık (2) ve ilkeyle açık (4).
+        assert!(entry_of(2).on() && entry_of(4).on());
+        // Kullanıcı (1) ya da ilke (3) kapatmış: kayıt var ama kapalı.
+        for s in [1, 3] {
+            assert_eq!(
+                entry_of(s),
+                Entry::Present {
+                    current: true,
+                    enabled: false
+                }
+            );
+        }
+        // Hiç açılmamış (0) ve bilinmeyen değer: kayıt yok.
+        assert_eq!(entry_of(0), Entry::Absent);
+        assert_eq!(entry_of(9), Entry::Absent);
+        // Yeni kurulumda varsayılan açılır; kullanıcı kapattıysa dokunulmaz.
+        assert_eq!(
+            plan(None, entry_of(0), true, true),
+            (Step::Enable, Some(true))
+        );
+        assert_eq!(
+            plan(Some(true), entry_of(1), true, true),
+            (Step::Nothing, None)
+        );
+        assert_eq!(
+            plan(Some(false), entry_of(0), true, true),
+            (Step::Nothing, None)
+        );
+    }
 
     #[test]
     fn gizli_baslatma_argumani() {

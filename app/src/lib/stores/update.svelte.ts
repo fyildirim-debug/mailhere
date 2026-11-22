@@ -1,7 +1,7 @@
 // İmzalı güncelleme: arka uç denetler ve `mh:update` yayar; arayüz kurmayı önerir.
 // İmzayı arka uç doğrular; burada yalnız durum tutulur.
 
-import { call, EVENTS, on, toAppError, type UpdateInfo } from '../api';
+import { call, EVENTS, on, toAppError, type UpdateInfo, type UpdateSource } from '../api';
 
 export const update = $state({
   info: null as UpdateInfo | null,
@@ -12,6 +12,8 @@ export const update = $state({
   /** Elle denetimin sonucu: null = denetlenmedi, true = güncel. */
   upToDate: null as boolean | null,
   error: null as string | null,
+  /** Güncellemeyi kim kurar: uygulama (`app`) ya da Microsoft Store (`store`). */
+  source: 'app' as UpdateSource,
 });
 
 let started = false;
@@ -25,6 +27,14 @@ export function initUpdate() {
     update.info = info;
     update.dismissed = false;
   });
+  // Microsoft Store kurulumunda denetim ve kurulum düğmeleri gösterilmez.
+  void call('update_source')
+    .then((source) => {
+      update.source = source;
+    })
+    .catch(() => {
+      /* komut yoksa (eski kabuk) uygulama kendi günceller sayılır */
+    });
 }
 
 export async function checkUpdate() {

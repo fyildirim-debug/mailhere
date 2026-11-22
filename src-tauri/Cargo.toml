@@ -41,7 +41,11 @@ windows-registry = "0.6.1"
 # Pano (doğrulama kodunu kendiliğinden kopyalama): Win32 çağrıları doğrudan.
 # `arboard` Windows'ta BSL-1.0 lisanslı `clipboard-win`e dayandığı için
 # kullanılmadı; `windows-sys` ağaçta zaten var (bkz. `src/clipboard.rs`).
-windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_DataExchange", "Win32_System_Memory"] }
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_Storage_Packaging_Appx", "Win32_UI_WindowsAndMessaging"] }
+# Microsoft Store (MSIX) paketi: başlangıç görevi ve etkinleştirme türü WinRT
+# arayüzüyle okunur (`src/msix.rs`, `src/autostart.rs`). `windows` ağaçta
+# zaten var (WebView2 bağlaması); MIT / Apache-2.0.
+windows = { version = "0.62", features = ["ApplicationModel", "ApplicationModel_Activation", "Foundation"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 dbus = "0.9.12"

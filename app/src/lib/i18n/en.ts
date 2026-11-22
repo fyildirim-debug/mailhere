@@ -1363,4 +1363,6 @@ export const en: Record<MessageKey, string> = {
   'palette.op.larger': 'Larger than a size, e.g. larger:5mb (büyük: also works)',
   'palette.op.smaller': 'Smaller than a size, e.g. smaller:100kb (küçük: also works)',
   'older.retry': 'Older mail is not ready yet. Try again in a moment.',
+  // Microsoft Store install: the Store installs updates.
+  'set.storeUpdates': 'This copy comes from the Microsoft Store. The Store installs updates; open Microsoft Store › Library to check.',
 };
