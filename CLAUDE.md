@@ -47,7 +47,7 @@ Modüller:
 - `app/` — Svelte 5 + TypeScript + Vite arayüzü. Tek giriş, pencere türü `#/main`, `#/notify`, `#/quick/:id`, `#/compose`, `#/onboarding` ile seçilir. Kabuk `desktop` ya da `mobile` (`app/src/lib/shell.ts`); mobil bileşenler `app/src/windows/mobile/` altında tembel yüklenir.
 - `crates/mh-app` — ortak uygulama katmanı: Tauri komutları (`commands`, `cmd_*`), `AppState` + `setup_core` (depo, eşitleyiciler, giden kutusu, zamanlayıcılar), olay köprüsü (`sink`), kurallar, elek, hatırlatmalar, `routes` (pencere rotaları ve adres denetimi), `files` (seçilmiş ek yolları), `notify` (ortak bildirim metni), `logging`. Kabuğa değil Tauri'ye bağlıdır; `keyring`, `single-instance`, `updater`, `tray-icon` **içermez**. Ortak komut listesi tek kaynaktan gelir: `shared_commands!` makrosu, `SHARED_COMMANDS` sabiti ve `crates/mh-app/commands.txt` (iki kabuğun `build.rs`'i `include_str!` ile okur; birim testi üçünü eşler).
 - `crates/mh-app/src/platform.rs` — **`Platform` trait'i**: kabuğa özgü işler (`notify`, `counts_changed`, `open_main`, `open_quick`, `open_compose`, `open_file`, `save_file`, `pick_files`, `copy_text`, `fatal`). Masaüstü `src-tauri/src/platform.rs` (`DesktopPlatform`: kart/tepsi/pencereler/dosya penceresi), Android `mailheremobile` (`AndroidPlatform`: sistem bildirimi, tek pencere + `mh:navigate`, paylaşım/SAF). Ortak kod pencere, tepsi ya da dosya penceresine doğrudan dokunmaz; `state.platform` üzerinden gider.
-- `src-tauri/` — masaüstü kabuğu: pencereler, tepsi, bildirim kartı penceresi, anahtar zinciri (`KeyringSecrets`), dosya seçme penceresi, imzalı güncelleme, tek örnek; masaüstüne özel komutlar (`open_quick`, `notify_*`, `demo_notify`, `update_*`; tam liste `src-tauri/commands.txt`).
+- `src-tauri/` — masaüstü kabuğu: pencereler, tepsi, bildirim kartı penceresi, anahtar zinciri (`KeyringSecrets`), dosya seçme penceresi, imzalı güncelleme, tek örnek; masaüstüne özel komutlar (`open_quick`, `notify_*`, `demo_notify`, `update_*`; tam liste `src-tauri/commands.txt`). Aynı ikili Microsoft Store paketinde (MSIX) de çalışır: `msix::packaged()` doğruysa güncellemeyi Store kurar ve açılışta başlama paketin başlangıç göreviyle yapılır; paket `src-tauri/msix/` + `scripts/msix-*.ps1` + `magaza.yml` ile üretilir (`docs/MAGAZA.md`).
 - `crates/mh-transfer` — cihazlar arası QR aktarımı (kripto + tel protokolü + sunucu/istemci; Store ve Tauri bilmez).
 - `crates/mh-relay` — bildirim aktarıcısı (`mailhere-relay`, Dokploy): posta sunucusunun "yeni posta" haberini Firebase ile telefona iletir; parola, jeton ya da posta içeriği tutmaz. Uygulama tarafı `crates/mh-app/src/push.rs`. Ayrıntı `docs/PUSH.md`.
 - `crates/mh-core` — ortak tipler (arayüzle sözleşme; `app/src/lib/api/types.ts` ile birebir aynı tutulur).
@@ -88,6 +88,7 @@ pnpm e2e                     # Playwright (sahte arka uç)
 cargo test --workspace       # Rust testleri
 cargo clippy --workspace --all-targets -- -D warnings
 pnpm tauri build             # paketler (Linux: deb, AppImage, rpm · Windows: nsis, msi)
+pwsh scripts/msix-paketle.ps1 -Exe target\release\mailhere.exe -Surum X.Y.Z   # Microsoft Store paketi (Windows; docs/MAGAZA.md)
 ```
 
 Android (çekirdek denetimi bu depoda; paket `mailheremobile` deposunda):
