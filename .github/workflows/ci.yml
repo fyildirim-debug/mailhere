@@ -19,7 +19,10 @@ env:
 jobs:
   arayuz:
     name: Arayüz (denetim, birim, uçtan uca)
-    runs-on: ubuntu-latest
+    # Sürüm sabit: `ubuntu-latest` yeni Ubuntu'ya geçince depodaki Playwright
+    # sürümü o imaja Chromium kuramıyor ("does not support chromium on
+    # ubuntu26.04"). Playwright yükseltilince bu da yükseltilir.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
