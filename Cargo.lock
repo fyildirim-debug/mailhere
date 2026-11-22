@@ -2753,7 +2753,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tray-icon",
- "windows",
  "windows-registry",
  "windows-sys 0.61.2",
 ]

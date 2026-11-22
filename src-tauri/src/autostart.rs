@@ -9,8 +9,6 @@
 //!   korur). Görev Yöneticisi › Başlangıç'tan kapatılmışsa
 //!   (`Explorer\StartupApproved\Run`) kapalı sayılır; ayardan açınca o işaret
 //!   de kaldırılır.
-//!   Microsoft Store (MSIX) kurulumunda bunun yerine paketteki
-//!   `windows.startupTask` görevi kullanılır (`store_task`).
 //! - **Linux:** XDG `~/.config/autostart/mailhere.desktop`
 //!   (`X-GNOME-Autostart-enabled=true`, `TryExec` ile kaldırılmış ikili
 //!   atlanır). AppImage'da yol, geçici bağlama noktası (`/tmp/.mount_*`)
@@ -456,102 +454,6 @@ pub mod windows_run {
     }
 }
 
-/// Microsoft Store (MSIX) kurulumu: kayıt defterindeki `Run` anahtarı pakete
-/// özel sanal kopyaya yazıldığından işe yaramaz; açılış, paket bildirimindeki
-/// `MailhereStartup` görevi (`windows.startupTask`, `--tepside` argümanıyla)
-/// üzerinden açılıp kapatılır. Görev, Görev Yöneticisi › Başlangıç'ta görünür.
-#[cfg(windows)]
-pub mod store_task {
-    use std::io;
-    use std::path::Path;
-
-    use ::windows::core::HSTRING;
-    use ::windows::ApplicationModel::{StartupTask, StartupTaskState};
-    use ::windows::Win32::System::WinRT::{RoInitialize, RO_INIT_MULTITHREADED};
-
-    use super::{Backend, Entry};
-
-    /// `packaging/msix/AppxManifest.xml` içindeki `TaskId`.
-    const TASK_ID: &str = "MailhereStartup";
-
-    pub struct Task;
-
-    fn win(e: ::windows::core::Error) -> io::Error {
-        io::Error::other(e.message())
-    }
-
-    /// WinRT çağrısı ayrı, çok iş parçacıklı (MTA) bir iş parçacığında
-    /// yapılır: ana iş parçacığı STA'dır, orada eşzamanlı bekleme kilitlenebilir.
-    fn in_mta<T: Send>(f: impl FnOnce() -> io::Result<T> + Send) -> io::Result<T> {
-        std::thread::scope(|s| {
-            s.spawn(|| {
-                // Zaten başlatılmışsa dönen hata önemsizdir.
-                let _ = unsafe { RoInitialize(RO_INIT_MULTITHREADED) };
-                f()
-            })
-            .join()
-            .unwrap_or_else(|_| Err(io::Error::other("başlangıç görevi iş parçacığı çöktü")))
-        })
-    }
-
-    fn task() -> io::Result<StartupTask> {
-        StartupTask::GetAsync(&HSTRING::from(TASK_ID))
-            .and_then(|op| op.join())
-            .map_err(win)
-    }
-
-    fn enabled(state: StartupTaskState) -> bool {
-        state == StartupTaskState::Enabled || state == StartupTaskState::EnabledByPolicy
-    }
-
-    impl Backend for Task {
-        fn read(&self, _exe: &Path) -> io::Result<Entry> {
-            in_mta(|| {
-                let state = task()?.State().map_err(win)?;
-                Ok(if state == StartupTaskState::Disabled {
-                    Entry::Absent
-                } else {
-                    Entry::Present {
-                        current: true,
-                        enabled: enabled(state),
-                    }
-                })
-            })
-        }
-
-        fn enable(&self, _exe: &Path) -> io::Result<()> {
-            in_mta(|| {
-                let state = task()?
-                    .RequestEnableAsync()
-                    .and_then(|op| op.join())
-                    .map_err(win)?;
-                if enabled(state) {
-                    Ok(())
-                } else {
-                    // Kullanıcı ya da ilke kapattıysa uygulama yeniden açamaz.
-                    Err(io::Error::new(
-                        io::ErrorKind::PermissionDenied,
-                        "başlangıç görevi sistem ayarlarından kapatılmış",
-                    ))
-                }
-            })
-        }
-
-        fn refresh(&self, _exe: &Path) -> io::Result<()> {
-            // Yol paket bildirimindedir; tazelenecek bir şey yok.
-            Ok(())
-        }
-
-        fn disable(&self) -> io::Result<()> {
-            in_mta(|| task()?.Disable().map_err(win))
-        }
-
-        fn restore_missing(&self) -> bool {
-            true
-        }
-    }
-}
-
 /// Bellek kipi (tanıtım, test) ve desteklenmeyen sistem: işletim sistemine
 /// dokunulmaz.
 pub struct Memory {
@@ -673,11 +575,7 @@ fn backend(app: &AppHandle) -> Box<dyn Backend> {
     #[cfg(windows)]
     {
         let _ = app;
-        if crate::package::packaged() {
-            Box::new(store_task::Task)
-        } else {
-            Box::new(windows_run::RunKey)
-        }
+        Box::new(windows_run::RunKey)
     }
     #[cfg(target_os = "linux")]
     {

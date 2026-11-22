@@ -10,7 +10,6 @@ mod files;
 mod links;
 mod logfile;
 mod notify_card;
-mod package;
 mod platform;
 mod prefs;
 mod secrets;
