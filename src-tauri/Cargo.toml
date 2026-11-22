@@ -41,7 +41,10 @@ windows-registry = "0.6.1"
 # Pano (doğrulama kodunu kendiliğinden kopyalama): Win32 çağrıları doğrudan.
 # `arboard` Windows'ta BSL-1.0 lisanslı `clipboard-win`e dayandığı için
 # kullanılmadı; `windows-sys` ağaçta zaten var (bkz. `src/clipboard.rs`).
-windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_DataExchange", "Win32_System_Memory"] }
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_Storage_Packaging_Appx"] }
+# Microsoft Store (MSIX) kurulumunda açılışta başlama: WinRT StartupTask.
+# Sürüm Tauri/WebView2 ağacındakiyle aynı (yeni kopya derlenmez).
+windows = { version = "0.62.2", features = ["ApplicationModel", "Foundation", "Win32_System_WinRT"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 dbus = "0.9.12"

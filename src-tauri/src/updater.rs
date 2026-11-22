@@ -129,6 +129,10 @@ async fn check(app: &AppHandle) -> Res<Option<Update>> {
 /// duyurmaz).
 #[tauri::command]
 pub async fn update_check(app: AppHandle) -> Res<Option<UpdateInfo>> {
+    // Mağaza kurulumu: sürümü Microsoft Store günceller.
+    if crate::package::packaged() {
+        return Ok(None);
+    }
     let Some(update) = check(&app).await? else {
         return Ok(None);
     };
@@ -141,6 +145,9 @@ pub async fn update_check(app: AppHandle) -> Res<Option<UpdateInfo>> {
 /// Windows'ta kurulum programı uygulamayı kendisi kapatıp yeniden açar.
 #[tauri::command]
 pub async fn update_install(app: AppHandle, desktop: State<'_, DesktopState>) -> Res<()> {
+    if crate::package::packaged() {
+        return Err(AppError::new(ErrorCode::Invalid, crate::package::STORE_UPDATES));
+    }
     if let Some(reason) = install_blocker(tauri::utils::platform::bundle_type()) {
         return Err(AppError::new(ErrorCode::Invalid, reason));
     }
@@ -214,7 +221,8 @@ async fn background_check(app: &AppHandle) {
 /// sonra, ardından 6 saatte bir). Tanıtım kipinde denetim yapılmaz.
 pub fn start(app: &AppHandle, rt: &tokio::runtime::Handle) {
     app.manage(UpdateState::default());
-    if mh_app::state::demo_mode() {
+    // Tanıtım kipinde ve Mağaza kurulumunda (güncellemeyi Mağaza yapar) denetim yok.
+    if mh_app::state::demo_mode() || crate::package::packaged() {
         return;
     }
     let app = app.clone();
